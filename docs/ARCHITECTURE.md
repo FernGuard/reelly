@@ -37,7 +37,7 @@ projects/<name>/
 
 All analysis is cached and content-addressed; nothing runs twice.
 
-- **Transcript**: mlx-whisper word-level timestamps (proven pipeline).
+- **Transcript**: mlx-whisper word-level timestamps on Apple Silicon; other platforms skip ASR loudly and continue.
 - **Speech map**: silences (silencedetect), filler words (um, uh, like, you know), restarts and repeated takes (near-duplicate sentence detection).
 - **Speaker map**: who talks when (needed for podcast/interview cuts).
 - **Shot/scene detection**: visual cut points, so edits never land mid-shot awkwardly.

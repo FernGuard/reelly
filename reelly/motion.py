@@ -1346,7 +1346,7 @@ def _place_lettering(vid, t0, t1, asset, project, width=920, avoid=(), attempt=0
 
 # ---------- assembly ----------
 
-# The managed account brand bug rides the WHOLE clip (reviewer 2026-08-13), not just the
+# The product corner mark rides the WHOLE clip, not just the
 # end-card: a persistent, low-opacity real wordmark in a corner so the mark's
 # colour and form carry through the video. Stamped, never generated -- the video
 # stays logo-free at generation time (M7) and the mark is composited on top, so
@@ -1407,7 +1407,7 @@ def _corner_bug_event(t_end):
             f'filter:drop-shadow(0 2px 6px rgba(0,0,0,.55));"/>')
     return {"template": "raw", "args": [html], "t": [0.0, float(t_end)],
             "ent": "none", "fade_in": False, "fade_out": True,
-            "why": f"managed account brand bug ({BUG_CORNER}); ends before the CTA card so one mark shows"}
+            "why": f"product corner mark ({BUG_CORNER}); ends before the CTA card so one mark shows"}
 
 
 SCRIM_PAD = 40          # img_tag draws a 40px scrim pad around hook/payoff
@@ -1458,7 +1458,7 @@ def _events(root, vid, ai, campaign, cut, total, project, attempt=0, avoid=(),
                 f'background:rgba(9,12,10,0.40); border-radius:20px;"></div>'
                 + img)
 
-    # Keep the hook/payoff off the persistent managed account bug (it is a stamped mark in
+    # Keep the hook/payoff off the persistent corner mark (it is a stamped mark in
     # the corner; treat it like a baked logo the type must clear).
     # The bug is a centred/corner mark and the hook is a full-width centred line;
     # they clear only by clearing the bug's Y-band, not its tight box.
@@ -1604,7 +1604,7 @@ def _events(root, vid, ai, campaign, cut, total, project, attempt=0, avoid=(),
          "ent": "rise", "sfx": ["ding.mp3", -18], "fade_out": False,
          "why": "single CTA, brand sans, safe zone, holds to last frame (M5)"},
     ]
-    # The bug ends as the CTA end-card rises (which carries its own managed account mark), so
+    # The bug ends as the CTA end-card rises (which carries its own product mark), so
     # the final beat shows one mark, not two stacked.
     bug = _corner_bug_event(round(max(0.0, total - 1.8), 2))
     if bug:

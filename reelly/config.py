@@ -121,7 +121,7 @@ GEMINI_MODEL = "gemini-3.5-flash"  # 2.5-flash retired by Google 2026-07-09
 CLAUDE_MODEL = "claude-sonnet-5"
 PRISM_WORK = os.path.join(HOME, "prism")
 
-# corporate SSL interception fix (same as the FAL/Gemini tools this grew from)
+# Honor a system CA bundle when present (corporate SSL interception).
 _CAFILE = "/etc/ssl/cert.pem"
 if os.path.exists(_CAFILE):
     os.environ.setdefault("SSL_CERT_FILE", _CAFILE)

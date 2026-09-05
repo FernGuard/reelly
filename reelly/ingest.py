@@ -19,7 +19,10 @@ def workspace(name, out_root):
 
 
 def link_source(root, path, role):
-    """Symlink the original into source/ under a role name; never copy gigabytes.
+    """Link the original into source/ under a role name.
+
+    Prefer a symlink so large media is not duplicated. If the filesystem
+    cannot symlink (typical on Windows without Developer Mode), copy the file.
 
     The input is fully RESOLVED (os.path.realpath) before linking, and an
     input that already lives inside this project's source/ leaves the

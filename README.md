@@ -13,7 +13,7 @@ Reelly is a local-first video editing engine. Give it a recording and it can ana
 You need:
 
 - Python 3.11 or newer
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip — `curl -LsSf https://astral.sh/uv/install.sh | sh` (Windows: `pip install uv`)
 - ffmpeg and ffprobe on `PATH`
 
 ```sh
@@ -67,6 +67,7 @@ uv run reelly setup
 ```
 
 Do not put real values in `.env.example`, repository files, commits, issues, or logs.
+Reelly does **not** load a `.env` file. Export the variables, or write `~/.reelly/config.json`.
 
 Instead of environment variables, you may use `~/.reelly/config.json`. Reelly creates it with owner-only permissions when written by its configuration helper. If you create it manually:
 

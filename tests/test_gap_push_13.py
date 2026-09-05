@@ -123,13 +123,13 @@ def test_parser_accepts_tokens_already_in_use(tmp_path):
         "2026-07-27 placement/fallbacks LEARNED because a constrained search lied",
         "2026-07-27 audio/true-peak FIXED because ten files clipped",
         "2026-07-27 sample-campaign/cuts_01-30 KEEP(all 30) because approved first pass",
-        "2026-07-31 sample/cut_02 KILL for the managed account because scheduler has no audio library",
+        "2026-07-31 sample/cut_02 KILL for the scheduled profile because scheduler has no audio library",
         "2026-07-23 sample-project/cut_09 AUTHORED because the set skipped layer 1",
     ]))
     rows, unparsed = learn.parse_verdicts_full(str(p))
     assert [r["verdict"] for r in rows] == ["LEARNED", "FIXED", "KEEP", "KILL", "AUTHORED"]
     assert rows[2]["qualifier"] == "all 30"          # space in parens broke \S*
-    assert rows[3]["scope"] == "for the managed account"  # scope words before 'because'
+    assert rows[3]["scope"] == "for the scheduled profile"  # scope words before 'because'
     assert unparsed == []
 
 
@@ -146,7 +146,7 @@ def test_parser_reports_unparsed_dated_lines_instead_of_skipping(tmp_path):
 
 def test_constraint_verdict_reaches_proposals_without_outliers(tmp_path, monkeypatch):
     v = tmp_path / "V.md"
-    v.write_text("2026-07-31 run/p5 CONSTRAINT because managed account cannot use trending "
+    v.write_text("2026-07-31 sample/cut_05 CONSTRAINT because scheduled profile cannot use trending "
                  "audio: scheduler publishes third-party and rights forbid it\n")
     monkeypatch.setattr(learn, "VERDICTS", str(v))
     monkeypatch.setattr(learn, "PROPOSALS", str(tmp_path / "proposals"))

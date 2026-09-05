@@ -42,8 +42,8 @@ def test_cta_clear_of_payoff_band_passes():
     assert motion._overlap_fraction(_cta_box(900), [band]) == 0
 
 
-def test_hook_band_forces_clearance_below_the_run_bug():
-    """The top-left managed account bug becomes a full-width band; a top hook row overlaps it
+def test_hook_band_forces_clearance_below_the_corner_mark():
+    """The top-left product corner mark becomes a full-width band; a top hook row overlaps it
     (so placement is pushed down), a lower row clears it."""
     bug_box = (60, 220, 200, 112)                   # top-left corner bug
     band = motion._full_width_band(bug_box, motion.SCRIM_PAD)

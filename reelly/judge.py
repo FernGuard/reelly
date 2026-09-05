@@ -269,7 +269,7 @@ def copy_contract(plan):
     bad += _voice_violations(plan)
     if bad:
         return ("copy_contract", "FAIL", "; ".join(bad))
-    return ("copy_contract", "PASS", "hook/payoff/cta/caption within contract, managed account voice")
+    return ("copy_contract", "PASS", "hook/payoff/cta/caption within contract, brand voice")
 
 
 def hook_from_frame1(root, plan):

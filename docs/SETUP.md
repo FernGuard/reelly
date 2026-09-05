@@ -11,6 +11,7 @@ ffmpeg and ffprobe must be on your PATH (or set `FFMPEG` / `FFPROBE`).
 |---|---|---|
 | ffmpeg / ffprobe | `brew install ffmpeg` · `sudo apt install ffmpeg` · `winget install Gyan.FFmpeg` | `ffmpeg -version` |
 | uv | `curl -LsSf https://astral.sh/uv/install.sh \| sh` · Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` or `pip install uv` | `uv --version` |
+| tesseract (PRISM OCR only) | `brew install tesseract` · `sudo apt install tesseract-ocr` · `winget install UB-Mannheim.TesseractOCR` | `tesseract --version` |
 | Chrome (overlays only) | Chrome/Chromium, or `CHROME_PATH` | `uv run reelly setup` |
 
 ## 2. Python environment
@@ -185,3 +186,4 @@ Before processing confidential media, read [../DATA_AND_PRIVACY.md](../DATA_AND_
 | Brand kit | legacy endcard path (Gemini + Chrome per cut), system fonts, default accent |
 | FaceMesh + Blaze both absent | face detection fails → face-dependent reframing unavailable |
 | mlx-whisper (non-Apple Silicon) | on-device ASR is skipped loudly; other analyze stages still run |
+| tesseract (PRISM OCR only) | PRISM OCR skips; core editing still runs |

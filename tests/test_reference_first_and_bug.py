@@ -167,7 +167,7 @@ def _mark(tmp_path):
 
 def test_corner_bug_ends_before_the_cta_card(monkeypatch, tmp_path):
     """The bug rides [0, t_end] and fades out -- it ends as the end-card (which
-    has its own managed account mark) rises, so the last beat shows ONE mark, not two."""
+    has its own product mark) rises, so the last beat shows ONE mark, not two."""
     monkeypatch.setattr(motion, "_brand_wordmark", lambda: _mark(tmp_path))
     ev = motion._corner_bug_event(6.2)
     assert ev is not None

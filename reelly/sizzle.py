@@ -861,8 +861,8 @@ def _grammar(w, h, crop=None, src=None, still=False, dur=3.0, at=0.0):
 
     A 16:9 source fills the frame and never gets blurred behind itself. Every
     other shape (the vertical player captures, the phone-shaped app grabs) sits
-    sharp and whole on a soft bed, which is what the shipped managed account sizzle looks
-    like -- not pillarboxed into black bars, and not cropped until the subject
+    sharp and whole on a soft bed, which is typical portrait-sizzle grammar --
+    not pillarboxed into black bars, and not cropped until the subject
     falls out of frame.
     """
     # CINEMATIC MEANS FILLING THE FRAME. A sharp rectangle floating on a
@@ -918,8 +918,8 @@ def _label_png(text, sub, w, h, workdir, name):
     """The shot's name label, rendered through the shipped overlay templates
     so a sizzle's type is the same type everything else in the brand uses.
 
-    TOP-left, not bottom-left. The shipped managed account sizzle sets its names low
-    because its footage is clean, but adventure games and interactive stories
+    TOP-left, not bottom-left. A clean-footage sizzle can set names low,
+    but adventure games and interactive stories
     put their dialogue boxes along the bottom edge, so a low label lands on
     in-game text in most shots. The top edge is empty in nearly all of it.
     """
@@ -1169,7 +1169,7 @@ def _typeset_into(still, line, out, project="", tries=3, style_ref=None,
         url = audio_post._fal(
             motion.IMAGE_ENDPOINT,
             {"prompt": TITLE_TYPE_PROMPT.format(spec=spec) + brand,
-             # match the reel's aspect (managed account socials are portrait) -- nano-banana
+             # match the reel's aspect (portrait socials are 9:16) -- nano-banana
              # edit defaults to landscape otherwise, and the wide title was then
              # cropped off both sides
              "image_urls": refs, "num_images": 1, "aspect_ratio": aspect},
@@ -1272,7 +1272,7 @@ def cinecard(product, w, h, dur, workdir, project="", line=None, tag="card"):
 
     concept = CARD_CONCEPTS.get(key) or CARD_CONCEPTS["video"]
     base = os.path.join(workdir, f"cinecard_{key}_base.png")
-    # Generate the title art in the REEL's aspect. managed account socials are portrait, so
+    # Generate the title art in the REEL's aspect. Portrait socials are 9:16, so
     # a landscape card center-cropped to 9:16 overflowed its big title off both
     # sides. Match the target instead.
     art_size = "portrait_16_9" if h >= w else "landscape_16_9"
