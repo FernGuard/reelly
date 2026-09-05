@@ -1,0 +1,41 @@
+__pycache__/
+*.pyc
+.DS_Store
+projects/
+*.venv/
+venv/
+.env
+.env.*
+!.env.example
+.venv/
+uv.lock
+
+# media never belongs in the repo: projects root holds all
+# footage and deliverables; tests build fixtures in temp dirs only
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.srt
+.claude/
+
+# generated reports / prism dumps (can contain transcripts and local paths)
+reports/
+source.info.json
+metrics*.json
+analytics*.csv
+accounts.json
+products.json
+.reelly/
+
+secrets.json
+credentials.json
+*.pem
+id_rsa
+id_ed25519
+

@@ -1,0 +1,59 @@
+[project]
+name = "reelly"
+version = "0.1.0"
+description = "Self-improving video processing engine"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [{name = "Reelly contributors"}]
+keywords = ["video", "editing", "ffmpeg", "captions", "shorts"]
+dependencies = [
+    "mlx-whisper>=0.4; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "pillow",
+    "google-genai",
+    "anthropic",
+    "requests",
+    "mediapipe>=0.10.35",
+    "PyYAML>=6",
+    "websockets>=12",
+]
+
+[project.urls]
+Homepage = "https://github.com/FernGuard/reelly"
+Issues = "https://github.com/FernGuard/reelly/issues"
+
+[project.optional-dependencies]
+# local speaker diarization (gap 8): on-device, no per-run cost.
+# One-time setup documented in README "Speaker diarization (local)".
+# Upper bound is deliberate. pyannote.audio 4.x rewires the speaker-diarization-3.1
+# pipeline onto pyannote/speaker-diarization-community-1 for embeddings, which is
+# gated behind MANUAL approval ("you are not in the authorized list") rather than
+# the instant auto-gate of the models the README tells you to accept. 3.x uses
+# pyannote/wespeaker-voxceleb-resnet34-LM, which auto-gates like the others, so the
+# documented one-time setup actually works. Lift this only after confirming the
+# embedding model a newer release pulls is reachable with an ordinary free token.
+# >=4 is forced, not preferred: pyannote.audio 3.x calls torchaudio.AudioMetaData,
+# removed in torchaudio 2.1+, so 3.x cannot run against the torch we build on.
+# Consequence for setup: 4.x fetches its embedding transform from
+# pyannote/speaker-diarization-community-1 unconditionally — even when the 3.1
+# config.yaml names wespeaker-voxceleb-resnet34-LM and even when that config is
+# loaded from a local path. So THREE repos must be accepted, not the two the
+# pyannote docs imply. See the README diarization section.
+diarize = ["pyannote.audio>=4"]
+# faster English-only ASR on Apple Silicon (REELLY_ASR=parakeet opts in;
+# default stays mlx-whisper until the accuracy A/B on real footage).
+asr-fast = ["parakeet-mlx"]
+prism = ["yt-dlp>=2025.1", "pytesseract>=0.3.13"]
+
+[project.scripts]
+reelly = "reelly.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["reelly"]
