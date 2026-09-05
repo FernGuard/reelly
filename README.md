@@ -13,7 +13,7 @@ Reelly is a local-first video editing engine. Give it a recording and it can ana
 You need:
 
 - Python 3.11 or newer
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip — `curl -LsSf https://astral.sh/uv/install.sh | sh` (Windows: `pip install uv`)
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip — `curl -LsSf https://astral.sh/uv/install.sh | sh` (Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` or `pip install uv`)
 - ffmpeg and ffprobe on `PATH`
 
 ```sh
@@ -87,6 +87,8 @@ chmod 700 ~/.reelly
 chmod 600 ~/.reelly/config.json
 ```
 
+On Windows PowerShell, create `%USERPROFILE%\.reelly\config.json` with the same JSON, then restrict it to your user (`icacls %USERPROFILE%\.reelly\config.json /inheritance:r /grant:r %USERNAME%:R`). Reelly still writes mode `0600` when it creates the file itself.
+
 Environment variables take precedence over the config file.
 
 ### 4. Run your first local analysis
@@ -95,7 +97,7 @@ Environment variables take precedence over the config file.
 uv run reelly analyze path/to/clip.mp4 --skip-visual
 ```
 
-The project is created under `~/reelly-projects`. Set `REELLY_PROJECTS` to change that location.
+The project is created under `~/reelly-projects`. Set `REELLY_PROJECTS` to change that location. On Windows, source files are copied into the project if the filesystem cannot create a symlink.
 
 For cloud-assisted analysis and editing after configuring keys:
 
@@ -128,7 +130,7 @@ A selected cloud engine never silently switches to a different paid provider.
 
 ```sh
 uv sync --extra diarize    # speaker diarization
-uv sync --extra asr-fast   # faster English ASR on Apple Silicon
+uv sync --extra asr-fast   # faster English ASR on Apple Silicon only
 uv sync --extra prism      # URL ingestion and OCR helpers for PRISM
 ```
 

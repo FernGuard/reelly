@@ -156,7 +156,7 @@ MAX_WINDOW = 120.0         # a pool entry never covers more than this
 # rather than one studio's own output. Path-based on purpose: the vision pass
 # describes these as plain interface, which is exactly why it cannot be the
 # thing that identifies them.
-CATALOGUE_MARK = "/trailer-clips/t"
+CATALOGUE_MARK = "/catalogue/t"
 
 
 def windows(clip, span=MAX_WINDOW):
@@ -457,7 +457,7 @@ STRUCTURE, totalling {seconds} seconds of CONTENT (a brand endcard is appended
 after your last shot by the renderer -- do not plan it):
 - `platform`: 2 or 3 shots, 0.6-1.2s each. Beat 1. Fast, near-subliminal, a
   rush of the platform and the worlds already on it. These MUST be the pool
-  entries whose id contains "/trailer-clips/t" -- that is the example.invalid
+  entries whose id contains "/catalogue/t" -- that is the example.invalid
   catalogue. They are marked `kind: interface` or `mixed` and that is CORRECT
   here: a library of worlds is what a platform looks like, and the
   output-only rule does not apply to this beat. Do not substitute this
@@ -486,7 +486,7 @@ rather than a wall of controls; prefer zero. Never open or close on one.
 
 LABELS NAME A THING. Each pool entry carries a "name to label it with". Use it,
 or a proper name you can actually read on screen. A label is what the viewer
-would type to go and find this -- "Rain on Neon", "The Spillgate". It is never
+would type to go and find this -- "Harbor Light", "The Gatehouse". It is never
 a genre description ("noir detective scene", "action scene", "anime visual
 novel game"); those are the vision model's words, not names, and burning them
 on screen makes eight different worlds read as one stock library.
@@ -531,7 +531,7 @@ def title_hint(path):
     """
     stem = os.path.splitext(os.path.basename(path))[0]
     # drop a screen-capture recorder suffix so the timestamp does not bleed into
-    # the burned name: "10 Days to Home - screen_2026-08-17_15-54-33" -> the name.
+    # the burned name: "Sample Title - screen_2026-01-01_00-00-00" -> the name.
     # Requires digits after "screen" so a real title like "Blue Screen" is kept.
     stem = re.sub(r"[\s_-]+screen[\s_-]?(?:recording)?[\s_-]?\d[\d\s_\-:.]*$", "",
                   stem, flags=re.I)

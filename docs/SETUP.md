@@ -28,7 +28,15 @@ uv sync --extra prism        # + URL ingestion and Tesseract OCR helper (optiona
 uv run reelly setup
 ```
 
-Without uv: `python -m venv .venv && source .venv/bin/activate && python -m pip install -e .` (Windows: `.venv\Scripts\activate`). Optional extras: `pip install -e '.[diarize]'` etc.
+Without uv:
+
+```sh
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install -e .
+```
+
+Optional extras: `pip install -e '.[diarize]'` etc.
 
 Check: `uv run python -c "import reelly.cli; print('ok')"`
 
@@ -38,7 +46,7 @@ Check: `uv run python -c "import reelly.cli; print('ok')"`
 Reelly does **not** load a `.env` file. Export variables in your shell, or write
 `~/.reelly/config.json`.
 
-Preferred: environment variables.
+Preferred: environment variables. They take precedence over `~/.reelly/config.json`.
 
 ```sh
 export GEMINI_API_KEY=...      # https://aistudio.google.com/apikey

@@ -16,9 +16,9 @@ def test_crop_map_bare_value_applies_everywhere():
 def test_crop_map_pattern_only_matches_its_paths():
     """The Video pool mixes screen recordings that need the player cropped out
     with finished episodes that the same crop would destroy."""
-    pick = sizzle.crop_map(["viddy_=512:892:704:90"])
-    assert pick("/x/trailer-clips/viddy_01_part2.mp4") == "512:892:704:90"
-    assert pick("/x/trailer-clips/t23_platform.mp4") is None
+    pick = sizzle.crop_map(["clip_=512:892:704:90"])
+    assert pick("/x/catalogue/clip_01_part2.mp4") == "512:892:704:90"
+    assert pick("/x/catalogue/t23_platform.mp4") is None
 
 
 def test_crop_map_empty_is_always_none():
@@ -52,7 +52,7 @@ def test_windows_leave_short_clips_whole(monkeypatch):
 @pytest.mark.parametrize("path,want", [
     ("/x/sample_scene.mp4", "scene"),
     ("/x/SampleProject.mp4", "Sample Project"),
-    ("/x/WhereLightMoves.mp4", "Where Light Moves"),
+    ("/x/HarborLight.mp4", "Harbor Light"),
 ])
 def test_title_hint_reads_a_name_off_the_filename(path, want):
     assert sizzle.title_hint(path) == want
@@ -68,7 +68,7 @@ def test_descriptions_are_rejected_as_labels():
 
 
 def test_real_titles_are_not_descriptions():
-    for name in ("Rain on Neon", "The Spillgate", "What the Water Carries"):
+    for name in ("Harbor Light", "The Gatehouse", "What the Water Carries"):
         assert not sizzle._is_description(name)
 
 
@@ -176,8 +176,8 @@ def test_platform_beat_must_come_from_the_catalogue():
     """Beat 1 is evidence a platform exists; the studio's own worlds are
     beat 3."""
     pool = _pool()
-    pool[0]["file"] = "/x/trailer-clips/t23_gallery.mp4"
-    pool[1]["file"] = "/x/trailer-clips/t24_gallery.mp4"
+    pool[0]["file"] = "/x/catalogue/t23_gallery.mp4"
+    pool[1]["file"] = "/x/catalogue/t24_gallery.mp4"
     p = _legal_plan(pool)
     p["shots"][0]["id"] = pool[5]["id"]          # a non-catalogue entry
     errs = sizzle._validate(p, pool, sum(s["dur"] for s in p["shots"]))

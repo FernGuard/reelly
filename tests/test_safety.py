@@ -6,8 +6,8 @@ from reelly import safety
 
 
 def test_unscreened_cut_fails():
-    """"Claws Under the Shutter" reached a fully written, ready-to-schedule row
-    before anyone noticed it opens on a gun and blood. The title sounds fine."""
+    """A cut can reach a fully written, ready-to-schedule row before anyone
+    notices it opens on a gun and blood. The title can still sound fine."""
     name, status, msg = safety.verdict({"hook": "Something is under the shutter"})
     assert status == "FAIL" and "not screened" in msg
 

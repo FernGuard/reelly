@@ -3,13 +3,16 @@ from reelly import sizzle
 
 
 def test_strips_obs_screen_capture_suffix():
-    assert sizzle.title_hint("/x/10 Days to Home - screen_2026-08-17_15-54-33.mov") \
-        == "10 Days to Home"
-    assert sizzle.title_hint("/x/Ballhalla - screen_2026-08-17_14-40-40.mov") == "Ballhalla"
-    assert sizzle.title_hint("/x/Rusko's Raiders - screen_2026-08-17_16-11-49.mov") \
-        == "Rusko's Raiders"
+    assert sizzle.title_hint("/x/Sample Title - screen_2026-01-01_00-00-00.mov") \
+        == "Sample Title"
+    assert sizzle.title_hint("/x/North Harbor - screen_2026-01-01_12-00-00.mov") \
+        == "North Harbor"
+    assert sizzle.title_hint("/x/Cedar Point Run - screen_2026-01-01_16-00-00.mov") \
+        == "Cedar Point Run"
 
 
 def test_keeps_a_real_name_and_leading_number():
-    assert sizzle.title_hint("/x/Rain on Neon.mp4") == "Rain on Neon"
+    assert sizzle.title_hint("/x/Harbor Light.mp4") == "Harbor Light"
     assert sizzle.title_hint("/x/Blue Screen.mp4") == "Blue Screen"   # no trailing digits -> kept
+    assert sizzle.title_hint("/x/7 Nights Out - screen_2026-01-01_09-00-00.mov") \
+        == "7 Nights Out"

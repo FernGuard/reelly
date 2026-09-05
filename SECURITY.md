@@ -6,7 +6,8 @@ Reelly does not ship API keys. Never put keys, tokens, or credentials in this
 repository, in issues, or in pull requests.
 
 Store keys in the environment or in `~/.reelly/config.json` (file mode 0600).
-That path is outside the repo. `.env` is gitignored.
+That path is outside the repo. `.env` is gitignored. Reelly does **not** load
+a `.env` file.
 
 If a command is missing a key it will name the environment variable and the
 signup URL. It will not print the key.
