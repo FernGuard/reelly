@@ -23,7 +23,7 @@ PROPOSALS = os.path.join(REPO, "playbook", "proposals")
 
 # Every verdict token actually in use in VERDICTS.md. The original alternation
 # (KEEP|KILL|FLAW) silently dropped LEARNED/FIXED/ADOPTED lines that were
-# already on file, including a 100%-keep-rate validation run whose qualifier
+# already on file, including a validation run whose qualifier
 # "(all 30)" broke the old \S* match. CONSTRAINT is the token for structural
 # facts ("this account cannot use trending audio") that can never produce
 # performance outliers and therefore need their own path to a proposal.
@@ -34,7 +34,7 @@ _LINE = re.compile(
     r"(\d{4}-\d{2}-\d{2})\s+(\S+)\s+"
     r"(" + "|".join(VERDICT_TOKENS) + r")"
     r"(?:\(([^)]*)\))?"        # qualifier: "(all 30)", "(fixed coords)" - spaces allowed
-    r"(.*?)"                    # scope words: "for the managed account"
+    r"(.*?)"                    # optional scope words before 'because'
     r"\s+because\s+(.+)", re.I)
 
 

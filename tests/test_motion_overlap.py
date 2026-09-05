@@ -1,8 +1,8 @@
-"""Motion placement no-overlap: centred marks (hook / payoff / CTA / managed account bug)
+"""Motion placement no-overlap: centred marks (hook / payoff / CTA / corner mark)
 must clear each other's whole Y-band + scrim, not just the tight text box.
 
-Regression for the two shipped collisions (reviewer 2026-08-18): the yellow CTA
-printed on the payoff type, and the managed account bug sat under the centred hook. Both came
+Regression for two shipped collisions: the yellow CTA
+printed on the payoff type, and a corner mark sat under the centred hook. Both came
 from avoiding a neighbour's tight box while every mark renders with a scrim pad,
 and from the motion pipeline not modelling centred marks as full-width Y-bands
 the way layout.occupied does.

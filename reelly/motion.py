@@ -1418,7 +1418,7 @@ def _full_width_band(box, pad=0):
     """A centred full-width mark can only clear ANOTHER centred mark by clearing
     its whole Y-RANGE -- they always share the horizontal centre, so avoiding a
     neighbour's tight text box still lets the two SCRIMS collide at the edges
-    (the managed account bug under the hook, the CTA on the payoff). Model the avoid-region
+    (a corner mark under the hook, the CTA on the payoff). Model the avoid-region
     as a full-width band over the source box's rows, inflated by its scrim pad --
     the same Y-band model layout.occupied uses. (reviewer 2026-08-18)"""
     if not box:

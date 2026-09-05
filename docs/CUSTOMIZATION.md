@@ -25,7 +25,7 @@ Create `~/.reelly/accounts.json`:
 Select a profile with `--account my-native-account` or in a project's `delivery.json`:
 
 ```json
-{"account": "my-native-account", "variants": ["gfx"]}
+{"account": "my-native-account", "variants": ["gfx"], "targets": ["tiktok", "reels", "shorts"]}
 ```
 
 ## Products

@@ -666,7 +666,7 @@ def _validate(plan, pool, seconds):
     # BEAT 1 IS AN EXCEPTION and this cost a rebuild: the platform shots are
     # not hero images, they are evidence that a platform exists, and evidence
     # of a platform IS its library and dashboards. The catalogue clips survey
-    # as `interface`/`mixed` by definition ("the managed account.game home dashboard", "a
+    # as `interface`/`mixed` by definition ("the product home dashboard", "a
     # game library interface"), so demanding `output` here made the brain
     # substitute the studio's own worlds and beat 1 stopped saying anything.
     catalogue = [c for c in pool if CATALOGUE_MARK in c["file"]]
@@ -1886,7 +1886,7 @@ def build(product, clip_patterns, out, seconds=30, size="1920x1080",
                          "Widen the pool or fix the sources.")
     print(f"[sizzle] {len(pool)} cleared, {len(drops)} dropped")
 
-    # `--seconds` is the managed accountTIME of the file, so the appended brand outro
+    # `--seconds` is the runtime of the file, so the appended brand outro
     # comes out of that budget rather than being added on top of it. A "30
     # second" reel that runs 32.6s is not what was asked for.
     # Reuse a pinned plan when one exists (mirrors `cut --replan`): the brain is

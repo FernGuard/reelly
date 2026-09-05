@@ -40,7 +40,11 @@ def link_source(root, path, role):
             return dst
     if os.path.islink(dst) or os.path.exists(dst):
         os.remove(dst)
-    os.symlink(real, dst)
+    try:
+        os.symlink(real, dst)
+    except OSError:
+        import shutil
+        shutil.copy2(real, dst)
     return dst
 
 

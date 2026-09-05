@@ -173,8 +173,8 @@ def card_png(plan, product, workdir):
         authored = "manual" in src or "hand-authored" in src
         # A per-cut, human-authored CTA renders dynamically (wordmark + the
         # ask), NOT the baked studio endcard: the static house card (e.g.
-        # the managed account's "play what matters. example.invalid") cannot carry a per-cut ask
-        # (dynamic-CTA gap, reviewer 2026-08-15). Without an authored CTA the
+        # a static house card) cannot carry a per-cut ask.
+        # Without an authored CTA the
         # baked kit card wins exactly as before.
         if not (authored and cta):
             p = brandkit.endcard(product) if product else None

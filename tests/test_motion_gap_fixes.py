@@ -356,13 +356,13 @@ def test_composite_true_peak_ceiling_tracks_the_judges_gate(monkeypatch):
     assert audio_post.enforce_true_peak("x.mp4") == -1.0
 
 
-# --- gap 7: copy contract voice/attribution (managed account is not a creator) ------------
+# --- gap 7: copy contract voice/attribution (brand is not a creator) ------------
 
-def test_copy_contract_fails_run_speaking_first_person_as_a_creator():
-    """'See my managed account prices' is the managed account's account posing as a third-party creator.
+def test_copy_contract_fails_brand_speaking_first_person_as_a_creator():
+    """'See my prices' is brand copy posing as a third-party creator.
     The judge must catch first-person-creator voice, not only lengths."""
     plan = {"planned_from": "image", "hook": {"text": "Build a game fast"},
-            "payoff": {"text": "ship it today"}, "cta": "See my managed account prices",
+            "payoff": {"text": "ship it today"}, "cta": "See my prices",
             "caption": "A plain sentence."}
     gate, status, detail = judge.copy_contract(plan)
     assert status == "FAIL"

@@ -135,7 +135,7 @@ def font(role="caption"):
 
 
 def accent():
-    """The single brand accent for caption highlights: sampled from the managed account
+    """The single brand accent for caption highlights: sampled from a
     wordmark at kit-build time (kit.json), Blue Smoke when no kit exists."""
     a = _kit_json().get("accent")
     return a if isinstance(a, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", a) \
@@ -257,7 +257,7 @@ def _banned_hits(text, banned):
 
 def _wordmarks():
     """Canonical registered wordmark spellings from products (single source
-    of truth): studio names + the managed account domains."""
+    of truth): product names plus any configured domains."""
     from . import products
     marks = {products.PRODUCTS[k]["name"]
              for k in ("video", "story", "games", "adventure")}
@@ -336,7 +336,7 @@ def _write_default_copy_bank(path):
 
 
 def _dominant_accent(logo_path):
-    """The brand accent: the managed account wordmark's dominant saturated hue, lifted to
+    """The brand accent: a wordmark's dominant saturated hue, lifted to
     caption-highlight lightness. Sampled ONCE at build time and pinned in
     kit.json so every caption uses the same accent."""
     import colorsys

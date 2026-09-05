@@ -10,7 +10,7 @@ ffmpeg and ffprobe must be on your PATH (or set `FFMPEG` / `FFPROBE`).
 | What | Install | Check |
 |---|---|---|
 | ffmpeg / ffprobe | `brew install ffmpeg` · `sudo apt install ffmpeg` · `winget install Gyan.FFmpeg` | `ffmpeg -version` |
-| uv | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `uv --version` |
+| uv | `curl -LsSf https://astral.sh/uv/install.sh \| sh` · Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` or `pip install uv` | `uv --version` |
 | Chrome (overlays only) | Chrome/Chromium, or `CHROME_PATH` | `uv run reelly setup` |
 
 ## 2. Python environment
@@ -27,13 +27,15 @@ uv sync --extra prism        # + URL ingestion and Tesseract OCR helper (optiona
 uv run reelly setup
 ```
 
-Without uv: `pip install -e .`
+Without uv: `python -m venv .venv && source .venv/bin/activate && python -m pip install -e .` (Windows: `.venv\Scripts\activate`). Optional extras: `pip install -e '.[diarize]'` etc.
 
 Check: `uv run python -c "import reelly.cli; print('ok')"`
 
 ## 3. API keys — you must request your own
 
 **Reelly ships no keys.** Do not put keys in this repo, in git, or in issues.
+Reelly does **not** load a `.env` file. Export variables in your shell, or write
+`~/.reelly/config.json`.
 
 Preferred: environment variables.
 
@@ -86,8 +88,9 @@ If a command needs a key you have not set, it exits with the variable name and t
 **Manual — diarization (gated models).** After installing the extra and the
 token, accept the terms on huggingface.co for **all three** repos:
 `pyannote/speaker-diarization-3.1`, `pyannote/segmentation-3.0`,
-`pyannote/speaker-diarization-community-1`. Verify with a real download (the
-README shows the snippet; `model_info()` is NOT a real check). Runs on Apple
+`pyannote/speaker-diarization-community-1`. Verify with a real download
+(`huggingface-cli download pyannote/speaker-diarization-3.1` is a real check;
+`model_info()` is not). Runs on Apple
 GPU (MPS) automatically; `REELLY_DIAR_DEVICE=cpu` forces CPU.
 
 **Manual — offline face fallback (only if you need face detection with no
@@ -181,4 +184,4 @@ Before processing confidential media, read [../DATA_AND_PRIVACY.md](../DATA_AND_
 | diarize extra / HF terms | analyze completes; voice identity UNVERIFIED (clearance gate weakened) |
 | Brand kit | legacy endcard path (Gemini + Chrome per cut), system fonts, default accent |
 | FaceMesh + Blaze both absent | face detection fails → face-dependent reframing unavailable |
-| mlx-whisper (non-Apple Silicon) | on-device ASR is unavailable; other stages still run |
+| mlx-whisper (non-Apple Silicon) | on-device ASR is skipped loudly; other analyze stages still run |

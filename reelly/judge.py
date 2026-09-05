@@ -219,9 +219,9 @@ def caption_collisions(plan, words, t_eps=0.05):
             f"{len(layers)} text layer(s), no temporal or spatial collisions")
 
 
-# M9 voice/attribution: the managed account's own account never speaks in the first person as a
+# M9 voice/attribution: brand copy should not speak in the first person as a
 # third-party creator. First-person-singular in the ASK or the message is the
-# tell (paid for: a CTA read "See my managed account prices" — managed account posing as a creator).
+# tell (a CTA like "See my prices" posing as a creator).
 _FIRST_PERSON = re.compile(r"\b(i|i'm|i've|i'll|i'd|me|my|mine|myself)\b", re.I)
 
 
@@ -237,12 +237,12 @@ def _voice_violations(plan):
         m = _FIRST_PERSON.search(text)
         if m:
             bad.append(f"{name} speaks first-person ({m.group(0)!r} in {text!r}); "
-                       "the managed account's account is not a third-party creator (M9)")
+                       "brand copy is not a third-party creator (M9)")
     return bad
 
 
 def copy_contract(plan):
-    """M8: on brand, fun, one clear CTA, short. M9: the managed account's voice, not a creator's.
+    """M8: on brand, fun, one clear CTA, short. M9: brand voice, not a creator's.
 
     The mechanical half of M8 is checked here (lengths, single ask, caption
     truncation) plus the M9 voice/attribution rule (no first-person-creator

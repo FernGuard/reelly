@@ -79,7 +79,7 @@ def get_silences(video, noise="-32dB", min_d=0.12):
 
 def words_from(result):
     """Flatten a whisper result (dict or path) into [{t, s, e}],
-    brand-vocabulary corrected (BDGO -> OldBrand and friends)."""
+    brand-vocabulary corrected."""
     from . import vocab
     if isinstance(result, str):
         result = json.load(open(result))

@@ -6,7 +6,7 @@ Reelly is local-first, not local-only. Read this document before using confident
 
 The following normally stay on the machine running Reelly:
 
-- source files copied into the project workspace;
+- source files linked (or copied on Windows) into the project workspace;
 - ffmpeg/ffprobe processing;
 - cached analysis artifacts, transcripts, captions, plans, renders, and reports;
 - Apple-Silicon transcription with mlx-whisper;

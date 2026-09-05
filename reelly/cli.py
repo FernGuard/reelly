@@ -114,8 +114,8 @@ def main():
     f.add_argument("--product", default="video",
                    choices=["video", "story", "games", "adventure"])
     f.add_argument("--for", dest="targets_for", metavar="PLATFORMS",
-                   help="comma list (tiktok,reels,shorts,youtube,x,master); "
-                        "default: project delivery.json, else tiktok,reels,shorts")
+                   help="comma list (tiktok,reels,shorts,youtube,x,threads,master); "
+                        "default: project delivery.json, else tiktok,reels,shorts,threads,x")
     f.add_argument("--force", action="store_true",
                    help="ignore the cached raw cut and re-render segments")
     f.add_argument("--account", help="publishing account profile")
@@ -425,7 +425,7 @@ def main():
         if gfx:
             gfx.finish()
             # gfx-only shipping: the base burn masters leave the ship dir for
-            # deliverables/.cache once every gfx variant exists (fix: the managed account's
+            # deliverables/.cache once every gfx variant exists (otherwise
             # final/ held both cut_XX.mp4 and cut_XX_gfx.mp4).
             finalize.retire_unshipped_bases(root, wanted, _plans, sfx)
             # Re-point the review at the _gfx files the overlays just made.

@@ -1,10 +1,10 @@
-"""P1 #6 (reference-first character pipeline) and #7 (persistent managed account brand bug).
+"""P1 #6 (reference-first character pipeline) and #7 (persistent corner brand mark).
 
 #6: build a character reference AND a clean background plate before the video,
 then drive reference-to-video with BOTH -- never one busy keyframe that makes
 the model invent character and scene at once (MAR-37).
 
-#7: the managed account wordmark rides the whole clip as a stamped (not generated) corner
+#7: the product wordmark rides the whole clip as a stamped (not generated) corner
 bug, so its colour/form carry through the video without violating the
 no-logos-in-generation rule (M7).
 """

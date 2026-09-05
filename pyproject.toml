@@ -1,7 +1,7 @@
 [project]
 name = "reelly"
 version = "0.1.0"
-description = "Self-improving video processing engine"
+description = "Local-first video editing engine"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -27,7 +27,7 @@ Issues = "https://github.com/FernGuard/reelly/issues"
 
 [project.optional-dependencies]
 # local speaker diarization (gap 8): on-device, no per-run cost.
-# One-time setup documented in README "Speaker diarization (local)".
+# One-time setup documented in README and docs/SETUP.md.
 # Upper bound is deliberate. pyannote.audio 4.x rewires the speaker-diarization-3.1
 # pipeline onto pyannote/speaker-diarization-community-1 for embeddings, which is
 # gated behind MANUAL approval ("you are not in the authorized list") rather than

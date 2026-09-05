@@ -105,7 +105,15 @@ def transcribe(video, out_json, model=None):
                       "installed (uv sync --extra asr-fast); using mlx-whisper")
             else:
                 return _parakeet_transcribe(wav, out_json)
-        import mlx_whisper  # heavy import, keep it lazy
+        try:
+            import mlx_whisper  # heavy import, keep it lazy
+        except ImportError:
+            print("[asr  ] mlx-whisper is not installed (Apple Silicon only). "
+                  "Transcript skipped; other analyze stages still run.")
+            res = {"segments": [], "text": "", "unavailable": True,
+                   "error": "mlx-whisper not installed"}
+            json.dump(res, open(out_json, "w"))
+            return res
         from . import vocab
         res = mlx_whisper.transcribe(
             wav, path_or_hf_repo=model or config.WHISPER_MODEL,

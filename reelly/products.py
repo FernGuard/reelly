@@ -6,6 +6,8 @@ in per-machine configuration outside this public repository.
 import json
 import os
 
+from . import config
+
 PLATFORMS = {
     "tiktok":  {"mix": "clean", "file": "_trending",
                 "note": "add licensed/trending audio in-app if authorized"},
@@ -62,7 +64,7 @@ DISCORD = ""
 
 
 def _load_product_overrides():
-    p = os.path.expanduser("~/.reelly/products.json")
+    p = os.path.join(config.HOME, "products.json")
     if not os.path.exists(p):
         return
     try:
@@ -80,7 +82,7 @@ _load_product_overrides()
 
 def brand_logo(product_key):
     """Logo for a product, configured per machine in ~/.reelly/config.json."""
-    cfg = os.path.expanduser("~/.reelly/config.json")
+    cfg = os.path.join(config.HOME, "config.json")
     if not os.path.exists(cfg):
         return None
     try:

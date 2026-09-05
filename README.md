@@ -39,6 +39,8 @@ uv run reelly setup
 Without uv:
 
 ```sh
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 python -m pip install -e .
 reelly setup
 ```
@@ -70,11 +72,7 @@ Instead of environment variables, you may use `~/.reelly/config.json`. Reelly cr
 
 ```sh
 mkdir -p ~/.reelly
-chmod 700 ~/.reelly
-chmod 600 ~/.reelly/config.json
-```
-
-```json
+cat > ~/.reelly/config.json <<'EOF'
 {
   "gemini_api_key": "your-key",
   "openai_api_key": "your-key",
@@ -83,6 +81,9 @@ chmod 600 ~/.reelly/config.json
   "huggingface_token": "your-key",
   "projects": "~/reelly-projects"
 }
+EOF
+chmod 700 ~/.reelly
+chmod 600 ~/.reelly/config.json
 ```
 
 Environment variables take precedence over the config file.

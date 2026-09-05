@@ -19,7 +19,7 @@ DEFAULT_STYLE = {
     # i.e. exactly today's system fonts when no kit is installed
     "font_role": "caption",
     # white body + a single accent; the accent is resolved from kit.json
-    # (sampled from the managed account wordmark at kit build) when not passed explicitly
+    # (sampled from a wordmark at kit build) when not passed explicitly
     "fill": "white",
     "accent": None,
     # mixed case: ASR words are rendered as spoken, never upper()-coerced
