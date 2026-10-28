@@ -74,6 +74,32 @@ def _pointer_events(plan, words_tl, workdir, video):
         return []
 
 
+class _Seq(str):
+    """A burn event whose image is a kinetic PNG SEQUENCE (k%05d.png), not a
+    still. Still a str, so the (png, y, t0, t1) event tuples keep their shape;
+    `offset` is how far into the sequence its window starts (non-zero only for
+    the second half of an event split across burn chunks)."""
+    def __new__(cls, pattern, offset=0.0):
+        obj = super().__new__(cls, pattern)
+        obj.offset = float(offset)
+        return obj
+
+
+def _text_layer(text, workdir, name, dur, hot=None):
+    """(path, y_shift) for a hook-style line: a kinetic sequence when the
+    kinetic layer is on, else the static Pillow PNG. A kinetic failure falls
+    back to the static PNG; it never fails the burn."""
+    from . import kinetic
+    if kinetic.enabled():
+        try:
+            pattern, _, _, pad = kinetic.hook_line(
+                text, os.path.join(workdir, f"kin_{name}"), dur, hot=hot)
+            return _Seq(pattern), -pad
+        except Exception as e:  # noqa: BLE001 -- static fallback, never break the burn
+            print(f"        kinetic '{name}' failed ({e}); static text instead")
+    return captions.hook_png(text, os.path.join(workdir, f"{name}.png")), 0
+
+
 def _accent():
     """The active brand's accent; the historical Blue Smoke without a kit."""
     from . import brandkit
@@ -129,15 +155,16 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
 
     hook = plan.get("hook") or {}
     if hook.get("text"):
-        hp = captions.hook_png(hook["text"], os.path.join(workdir, "hook.png"))
-        events.append((hp, hook_y, 0.0, float(hook.get("show_s", 3.6))))
+        show = float(hook.get("show_s", 3.6))
+        hp, dy = _text_layer(hook["text"], workdir, "hook", show, hook.get("hot"))
+        events.append((hp, hook_y + dy, 0.0, show))
 
     # P-TEXT: timed lines beyond the hook; on captions:"none" cuts they carry
     # all of the writing.
     for oi, o in enumerate(plan.get("overlay_lines") or []):
-        op = captions.hook_png(o["text"], os.path.join(workdir, f"ov{oi}.png"))
-        t0 = float(o["t"])
-        events.append((op, hook_y, t0, t0 + float(o.get("show_s", 3.0))))
+        t0, show = float(o["t"]), float(o.get("show_s", 3.0))
+        op, dy = _text_layer(o["text"], workdir, f"ov{oi}", show, o.get("hot"))
+        events.append((op, hook_y + dy, t0, t0 + show))
 
     payoff = plan.get("payoff") or {}
     if payoff.get("jump") and payoff.get("local_t") is not None:
@@ -193,7 +220,9 @@ def _burn_chunks(events, dur, chunk_s=BURN_CHUNK_S):
         e = min(dur, s + chunk_s)
         if dur - e < 5.0:
             e = dur
-        local = [(png, y, max(0.0, t0 - s), min(e, t1) - s)
+        local = [(_Seq(png, getattr(png, "offset", 0.0) + max(0.0, s - t0))
+                  if isinstance(png, _Seq) else png,
+                  y, max(0.0, t0 - s), min(e, t1) - s)
                  for png, y, t0, t1 in events if t1 > s and t0 < e]
         out.append((s, e, local))
         s = e
@@ -209,9 +238,17 @@ def _burn_pass(src, dst, events, seek=None):
     inputs += ["-i", src]
     filters, last, idx = [], "0:v", 1
     for png, y, t0, t1 in events:
-        inputs.extend(["-i", png])
-        filters.append(f"[{last}][{idx}:v]overlay=(W-w)/2:{y}:"
-                       f"enable='between(t,{t0:.2f},{t1:.2f})'[v{idx}]")
+        if isinstance(png, _Seq):
+            # kinetic sequence: frame 0 lands on t0 (minus any chunk offset)
+            inputs.extend(["-framerate", "30", "-i", png])
+            trim = f"trim=start={png.offset:.3f}," if png.offset > 0 else ""
+            filters.append(f"[{idx}:v]{trim}setpts=PTS-STARTPTS+{t0:.3f}/TB[k{idx}]")
+            filters.append(f"[{last}][k{idx}]overlay=(W-w)/2:{y}:eof_action=pass:"
+                           f"enable='between(t,{t0:.2f},{t1:.2f})'[v{idx}]")
+        else:
+            inputs.extend(["-i", png])
+            filters.append(f"[{last}][{idx}:v]overlay=(W-w)/2:{y}:"
+                           f"enable='between(t,{t0:.2f},{t1:.2f})'[v{idx}]")
         last = f"v{idx}"
         idx += 1
     if filters:

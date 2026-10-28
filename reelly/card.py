@@ -512,6 +512,10 @@ _SEEK = """(function(ms){
 })(%f)"""
 
 
+# urllib opener that ignores proxy env vars, for the local DevTools endpoint.
+_LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def _free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -546,7 +550,7 @@ class _Browser:
         for _ in range(150):  # Chrome writes the endpoint when it is ready
             await asyncio.sleep(0.1)
             try:
-                with urllib.request.urlopen(
+                with _LOCAL.open(
                         f"http://127.0.0.1:{self.port}/json/version", timeout=1) as r:
                     url = json.load(r)["webSocketDebuggerUrl"]
                 break
@@ -555,7 +559,12 @@ class _Browser:
         if not url:
             raise RuntimeError("headless Chrome never opened a debug port")
 
-        self.ws = await websockets.connect(url, max_size=None)
+        # The DevTools socket is local: never route it through a proxy from
+        # the environment (websockets >= 15 honours https_proxy otherwise).
+        try:
+            self.ws = await websockets.connect(url, max_size=None, proxy=None)
+        except TypeError:       # websockets < 15 has no proxy support at all
+            self.ws = await websockets.connect(url, max_size=None)
         tid = (await self("Target.createTarget", {"url": "about:blank"}))["targetId"]
         self.sid = (await self("Target.attachToTarget",
                                {"targetId": tid, "flatten": True}))["sessionId"]
