@@ -116,10 +116,19 @@ reelly budget              show recorded AI spend
 reelly --help              list every command
 ```
 
+## Zero-paid by default
+
+Reelly never calls a provider that bills per call (Gemini, OpenAI, FAL,
+Anthropic) unless the run says so with `--allow-paid` (or
+`REELLY_ALLOW_PAID=1`). Keys you have set stay idle until then. The editor
+brain defaults to `--brain auto`: a signed-in subscription CLI (`codex`, then
+`claude`), else heuristic planning. Uncached SFX and music beds are skipped,
+not generated.
+
 ## What works without each key
 
 - No Gemini key: `analyze --skip-visual` runs local stages; visual review and vision QC are unavailable.
-- No OpenAI key: use `direct --brain gemini` with a Gemini key, or `direct --no-ai`.
+- No OpenAI key: the default `--brain auto` uses a subscription CLI or heuristics; `--brain gpt` needs the key and `--allow-paid`.
 - No FAL key: cached/generated assets already on disk remain usable; new media generation is unavailable.
 - No Anthropic key: only Anthropic-backed PRISM analysis is unavailable.
 - No Hugging Face token: core editing still works; gated speaker diarization is unavailable.

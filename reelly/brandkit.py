@@ -15,6 +15,14 @@ The kit moves the derivable work to BUILD TIME, once per machine:
     outros/<studio>.mov          brand outro clip for card.py concat (optional)
     fonts/<role>.ttf|.otf        brand type per role (caption, headline, ...)
     music/manifest.json          cleared music bed manifest (optional)
+    brands/<brand>/              one folder per brand (a studio, or each of
+      brand.json                 its games): {"name", "accent", "ink",
+      <font files>               "surface", "fonts": {role: file}}
+
+BRANDS: a run picks one with `--brand NAME` (REELLY_BRAND) or kit.json
+"default_brand". The active brand's fonts, accent, ink and surface win over
+the flat kit; anything a brand leaves out falls back to the flat kit, then to
+the built-in defaults. No brand active = exactly the pre-brand behaviour.
 
 EVERYTHING DEGRADES GRACEFULLY: a missing kit, a missing asset or a broken
 kit.json returns None/{}/defaults and the pipeline behaves exactly as it did
@@ -115,10 +123,91 @@ def outro(studio):
     return p if os.path.exists(p) else None
 
 
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
+# A role a brand does not define borrows from the next one down.
+ROLE_FALLBACK = {"headline": ("headline", "caption"),
+                 "caption": ("caption",),
+                 "cta": ("cta", "caption"),
+                 "kicker": ("kicker", "caption")}
+
+
+def brand_name():
+    """The active brand for this run, or None. REELLY_BRAND wins (what the
+    CLI's --brand sets), then kit.json "default_brand"."""
+    name = (os.environ.get("REELLY_BRAND") or "").strip()
+    if not name:
+        name = str(_kit_json().get("default_brand") or "").strip()
+    if not name or not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in (".", ".."):
+        return None
+    return name
+
+
+def brand_dir(name=None):
+    name = name or brand_name()
+    return os.path.join(kit_dir(), "brands", name) if name else None
+
+
+def brand(name=None):
+    """The active brand's brand.json as a dict ({} when no brand is active or
+    its file is missing or broken). A named brand whose folder is missing is
+    reported once, loudly: rendering silently in the wrong type is the
+    failure this guards against."""
+    d = brand_dir(name)
+    if not d:
+        return {}
+    try:
+        with open(os.path.join(d, "brand.json")) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        if d not in _WARNED:
+            _WARNED.add(d)
+            print(f"[brand] WARNING: brand '{os.path.basename(d)}' has no "
+                  f"readable brand.json at {d}; using the flat kit")
+        return {}
+
+
+_WARNED = set()
+
+
+def _brand_color(key):
+    v = brand().get(key)
+    return v if isinstance(v, str) and _HEX.fullmatch(v) else None
+
+
+def ink():
+    """Text colour of the active brand, or None (callers keep their own)."""
+    return _brand_color("ink")
+
+
+def surface():
+    """Plate / backdrop colour of the active brand, or None."""
+    return _brand_color("surface")
+
+
+def _brand_font(role):
+    d = brand_dir()
+    if not d:
+        return None
+    fonts = brand().get("fonts")
+    fonts = fonts if isinstance(fonts, dict) else {}
+    for r in ROLE_FALLBACK.get(role, (role, "caption")):
+        fn = fonts.get(r)
+        if isinstance(fn, str) and fn and os.path.basename(fn) == fn:
+            p = os.path.join(d, fn)
+            if os.path.exists(p):
+                return p
+    return None
+
+
 def font(role="caption"):
     """Brand font file for a role, or None (caller falls back to its own
-    system-font list -- captions.FONTS today). Resolution order:
-    fonts/<role>.ttf|.otf, fonts/default.ttf|.otf, then any font in fonts/."""
+    system-font list -- captions.FONTS today). Resolution order: the active
+    brand's role (headline borrows caption), then fonts/<role>.ttf|.otf,
+    fonts/default.ttf|.otf, then any font in fonts/."""
+    bf = _brand_font(role)
+    if bf:
+        return bf
     d = os.path.join(kit_dir(), "fonts")
     for name in (role, "default"):
         for ext in (".ttf", ".otf", ".ttc"):
@@ -135,11 +224,39 @@ def font(role="caption"):
 
 
 def accent():
-    """The single brand accent for caption highlights: sampled from a
-    wordmark at kit-build time (kit.json), Blue Smoke when no kit exists."""
+    """The single brand accent: the active brand's, else the one sampled
+    from a wordmark at kit-build time (kit.json), Blue Smoke when no kit
+    exists."""
+    b = _brand_color("accent")
+    if b:
+        return b
     a = _kit_json().get("accent")
     return a if isinstance(a, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", a) \
         else FALLBACK_ACCENT
+
+
+def font_css():
+    """CSS that points Chrome-rendered layers (overlays, cards) at the active
+    brand's own font files instead of a font CDN, or "" with no brand fonts.
+
+    `!important` rules beat the templates' inline font-family, so every
+    overlay takes the brand type from this one injection point. Headline-like
+    marks (.marker) take the headline role and the brand accent."""
+    from pathlib import Path
+    cap, head = _brand_font("caption"), _brand_font("headline")
+    if not cap and not head:
+        return ""
+    rules = []
+    for fam, path in (("ReellyBrandCaption", cap or head),
+                      ("ReellyBrandHeadline", head or cap)):
+        rules.append("@font-face {font-family:'%s'; src:url('%s');}"
+                     % (fam, Path(path).resolve().as_uri()))
+    acc = accent()
+    rules.append("body, body * {font-family:'ReellyBrandCaption', sans-serif "
+                 "!important;}")
+    rules.append(".marker {font-family:'ReellyBrandHeadline', sans-serif "
+                 "!important; color:%s !important;}" % acc)
+    return "\n".join(rules)
 
 
 def copy_bank():

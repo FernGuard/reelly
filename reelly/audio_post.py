@@ -298,6 +298,10 @@ def sfx(name, project=""):
     with _SFX_LOCK:
         if os.path.exists(p):
             return p
+        if config.paid_blocked("fal-ai"):
+            print(f"         sfx '{name}': not cached and paid calls are off; "
+                  f"skipped (drop a file at {p} to use one)")
+            return None
         prompt, dur = SFX_SPECS[name]
         # /v2: the base endpoint defaults to a retired ElevenLabs model (probed)
         url = _fal("fal-ai/elevenlabs/sound-effects/v2",
@@ -412,6 +416,10 @@ def _music_generate(plan, out_mp3, project=""):
             ledger.add("brandkit-music", f"music {plan['id']} ({bed}, kit)",
                        0.0, project)
         return out_mp3
+    if config.paid_blocked("fal-ai"):
+        print(f"         music: no {bed} bed in the kit and paid calls are off; "
+              f"this mix ships without a generated bed")
+        return None
     about = (plan.get("title") or "").strip()
     prompt = (f"Instrumental {BEDS[bed]}. "
               f"Scores a short vertical video about: {about}. "
@@ -570,6 +578,8 @@ def final_mix(voice_wav, music_mp3, events, dur, out_wav, project="",
     sfx_paths = []
     for t, name, gain in events:
         p = sfx(name, project)
+        if not p:
+            continue
         inputs += ["-i", p]
         sfx_paths.append((t, gain))
     base = 2 if music_mp3 else 1

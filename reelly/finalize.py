@@ -74,6 +74,12 @@ def _pointer_events(plan, words_tl, workdir, video):
         return []
 
 
+def _accent():
+    """The active brand's accent; the historical Blue Smoke without a kit."""
+    from . import brandkit
+    return brandkit.accent()
+
+
 def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     """Every overlay the final burn composites, as (png, y, t0, t1) rows.
 
@@ -105,7 +111,8 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     gname = str(plan.get("game_name") or "").strip()
     if gname:
         gp = captions.text_png(gname, os.path.join(workdir, "gamename.png"),
-                               width=760, size=40, fill="#FCFCFB", stroke_w=6)
+                               width=760, size=40, fill=captions.ink("#FCFCFB"),
+                               stroke_w=6)
         events.append((gp, gname_y, 0.0, dur))
 
     # NO BURN-TIME END-CARD SCRIM (2026-08-02). The closing card's dark pass
@@ -136,7 +143,7 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     if payoff.get("jump") and payoff.get("local_t") is not None:
         chip = captions.text_png(">> " + payoff.get("chip", "moments later"),
                                  os.path.join(workdir, "chip.png"),
-                                 width=560, size=42, fill="#17cdff", stroke_w=5)
+                                 width=560, size=42, fill=_accent(), stroke_w=5)
         t0 = float(payoff["local_t"])
         events.append((chip, chip_y, t0, t0 + 1.6))
 
@@ -163,7 +170,8 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     if product_key and not (plan.get("cta") or "").strip():
         tag = captions.text_png(products.PRODUCTS[product_key]["end_tag"],
                                 os.path.join(workdir, "endtag.png"),
-                                width=900, size=44, fill="#FCFCFB", stroke_w=5)
+                                width=900, size=44, fill=captions.ink("#FCFCFB"),
+                                stroke_w=5, role="cta")
         events.append((tag, tag_y, max(0, dur - 2.2), dur))
 
     # Opt-in pointer overlays (circle/brackets) pointing at what the narrator
@@ -436,7 +444,8 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     payoff = p.get("payoff") or {}
                     beat_target = (float(payoff["local_t"]) if payoff.get("jump")
                                    else float(p["hook"].get("show_s", 3.6)))
-                    off = audio_post.beat_offset(mus, beat_target)
+                    off = (audio_post.beat_offset(mus, beat_target)
+                           if mus else 0.0)
             with timing.stage(f"{p['id']} mix", tpath):
                 # pad_to keeps the outro alive through amix(duration=first)
                 # and the mux's -shortest: the voice is padded with silence

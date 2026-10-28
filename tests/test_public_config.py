@@ -8,6 +8,14 @@ import pytest
 from reelly import config
 
 
+@pytest.fixture(autouse=True)
+def _paid_calls_on(monkeypatch):
+    """These tests exercise the paid-provider paths (mocked, nothing bills).
+    Reelly is zero-paid by default, so they opt in the way a real run must."""
+    monkeypatch.setenv("REELLY_ALLOW_PAID", "1")
+
+
+
 SECRET = "sk-test-do-not-commit-this-value-xyz"
 
 

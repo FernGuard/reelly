@@ -68,6 +68,25 @@ uv run python -m reelly.brandkit
 
 This creates local files under `~/.reelly/brandkit/`, including `copy_bank.yaml`. Put private copy rules, banned names, fonts, music manifests, and generated end cards there. Do not move those files into the repository.
 
+### Brands
+
+One kit can hold several brands, for example a studio and each of its games:
+
+```text
+~/.reelly/brandkit/brands/<brand>/
+  brand.json        {"name", "accent", "ink", "surface", "fonts": {"headline": "...", "caption": "..."}}
+  <font files>      .ttf / .otf named in brand.json
+```
+
+Pick one per run with `--brand <brand>` (anywhere on the command line) or
+`REELLY_BRAND`, or set `"default_brand"` in `kit.json`. The hook and end card
+use the `headline` font, captions and labels use `caption` (a missing headline
+borrows caption). The accent drives karaoke highlights, chips and the outro
+tint; `ink` is the text colour. Overlay and card pages load the brand's own
+font files locally instead of a font CDN. Pillow needs static fonts: cut
+variable fonts to fixed instances first (for example with fontTools'
+`varLib.instancer`).
+
 ## Verdicts and analytics
 
 `playbook/feedback/VERDICTS.md` is a public empty template. Store real human judgments and performance exports in a private project or data store. Use synthetic examples in tests and documentation.

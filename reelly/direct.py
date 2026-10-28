@@ -7,6 +7,7 @@ edges, and a cut without a clean landing is dropped (playbook C4, learned
 from the fragmentary-clip failure). Every plan carries `because:` fields
 citing the playbook rules and signals that produced it.
 """
+import functools
 import json
 import re
 import os
@@ -312,8 +313,155 @@ def _refine_heuristic(cand, wsents):
             "why": "heuristic: whole sentences in candidate window"}
 
 
+# ---------------------------------------------------------------- brains
+# Zero-paid by default: "auto" uses a signed-in SUBSCRIPTION CLI (codex, then
+# claude) and falls back to the heuristic planner. gemini/gpt bill per call
+# and only run with --allow-paid. The API-key env vars are stripped from the
+# CLI subprocess so a stray key can never turn a subscription call into a
+# billed one.
+_CLI_KEY_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN")
+CLI_TIMEOUT_S = 300
+PAID_BRAINS = {"gemini": "google-genai", "gpt": "openai"}
+
+
+def _cli_env():
+    env = dict(os.environ)
+    for k in _CLI_KEY_ENV:
+        env.pop(k, None)
+    return env
+
+
+@functools.lru_cache(maxsize=None)
+def cli_ready(tool):
+    """True when `tool` (codex | claude) is installed AND signed in to a
+    subscription on this machine. Probed once per process."""
+    import shutil
+    import subprocess
+    exe = shutil.which(tool)
+    if not exe:
+        return False
+    cmd = {"codex": [exe, "login", "status"],
+           "claude": [exe, "auth", "status"]}.get(tool)
+    if not cmd:
+        return False
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                           env=_cli_env(), stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    out = (r.stdout or "") + (r.stderr or "")
+    if tool == "codex":
+        return r.returncode == 0 and "logged in" in out.lower()
+    try:
+        return bool(json.loads(r.stdout).get("loggedIn"))
+    except (ValueError, AttributeError):
+        return False
+
+
+def resolve_brain(brain):
+    """The brain this run will actually use, or None for heuristics only.
+
+    auto -> codex, then claude (whichever is signed in), else None.
+    codex/claude asked for by name but not signed in -> None, said loudly.
+    gemini/gpt without --allow-paid -> SystemExit with the opt-in message."""
+    brain = brain or "auto"
+    if brain in PAID_BRAINS:
+        if config.paid_blocked(PAID_BRAINS[brain]):
+            raise SystemExit(config.paid_disabled_message(PAID_BRAINS[brain]))
+        return brain
+    order = ("codex", "claude") if brain == "auto" else (brain,)
+    for tool in order:
+        if cli_ready(tool):
+            return tool
+    print(f"[brain] no signed-in subscription CLI ({' / '.join(order)}); "
+          f"planning with heuristics only")
+    return None
+
+
+def _json_from_text(text):
+    """The first JSON object in a model reply (tolerates code fences and a
+    sentence of chatter around it)."""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        t = t[t.find("\n") + 1:] if "\n" in t else t
+    a, b = t.find("{"), t.rfind("}")
+    if a < 0 or b <= a:
+        return None
+    try:
+        out = json.loads(t[a:b + 1])
+    except json.JSONDecodeError:
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def _ask_cli(tool, prompt, project, label):
+    """One JSON completion from a subscription CLI. $0 per call; logged in
+    the ledger at 0.0 so the run's record still shows every brain call."""
+    import shutil
+    import subprocess
+    import tempfile
+    exe = shutil.which(tool)
+    prompt = prompt + "\n\nReply with the JSON object only."
+    with tempfile.TemporaryDirectory() as td:
+        if tool == "codex":
+            out_p = os.path.join(td, "reply.txt")
+            model = os.environ.get("REELLY_CODEX_MODEL") or config.CODEX_MODEL
+            cmd = [exe, "exec", "--skip-git-repo-check", "--ephemeral",
+                   "-s", "read-only", "-o", out_p]
+            if model:
+                cmd += ["-m", model]
+            cmd.append(prompt)
+        else:
+            out_p = None
+            cmd = [exe, "-p", "--output-format", "json",
+                   "--no-session-persistence", "--strict-mcp-config", prompt]
+        try:
+            # stdin closed: both CLIs read a piped stdin as extra prompt and
+            # would otherwise wait on the parent's stdin until the timeout
+            r = subprocess.run(cmd, cwd=td, capture_output=True, text=True,
+                               timeout=CLI_TIMEOUT_S, env=_cli_env(),
+                               stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"  [{tool}] call failed ({e}); heuristic for this window")
+            return None
+        if out_p:
+            text = open(out_p).read() if os.path.exists(out_p) else ""
+        else:
+            try:
+                env_out = json.loads(r.stdout)
+                text = "" if env_out.get("is_error") else env_out.get("result", "")
+            except (ValueError, AttributeError):
+                text = r.stdout
+    with _LEDGER_LOCK:
+        ledger.add(f"{tool}-cli", label, 0.0, project)
+    reply = _json_from_text(text)
+    if reply is None:
+        print(f"  [{tool}] no JSON in the reply (exit {r.returncode}); "
+              f"heuristic for this window")
+    return reply
+
+
+def _refine_cli(cand, wsents, vr, peaks, project, tool):
+    """The speech refine contract on a subscription CLI brain."""
+    lines = "\n".join(f"{i} | {media.fmt(x['s'])}-{media.fmt(x['e'])} | {x['text']}"
+                      for i, x in wsents)
+    visuals = "; ".join(f"[{v.get('start_abs')}-{v.get('end_abs')}] {v.get('what_happens', '')}"
+                        for v in vr if cand["s"] - 20 <= v.get("start_s", 0) <= cand["e"] + 20) or "none noted"
+    pk = ", ".join(f"{media.fmt(p['t'])} ({p['above_median']:+.1f}dB)"
+                   for p in peaks if cand["s"] - 10 <= p["t"] <= cand["e"] + 10) or "none"
+    return _ask_cli(tool, REFINE_PROMPT.format(
+        why=cand["why"], visuals=visuals, peaks=pk, sents=lines,
+        payoffs=_payoff_lines(cand, vr)), project, f"refine {cand['why'][:40]}")
+
+
 def _ask_json(prompt, brain, project, label):
     """One JSON completion from whichever brain is selected."""
+    if brain in ("codex", "claude"):
+        return _ask_cli(brain, prompt, project, label)
     if brain == "gpt":
         import requests
         with _LEDGER_LOCK:
@@ -1013,8 +1161,15 @@ def _batched_refine(cands, worker, consume, batch_size=12, max_workers=12):
                 return
 
 
-def run(project, ai=True, max_cuts=8, brain="gemini", tag=None):
+def run(project, ai=True, max_cuts=8, brain="auto", tag=None):
     root = resolve_project(project)
+    if ai:
+        brain = resolve_brain(brain)
+        ai = brain is not None
+    if not ai:
+        brain = "heuristic"
+    print(f"[brain] {brain}" + (" (subscription CLI, $0 per call)"
+                                if brain in ("codex", "claude") else ""))
     an = os.path.join(root, "analysis")
     edl = os.path.join(root, "edl")
     sfx = f"_{tag}" if tag else ""
@@ -1093,7 +1248,10 @@ def run(project, ai=True, max_cuts=8, brain="gemini", tag=None):
         if as_visual:
             ref = _refine_visual(cand, vr, peaks, scenes, duration, brain, name) if ai else None
         else:
-            refine = {"gemini": _refine_ai, "gpt": _refine_gpt}.get(brain, _refine_ai)
+            if brain in ("codex", "claude"):
+                refine = functools.partial(_refine_cli, tool=brain)
+            else:
+                refine = {"gemini": _refine_ai, "gpt": _refine_gpt}.get(brain, _refine_ai)
             ref = (refine(cand, wsents, vr, peaks, name) if ai else None) \
                 or _refine_heuristic(cand, wsents)
             # A window can have speech nearby and still have no spoken landing:

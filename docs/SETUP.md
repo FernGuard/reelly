@@ -188,7 +188,8 @@ Before processing confidential media, read [../DATA_AND_PRIVACY.md](../DATA_AND_
 | ffmpeg/ffprobe | hard fail (`reelly setup` tells you) |
 | Chrome | overlay cards fail; the rest of the pipeline runs |
 | Gemini key | no visual review / occupancy / QC vision — analyze says so loudly |
-| OpenAI key | default `--brain gpt` fails with the OpenAI signup URL; use `--brain gemini` or `--no-ai` only if you choose that path |
+| OpenAI key | not needed: the default `--brain auto` uses a signed-in `codex` or `claude` CLI, else heuristics; `--brain gpt` needs the key plus `--allow-paid` |
+| `--allow-paid` | every per-call provider stays off (keys idle); analyze skips the Gemini pass, uncached SFX and beds are skipped |
 | FAL key | no music/SFX/lettering generation; kit-served beds still work |
 | diarize extra / HF terms | analyze completes; voice identity UNVERIFIED (clearance gate weakened) |
 | Brand kit | legacy endcard path (Gemini + Chrome per cut), system fonts, default accent |

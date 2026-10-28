@@ -16,6 +16,7 @@ brackets(x, y, w, h, label, lx, ly, color) · raw(html).
 """
 import json
 import os
+import re
 import subprocess
 
 from . import config, direct
@@ -37,6 +38,18 @@ body {width:WPXpx; height:HPXpx; background:transparent; overflow:hidden; positi
 .marker {font-family:'Permanent Marker', cursive; color:#ffd60a;
          text-shadow:0 3px 14px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);}
 </style></head><body>BODY</body></html>"""
+
+def _head():
+    """The page head: with brand fonts in the kit, the brand's own files are
+    served locally (no font CDN, works offline) and override every template's
+    inline font; without them, exactly the historical HEAD."""
+    from . import brandkit
+    css = brandkit.font_css()
+    if not css:
+        return HEAD
+    return re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "",
+                  HEAD).replace("</style>", css + "\n</style>")
+
 
 # The vertical feeds are the default because that is what `cut` delivers, but
 # the page is not vertical-only: sizzle reels render the same templates at
@@ -162,6 +175,9 @@ def plan_pointers(video, words_tl, project="", frame_at=None,
     returns []."""
     from . import design, speech
     if not words_tl or frame_at is None:
+        return []
+    if config.paid_blocked("google-genai"):
+        print("[overlays] pointer marks skipped: they need a paid vision call")
         return []
     events, last_t = [], -1e9
     for cs, ce, wlist in speech.group_cue_words(words_tl):
@@ -308,7 +324,7 @@ def _render_png(workdir, name, body, size=None):
     w, h = size or FRAME
     os.makedirs(workdir, exist_ok=True)
     hp = os.path.join(workdir, name + ".html")
-    open(hp, "w").write(HEAD.replace("WPX", str(w)).replace("HPX", str(h))
+    open(hp, "w").write(_head().replace("WPX", str(w)).replace("HPX", str(h))
                         .replace("BODY", body))
     dst = os.path.join(workdir, name + ".png")
     subprocess.run([CHROME, "--headless", "--disable-gpu", "--hide-scrollbars",

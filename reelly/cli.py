@@ -6,8 +6,16 @@
   reelly budget
   reelly budget sprint <cap> [--days N] [--reason TEXT]
   reelly budget endsprint
+
+Global flags, accepted anywhere on the command line:
+  --allow-paid     let THIS run call providers that bill per call (Gemini,
+                   OpenAI, FAL, Anthropic). Off by default: Reelly is zero-paid.
+  --brand NAME     render with the brand kit's brands/NAME (fonts, accent,
+                   ink, surface). Same as REELLY_BRAND=NAME.
 """
 import argparse
+import os
+import sys
 
 from . import ledger
 
@@ -58,7 +66,33 @@ class _CutGfx:
             raise RuntimeError("overlays failed on: " + ", ".join(failed))
 
 
-def main():
+BRAINS = ["auto", "codex", "claude", "gemini", "gpt"]
+BRAIN_HELP = ("editor brain: auto (default) uses a signed-in subscription CLI "
+              "(codex, then claude) and falls back to heuristics; gemini and "
+              "gpt bill per call and need --allow-paid")
+
+
+def _global_flags(argv):
+    """Strip --allow-paid / --brand NAME from anywhere in argv into the env,
+    so they work before or after the subcommand. Returns the remaining argv."""
+    out, i = [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--allow-paid":
+            os.environ["REELLY_ALLOW_PAID"] = "1"
+        elif a == "--brand" and i + 1 < len(argv):
+            os.environ["REELLY_BRAND"] = argv[i + 1]
+            i += 1
+        elif a.startswith("--brand="):
+            os.environ["REELLY_BRAND"] = a.split("=", 1)[1]
+        else:
+            out.append(a)
+        i += 1
+    return out
+
+
+def main(argv=None):
+    argv = _global_flags(list(sys.argv[1:] if argv is None else argv))
     ap = argparse.ArgumentParser(prog="reelly")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -75,8 +109,7 @@ def main():
     d.add_argument("project", help="project name or path")
     d.add_argument("--no-ai", action="store_true", help="heuristic refinement only")
     d.add_argument("--max-cuts", type=int, default=8)
-    d.add_argument("--brain", choices=["gemini", "gpt"], default="gpt",
-                   help="language-model backend for edit refinement")
+    d.add_argument("--brain", choices=BRAINS, default="auto", help=BRAIN_HELP)
     d.add_argument("--tag", help="suffix for plan/preview files (A/B experiments)")
 
     c = sub.add_parser("cut", help="ONE PASS: plans -> fully treated videos + REVIEW.md "
@@ -85,7 +118,7 @@ def main():
     c.add_argument("--replan", action="store_true",
                    help="re-run the editor brain even if cut plans already exist")
     c.add_argument("--max-cuts", type=int, default=8)
-    c.add_argument("--brain", choices=["gemini", "gpt"], default="gpt")
+    c.add_argument("--brain", choices=BRAINS, default="auto", help=BRAIN_HELP)
     c.add_argument("--tag", help="suffix for plan/deliverable files (A/B experiments)")
     c.add_argument("--product", default="video",
                    choices=["video", "story", "games", "adventure"])
@@ -328,13 +361,11 @@ def main():
     su.add_argument("--json", action="store_true",
                     help="machine-readable check results")
 
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     from . import runlog
     if args.cmd == "runs":
-        import sys
         sys.exit(1 if runlog.report() else 0)
     if args.cmd == "setup":
-        import sys
         from . import config
         sys.exit(config.doctor(as_json=args.json))
     if args.cmd != "budget":
@@ -559,7 +590,6 @@ def main():
                                args.speaker, cleared=args.cleared,
                                by=args.by, note=args.note)
     elif args.cmd == "judge":
-        import sys
 
         from . import judge
         sys.exit(1 if judge.run(args.project, tag=args.tag,

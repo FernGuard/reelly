@@ -8,6 +8,13 @@ Resolution order for each provider:
 
 `reelly setup` prints what is missing and where to get it. It never prints
 key values.
+
+ZERO-PAID BY DEFAULT: providers that bill per call (Gemini, OpenAI, FAL,
+Anthropic) are OFF unless the run opts in with `--allow-paid` or
+REELLY_ALLOW_PAID=1. With paid calls off, get_key() returns None for those
+providers even when a key is present, so every paid path takes the same
+"no key" branch it always had. Subscription CLIs (codex, claude) and local
+tools are not paid providers and stay on.
 """
 import json
 import os
@@ -119,6 +126,10 @@ DEFAULT_PROJECTS = _default_projects()
 WHISPER_MODEL = "mlx-community/whisper-medium.en-mlx"
 GEMINI_MODEL = "gemini-3.5-flash"  # 2.5-flash retired by Google 2026-07-09
 CLAUDE_MODEL = "claude-sonnet-5"
+# Model for the subscription Codex brain (`--brain codex`). The CLI default can
+# name a model the installed CLI is too old for, so Reelly passes one it knows
+# works with a ChatGPT sign-in. Override with REELLY_CODEX_MODEL.
+CODEX_MODEL = "gpt-5.6-sol"
 PRISM_WORK = os.path.join(HOME, "prism")
 
 # Honor a system CA bundle when present (corporate SSL interception).
@@ -135,15 +146,15 @@ PROVIDERS = {
         "label": "Gemini",
         "used_for": "visual review, occupancy, QC, sizzle survey",
         "url": "https://aistudio.google.com/apikey",
-        "required": True,
+        "required": False,
     },
     "openai": {
         "env": ("OPENAI_API_KEY",),
         "config": ("openai_api_key",),
         "label": "OpenAI",
-        "used_for": "editor brain (default --brain gpt)",
+        "used_for": "editor brain (--brain gpt)",
         "url": "https://platform.openai.com/api-keys",
-        "required": True,
+        "required": False,
     },
     "fal-ai": {
         "env": ("FAL_KEY", "FAL_API_KEY"),
@@ -151,7 +162,7 @@ PROVIDERS = {
         "label": "FAL",
         "used_for": "music beds, SFX, motion / image-to-video",
         "url": "https://fal.ai/dashboard/keys",
-        "required": True,
+        "required": False,
     },
     "anthropic": {
         "env": ("ANTHROPIC_API_KEY",),
@@ -172,14 +183,48 @@ PROVIDERS = {
 }
 
 
+# Providers that bill per call. Everything else (Hugging Face model downloads,
+# subscription CLIs, local tools) costs nothing per run.
+PAID_PROVIDERS = frozenset({"google-genai", "openai", "fal-ai", "anthropic"})
+
+
 class MissingKeyError(RuntimeError):
     """A cloud provider key was requested but the user has not supplied one."""
 
 
+class PaidDisabledError(MissingKeyError):
+    """A paid provider was requested while paid calls are off (the default).
+
+    Subclasses MissingKeyError so every caller that already degrades on a
+    missing key degrades the same way here."""
+
+
+def paid_allowed():
+    """True only when this run opted in to per-call billing.
+
+    REELLY_ALLOW_PAID=1 (what `--allow-paid` sets) or "allow_paid": true in
+    ~/.reelly/config.json. Read at call time so tests and the CLI can flip it."""
+    env = os.environ.get("REELLY_ALLOW_PAID", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    return load_user_config().get("allow_paid") is True
+
+
+def paid_blocked(name):
+    """True when `name` bills per call and this run has not opted in."""
+    return name in PAID_PROVIDERS and not paid_allowed()
+
+
 def get_key(name):
-    """Return the key for `name`, or None. Never prints the value."""
+    """Return the key for `name`, or None. Never prints the value.
+
+    Paid providers return None while paid calls are off, whatever is set."""
     spec = PROVIDERS.get(name)
     if spec is None:
+        return None
+    if paid_blocked(name):
         return None
     for var in spec["env"]:
         val = os.environ.get(var, "").strip()
@@ -198,6 +243,27 @@ def get_key(name):
 
 def have_key(name):
     return bool(get_key(name))
+
+
+def _key_present_ignoring_gate(name):
+    """Whether a key is configured at all (setup's report only; the value is
+    never returned or printed)."""
+    spec = PROVIDERS.get(name) or {}
+    if any(os.environ.get(v, "").strip() for v in spec.get("env", ())):
+        return True
+    cfg = load_user_config()
+    nested = cfg.get("keys") if isinstance(cfg.get("keys"), dict) else {}
+    return any(str(cfg.get(k) or nested.get(k) or "").strip()
+               for k in spec.get("config", ())) or bool(nested.get(name))
+
+
+def paid_disabled_message(name):
+    label = PROVIDERS.get(name, {}).get("label", name)
+    used = PROVIDERS.get(name, {}).get("used_for", "")
+    return (f"{label} ({name}) bills per call and paid calls are off: Reelly "
+            f"runs zero-paid by default. Re-run with --allow-paid (or "
+            f"REELLY_ALLOW_PAID=1) to let this run bill your own key."
+            + (f"\nUsed for: {used}" if used else ""))
 
 
 def missing_key_message(name):
@@ -221,8 +287,11 @@ def missing_key_message(name):
 def provider_key(name):
     """API key for a cloud provider. Never stored in this repo.
 
-    Raises MissingKeyError with the exact env var and signup URL when absent.
+    Raises PaidDisabledError while paid calls are off, MissingKeyError with
+    the exact env var and signup URL when the key is absent.
     """
+    if paid_blocked(name):
+        raise PaidDisabledError(paid_disabled_message(name))
     key = get_key(name)
     if not key:
         raise MissingKeyError(missing_key_message(name))
@@ -335,9 +404,31 @@ def doctor(as_json=False):
                    else "not found (needed for overlay cards). Install Chrome or set CHROME_PATH"),
     })
 
+    paid_on = paid_allowed()
+    checks.append({
+        "id": "paid calls",
+        "status": "ok",
+        "detail": ("ON for this run (--allow-paid / REELLY_ALLOW_PAID): paid "
+                   "providers below may bill your keys" if paid_on else
+                   "OFF (default): no provider below bills; pass --allow-paid "
+                   "to opt in for one run"),
+    })
+    for tool in ("codex", "claude"):
+        found = shutil.which(tool)
+        checks.append({
+            "id": f"{tool} CLI", "status": "ok" if found else "skip",
+            "detail": (f"{found} (subscription editor brain, --brain {tool})"
+                       if found else f"optional: subscription editor brain "
+                                     f"(--brain {tool})"),
+        })
+
     for name, spec in PROVIDERS.items():
-        present = have_key(name)
-        if present:
+        present = have_key(name) if not paid_blocked(name) else bool(
+            _key_present_ignoring_gate(name))
+        if present and paid_blocked(name):
+            status, detail = "skip", (f"key present, idle while paid calls "
+                                      f"are off; {spec['used_for']}")
+        elif present:
             status, detail = "ok", spec["used_for"]
         elif spec["required"]:
             status = "missing"
@@ -358,12 +449,9 @@ def doctor(as_json=False):
             mark = {"ok": "ok     ", "missing": "MISSING", "skip": "skip   "}[c["status"]]
             print(f"  {c['id']:<{width}}  {mark}  {c['detail']}")
         print()
-        print("Required keys (create them, then export — do not commit them):")
-        for name, spec in PROVIDERS.items():
-            if spec["required"]:
-                print(f"  {spec['env'][0]:<22} {spec['url']}")
+        print("No key is required: Reelly runs zero-paid by default.")
         print()
-        print("Optional keys:")
+        print("Optional keys (paid ones bill only with --allow-paid):")
         for name, spec in PROVIDERS.items():
             if not spec["required"]:
                 print(f"  {spec['env'][0]:<22} {spec['url']}")

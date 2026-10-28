@@ -165,12 +165,12 @@ def _text_layers(plan, words):
     layers = []
     hook = plan.get("hook") or {}
     if hook.get("text"):
-        h = captions.block_height(hook["text"], width=980, size=74)
+        h = captions.hook_block_height(hook["text"])
         layers.append((0.0, float(hook.get("show_s", 3.6)),
                        hook_y, hook_y + h, "hook"))
     for o in plan.get("overlay_lines") or []:
         t0 = float(o["t"])
-        h = captions.block_height(o["text"], width=980, size=74)
+        h = captions.hook_block_height(o["text"])
         layers.append((t0, t0 + float(o.get("show_s", 3.0)),
                        hook_y, hook_y + h, f"overlay@{t0:.0f}s"))
     payoff = plan.get("payoff") or {}
@@ -564,6 +564,9 @@ def run(project, tag=None, visual=False):
 
     # perceptual pass (WARN-level: advises the human, never blocks shipping)
     visual_findings = {}
+    if visual and config.paid_blocked("google-genai"):
+        print("[judge] perceptual join review skipped: paid calls are off")
+        visual = False
     if visual:
         from . import visual_qc
         visual_findings = visual_qc.review(root, tag)

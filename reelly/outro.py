@@ -154,9 +154,10 @@ def _typeset_card(cta, path, size=(1080, 1920)):
     W, H = size
     img = Image.new("RGBA", (W, H), (*INK, 153))     # ~60% scrim
     d = ImageDraw.Draw(img)
-    f = captions._font(52)
+    f = captions._font(52, "headline")
     tw = d.textlength(cta, font=f)
-    d.text(((W - tw) / 2, int(H * 0.47)), cta, font=f, fill=(252, 252, 251))
+    d.text(((W - tw) / 2, int(H * 0.47)), cta, font=f,
+           fill=captions.ink("#FCFCFB"))
     img.save(path)
     return path
 

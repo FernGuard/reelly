@@ -15,6 +15,11 @@ from . import captions, config, direct, speech
 MAX_OFFSET_S = 30.0  # beyond this, waveform sync failed rather than found a real lag
 
 
+
+def _brand_accent():
+    from . import brandkit
+    return brandkit.accent()
+
 def run_parallel(items, fn, max_workers=3):
     """Run fn over items on a small thread pool; results in input order.
 
@@ -326,7 +331,7 @@ def _burn(src, dst, cues, hook, workdir, layout=None, payoff=None, overlays=None
     if payoff and payoff.get("jump"):  # C6: mark the jump so it reads as intent
         chip = captions.text_png(">> " + payoff.get("chip", "moments later"),
                                  os.path.join(workdir, "chip.png"),
-                                 width=560, size=42, fill="#17cdff", stroke_w=5)
+                                 width=560, size=42, fill=_brand_accent(), stroke_w=5)
         t0 = payoff["local_t"]
         inputs += ["-i", chip]
         filters.append(f"[{last}][{idx}:v]overlay=(W-w)/2:"

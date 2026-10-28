@@ -115,7 +115,8 @@ def run(project, product="video", music=True):
 
     endtag = captions.text_png(products.PRODUCTS[product]["end_tag"],
                                os.path.join(td, "endtag.png"),
-                               width=900, size=40, fill="#FCFCFB", stroke_w=5)
+                               width=900, size=40, fill=captions.ink("#FCFCFB"),
+                               stroke_w=5, role="cta")
 
     parts = []
     print(f"[long ] {len(keep)} blocks, {media.fmt(full['edited_s'])} target ...")

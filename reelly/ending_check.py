@@ -49,7 +49,10 @@ Answer ONLY JSON:
 
 
 def enabled():
-    return os.environ.get("REELLY_ENDING_CHECK", "").lower() != "off"
+    """On unless REELLY_ENDING_CHECK=off, and only when paid calls are on
+    (the check is a Gemini call)."""
+    return (os.environ.get("REELLY_ENDING_CHECK", "").lower() != "off"
+            and not config.paid_blocked("google-genai"))
 
 
 def _payoff_desc(plan):

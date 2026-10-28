@@ -12,6 +12,14 @@ import pytest
 from reelly import audio_post, cli, config, design, judge, motion
 
 
+@pytest.fixture(autouse=True)
+def _paid_calls_on(monkeypatch):
+    """These tests exercise the paid-provider paths (mocked, nothing bills).
+    Reelly is zero-paid by default, so they opt in the way a real run must."""
+    monkeypatch.setenv("REELLY_ALLOW_PAID", "1")
+
+
+
 # --- gap 1: real-art mode (no invented character over real games / product UI) -
 
 def test_real_art_prompt_forbids_inventing_any_content():
