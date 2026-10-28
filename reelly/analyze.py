@@ -230,12 +230,24 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
     chains = [("session", chain_session), ("transcript", chain_transcript),
               ("scenes", chain_scenes), ("loudness", chain_loudness),
               ("diarize", chain_diarize)]
+    def chain_sight():  # B, zero-paid: subscription / local vision model
+        from . import sight, visual
+        vis_json = os.path.join(an, "visual_review.json")
+        vis_md = os.path.join(an, "visual_review.md")
+        force_vis = force or visual.needs_rerun(vis_json)
+        _step("visual review (free: sight)", vis_json, force_vis,
+              lambda: sight.review(video, vis_json, vis_md, crop=crop, project=name))
+
     if not skip_visual and config.paid_blocked("google-genai"):
-        print("[note] visual review (Gemini) skipped: paid calls are off. "
-              "Pass --allow-paid to run it; picture-only footage then plans "
-              "from scenes and loudness alone")
-        skip_visual = True
-    if not skip_visual:
+        from . import sight
+        if sight.resolve_backend():
+            chains.append(("visual", chain_sight))
+        else:
+            print("[note] visual review skipped: paid calls are off and no free "
+                  "vision backend is available (sign in to codex, or set "
+                  "REELLY_VISION_URL); picture-only footage has nothing to "
+                  "plan from")
+    elif not skip_visual:
         chains.append(("visual", chain_visual))
 
     errors = []

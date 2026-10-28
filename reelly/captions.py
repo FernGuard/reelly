@@ -132,18 +132,50 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
+def wrap_balanced(draw, text, font, max_w):
+    """Same number of lines as the greedy wrap, but the breaks chosen so the
+    lines come out as even as possible: no single word stranded on the last
+    line (a widow), which is how a designer sets a two-line headline.
+    Minimises the widest line, then the spread between lines."""
+    greedy = _wrap(draw, text, font, max_w)
+    words = text.split()
+    n = len(greedy)
+    if n < 2 or len(words) <= n or len(words) > 16 or n > 4:
+        return greedy           # one line, or too long to be a headline
+    width = lambda ws: draw.textlength(" ".join(ws), font=font)
+    best, best_key = greedy, None
+
+    def splits(start, k):
+        if k == 1:
+            yield [words[start:]]
+            return
+        for cut in range(start + 1, len(words) - k + 2):
+            for rest in splits(cut, k - 1):
+                yield [words[start:cut]] + rest
+
+    for lines in splits(0, n):
+        ws = [width(ln) for ln in lines]
+        if max(ws) > max_w:
+            continue
+        key = (round(max(ws)), round(max(ws) - min(ws)))
+        if best_key is None or key < best_key:
+            best, best_key = [" ".join(ln) for ln in lines], key
+    return best
+
+
 def text_png(text, path, width=1000, size=58, fill="white", stroke="black",
-             stroke_w=None, align="center", role=None):
+             stroke_w=None, align="center", role=None, balance=False):
     """Render wrapped text to a tight transparent PNG.
 
     stroke_w=None -> DEFAULT_STYLE["stroke_px"] (thin outline) + the style's
     soft shadow; an explicit stroke_w is honored exactly as passed. role picks
-    the brand font (caption by default; the hook uses headline)."""
+    the brand font (caption by default; the hook uses headline). balance=True
+    sets multi-line text in even lines (headlines: no widows)."""
     stroke_w = _stroke_px(stroke_w)
     font = _font(size, role)
     probe = Image.new("RGBA", (width, 10))
     d = ImageDraw.Draw(probe)
-    lines = _wrap(d, text, font, width - 2 * stroke_w)
+    lines = (wrap_balanced if balance else _wrap)(d, text, font, width - 2 * stroke_w)
     lh = int(size * 1.22)
     h = lh * len(lines) + 2 * stroke_w + 8 + _shadow_pad()
     img = Image.new("RGBA", (width, h), (0, 0, 0, 0))
@@ -350,7 +382,7 @@ def text_extent(text, width, size, role=None):
 
 def hook_png(text, path):
     return text_png(text, path, width=HOOK_WIDTH, size=hook_size(text),
-                    fill=ink("#FCFCFB"), role=HOOK_ROLE)
+                    fill=ink("#FCFCFB"), role=HOOK_ROLE, balance=True)
 
 
 def hook_block_height(text):

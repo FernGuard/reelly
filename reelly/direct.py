@@ -398,9 +398,10 @@ def _json_from_text(text):
     return out if isinstance(out, dict) else None
 
 
-def _ask_cli(tool, prompt, project, label):
+def _ask_cli(tool, prompt, project, label, images=None):
     """One JSON completion from a subscription CLI. $0 per call; logged in
-    the ledger at 0.0 so the run's record still shows every brain call."""
+    the ledger at 0.0 so the run's record still shows every brain call.
+    images: files attached to the prompt (codex only: `-i`)."""
     import shutil
     import subprocess
     import tempfile
@@ -414,8 +415,13 @@ def _ask_cli(tool, prompt, project, label):
                    "-s", "read-only", "-o", out_p]
             if model:
                 cmd += ["-m", model]
-            cmd.append(prompt)
+            for img in images or []:
+                cmd += ["-i", os.path.abspath(img)]
+            # `--`: --image takes several files and would read the prompt as one
+            cmd += ["--", prompt]
         else:
+            if images:
+                raise ValueError("the claude CLI brain takes no images; use codex")
             out_p = None
             cmd = [exe, "-p", "--output-format", "json",
                    "--no-session-persistence", "--strict-mcp-config", prompt]

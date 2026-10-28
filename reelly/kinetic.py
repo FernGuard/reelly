@@ -155,15 +155,17 @@ def _font_face(role):
 
 
 def wrap_lines(text, size, width, role="headline"):
-    """The line breaks the static layer would use (captions._wrap with the
-    same font, size and box), as lists of words. The browser is told these
+    """The line breaks the static layer would use (captions.wrap_balanced
+    with the same font, size and box: even lines, no widow), as lists of
+    words. The browser is told these
     breaks instead of wrapping on its own, so the kinetic text has exactly the
     footprint layout and the collision gate measured."""
     from PIL import Image, ImageDraw
     from . import captions
     stroke = captions._stroke_px(None)
     d = ImageDraw.Draw(Image.new("RGBA", (width, 10)))
-    lines = captions._wrap(d, text, captions._font(size, role), width - 2 * stroke)
+    lines = captions.wrap_balanced(d, text, captions._font(size, role),
+                                   width - 2 * stroke)
     return [ln.split() for ln in lines]
 
 
