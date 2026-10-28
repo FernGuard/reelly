@@ -544,6 +544,9 @@ class _Browser:
             # "Chrome Safe Storage", and from ssh/launchd/CI that raises a
             # keychain dialog on the user's screen once per launch.
             "--use-mock-keychain", "--password-store=basic",
+            # no crash reporter: its handler outlives Chrome and, on Windows,
+            # keeps profile files locked so the work folder cannot be removed
+            "--disable-breakpad", "--disable-crash-reporter",
             "--disable-features=DialMediaRouteProvider,MediaRouter",
             "--allow-file-access-from-files", "--autoplay-policy=no-user-gesture-required",
             "--force-device-scale-factor=1", f"--window-size={W},{H}",

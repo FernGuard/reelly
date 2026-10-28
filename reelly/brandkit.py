@@ -42,7 +42,7 @@ import re
 import threading
 
 KIT_VERSION = 1
-DEFAULT_KIT_DIR = "~/.reelly/brandkit"
+DEFAULT_KIT_DIR = None      # None -> <config.HOME>/brandkit
 
 # Copy contract defaults (memory: copy-rules-on-brand-fun-cta-short). The
 # copy_bank.yaml generated below carries these so a human can tune them per
@@ -61,9 +61,12 @@ FALLBACK_ACCENT = "#17CDFF"     # Blue Smoke, the pre-kit hardcoded accent
 
 
 def kit_dir():
-    """The kit root, resolved at call time so tests/env can redirect it."""
+    """The kit root, resolved at call time so tests/env can redirect it:
+    REELLY_BRANDKIT, else <Reelly home>/brandkit (REELLY_HOME aware)."""
+    from . import config
     return os.path.expanduser(os.environ.get("REELLY_BRANDKIT")
-                              or DEFAULT_KIT_DIR)
+                              or DEFAULT_KIT_DIR
+                              or os.path.join(config.HOME, "brandkit"))
 
 
 def _kit_json():

@@ -229,11 +229,11 @@ html,body{{width:{width}px;height:{height}px;background:transparent;overflow:hid
 <script>/* keeps the page alive for the seek */</script></body></html>"""
 
 
-async def _render(page, frames, width, height, out_dir, still):
+async def _render(page, frames, width, height, out_dir, still, profile):
     """Capture `frames` [(n, t)]; frames inside the still hold reuse one
     capture (hard link)."""
     from . import card
-    async with card._Browser(os.path.join(out_dir, ".profile")) as b:
+    async with card._Browser(profile) as b:
         await b("Emulation.setDeviceMetricsOverride",
                 {"width": width, "height": height, "deviceScaleFactor": 1,
                  "mobile": False})
@@ -282,9 +282,17 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     n = max(1, int(round(dur * fps)))
     frames = [(i, i / fps) for i in range(n)]
     hold_end = exit_t if leave else dur + 1.0
-    asyncio.run(_render(page, frames, cw, ch, out_dir,
-                        (settle, hold_end) if hold_end > settle else None))
-    shutil.rmtree(os.path.join(out_dir, ".profile"), ignore_errors=True)
+    # The browser profile lives OUTSIDE out_dir and is removed best-effort: a
+    # lingering Chrome process can hold its files (Windows), and that must
+    # never fail the caller's own work-folder cleanup.
+    import tempfile
+    profile = tempfile.mkdtemp(prefix="reelly-chrome-")
+    try:
+        asyncio.run(_render(page, frames, cw, ch, out_dir,
+                            (settle, hold_end) if hold_end > settle else None,
+                            profile))
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
     made = len([f for f in os.listdir(out_dir) if f.startswith("k") and f.endswith(".png")])
     if made < n:
         raise RuntimeError(f"kinetic: only {made}/{n} frames rendered for {text!r}")
@@ -324,10 +332,7 @@ def sequence_input(pattern, fps=FPS):
 
 
 def probe_ok():
-    """Cheap self-check used by tests and `setup`: Chrome can be launched."""
-    try:
-        r = subprocess.run([config.CHROME, "--version"], capture_output=True,
-                           text=True, timeout=20)
-        return r.returncode == 0
-    except (OSError, subprocess.SubprocessError, TypeError):
-        return False
+    """Cheap self-check used by tests and `setup`: a Chrome binary exists.
+    (`chrome --version` prints nothing on Windows, so it is not a test.)"""
+    ch = config.CHROME
+    return bool(ch) and (os.path.isfile(ch) or bool(shutil.which(ch)))

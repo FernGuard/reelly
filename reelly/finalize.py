@@ -293,11 +293,16 @@ RAW_CACHE_VERSION = 2
 def _raw_cache_key(plan, video, facecam, follow):
     """Cache key for a cut's concatenated pre-caption raw.mp4: everything the
     segment render depends on. Captions/music/overlay changes do NOT move it."""
+    from . import follow as follow_mod
     st = os.stat(video)
     parts = {"version": RAW_CACHE_VERSION,
              "segments": plan.get("segments"),
              "comp": plan.get("composition"),
              "reframe": plan.get("reframe", 1.0),
+             # the crop path is measured from the source: version + switch
+             "follow_action": (follow_mod.FOLLOW_VERSION if follow_mod.enabled()
+                               else "off"),
+             "focus": plan.get("focus"),
              "follow": bool(follow),
              # facemesh vs blaze frame the facecam crop differently; with no
              # facecam there is no crop to frame, and building a detector here
@@ -448,6 +453,7 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                 with timing.stage(f"{p['id']} segments+concat", tpath):
                     _cut_segments(video, p["segments"], dst, comp=comp,
                                   facecam=facecam, follow_faces=follow,
+                                  focus=p.get("focus"),
                                   reframe=p.get("reframe", 1.0))
             raw = _cached_raw(root, p, sfx,
                               _raw_cache_key(p, video, facecam, follow),

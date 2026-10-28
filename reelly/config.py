@@ -22,7 +22,10 @@ import shutil
 import stat
 import sys
 
-HOME = os.path.expanduser("~/.reelly")
+# REELLY_HOME moves Reelly's per-machine folder (config, kit, caches, runs)
+# without touching the OS home: on Windows, Chrome and other tools break when
+# USERPROFILE is redirected, so isolation must not rely on that.
+HOME = os.path.expanduser(os.environ.get("REELLY_HOME") or "~/.reelly")
 USER_CFG = os.path.join(HOME, "config.json")
 
 # --- binaries ---------------------------------------------------------------

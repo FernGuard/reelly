@@ -47,3 +47,10 @@ def test_ledger_add_works_on_this_platform(tmp_path, monkeypatch):
     ledger.add("codex-cli", "smoke", 0.0, "proj")
     ledger.add("codex-cli", "smoke 2", 0.0, "proj")
     assert len(ledger._load()["entries"]) == 2
+
+
+def test_reelly_home_moves_the_kit_without_touching_the_os_home(monkeypatch, tmp_path):
+    from reelly import brandkit
+    monkeypatch.delenv("REELLY_BRANDKIT", raising=False)
+    monkeypatch.setattr(config, "HOME", str(tmp_path / "rh"))
+    assert brandkit.kit_dir() == os.path.join(str(tmp_path / "rh"), "brandkit")

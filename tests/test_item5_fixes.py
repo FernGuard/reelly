@@ -142,11 +142,11 @@ def test_retry_message_names_the_missing_extra(monkeypatch, tmp_path, capsys):
 
 
 def test_the_suite_never_touches_the_real_home():
-    """tests/conftest.py points HOME at a throwaway folder before import."""
-    from reelly import config
-    home = os.path.expanduser("~")
-    assert "reelly-test-home-" in home
-    assert config.USER_CFG.startswith(home)
+    """tests/conftest.py points REELLY_HOME at a throwaway folder before import."""
+    from reelly import config, slots
+    assert "reelly-test-home-" in config.HOME
+    assert config.USER_CFG.startswith(config.HOME)
+    assert slots.SLOTS_DIR.startswith(config.HOME)
 
 
 # --- footage with no audio track ------------------------------------------------------------
