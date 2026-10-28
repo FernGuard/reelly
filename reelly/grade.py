@@ -14,7 +14,7 @@ import os
 import subprocess
 import tempfile
 
-from . import config
+from . import config, media
 
 # signalstats decodes the sampled range every time; the result only depends
 # on (file identity, range, sample count), so it is cached on disk like
@@ -76,7 +76,8 @@ def _frame_stats_uncached(video, start, duration, n_samples=10):
         r = subprocess.run(
             [config.FFMPEG, "-y", "-hide_banner", "-nostats",
              "-ss", f"{start:.3f}", "-i", video, "-t", f"{duration:.3f}",
-             "-vf", f"fps={fps:.2f},signalstats,metadata=print:file={mpath}",
+             "-vf", f"fps={fps:.2f},signalstats,"
+                    f"metadata=print:file={media.filter_path(mpath)}",
              "-f", "null", "-"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if r.returncode != 0:

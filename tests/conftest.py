@@ -9,6 +9,7 @@ import tempfile
 _REAL_HOME = os.path.expanduser("~")
 _TEST_HOME = tempfile.mkdtemp(prefix="reelly-test-home-")
 os.environ["HOME"] = _TEST_HOME
+os.environ["USERPROFILE"] = _TEST_HOME     # what expanduser reads on Windows
 # model caches stay where they are: nothing in the suite should download, and
 # a fresh HOME must not turn a stray cache lookup into a 1.4 GB fetch
 os.environ.setdefault("HF_HOME", os.path.join(_REAL_HOME, ".cache", "huggingface"))

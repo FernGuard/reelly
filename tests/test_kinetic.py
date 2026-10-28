@@ -71,6 +71,16 @@ def test_wrap_lines_matches_the_static_wrap():
     assert len(lines) >= 2
 
 
+def test_headless_chrome_never_touches_the_keychain():
+    """From ssh or a background job a keychain access raises a dialog on the
+    user's screen; every headless launch passes the mock keychain."""
+    import inspect
+    from reelly import card, overlays
+    for src in (inspect.getsource(card._Browser.__aenter__),
+                inspect.getsource(overlays)):
+        assert "--use-mock-keychain" in src and "--password-store=basic" in src
+
+
 def test_off_switch(monkeypatch):
     monkeypatch.setenv("REELLY_KINETIC", "off")
     assert kinetic.enabled() is False

@@ -116,14 +116,18 @@ def test_paid_brain_with_opt_in_is_kept(monkeypatch):
     assert direct.resolve_brain("gemini") == "gemini"
 
 
-def test_auto_prefers_codex_then_claude_then_heuristics(monkeypatch):
+def test_auto_uses_codex_and_never_probes_claude(monkeypatch):
+    """claude's sign-in check reads the macOS keychain (a dialog from ssh),
+    so auto never probes it; it must be asked for by name."""
+    probed = []
     ready = {"codex": False, "claude": True}
-    monkeypatch.setattr(direct, "cli_ready", lambda tool: ready[tool])
-    assert direct.resolve_brain("auto") == "claude"
+    monkeypatch.setattr(direct, "cli_ready",
+                        lambda tool: (probed.append(tool), ready[tool])[1])
+    assert direct.resolve_brain("auto") is None
+    assert probed == ["codex"]
     ready["codex"] = True
     assert direct.resolve_brain("auto") == "codex"
-    ready.update(codex=False, claude=False)
-    assert direct.resolve_brain("auto") is None
+    assert direct.resolve_brain("claude") == "claude"
 
 
 def test_named_cli_brain_not_signed_in_falls_back(monkeypatch):

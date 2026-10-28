@@ -6,8 +6,9 @@ stop meaning anything when several projects run in parallel: N runs bring
 N budgets and everything crawls while looking stuck. These pools live in
 ~/.reelly/slots/ and are shared by every reelly process on the machine.
 
-flock-based on purpose: a killed or crashed process releases its slot the
-moment its fd closes, so there is no stale-lock cleanup and no daemon. A
+flock-based on purpose (msvcrt byte locks on Windows, same semantics): a
+killed or crashed process releases its slot the moment its fd closes, so
+there is no stale-lock cleanup and no daemon. A
 long wait heartbeats the run log and says what it is waiting for, so a
 slot queue reads as "waiting", never as "hung".
 
@@ -16,15 +17,51 @@ Pools (defaults match today's single-run behaviour; only STACKED runs share):
   render  5 slots  segment cut+encode renders  (REELLY_RENDER_SLOTS)
 """
 import contextlib
-import fcntl
 import os
 import time
+
+try:                        # POSIX
+    import fcntl
+except ImportError:         # Windows
+    fcntl = None
+    import msvcrt
 
 from . import config
 
 SLOTS_DIR = os.path.join(config.HOME, "slots")
 POOLS = {"decode": 2, "render": 5}
 _WAIT_NOTE_S = 10  # say something (and heartbeat) after this long in the queue
+
+
+def _try_lock(f):
+    """Non-blocking exclusive lock on an open slot file; raises OSError when
+    another holder has it."""
+    if fcntl is not None:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    else:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+
+
+def _lock_blocking(f):
+    """Blocking exclusive lock (released when the file closes)."""
+    if fcntl is not None:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        return
+    while True:
+        try:
+            _try_lock(f)
+            return
+        except OSError:
+            time.sleep(0.05)
+
+
+def _unlock(f):
+    if fcntl is not None:
+        fcntl.flock(f, fcntl.LOCK_UN)
+    else:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _pool_size(pool):
@@ -47,9 +84,9 @@ def hold(pool, label=""):
     fh, t0, noted = None, time.monotonic(), 0.0
     while fh is None:
         for i in range(n):
-            f = open(os.path.join(SLOTS_DIR, f"{pool}.{i}"), "w")
+            f = open(os.path.join(SLOTS_DIR, f"{pool}.{i}"), "a+")
             try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _try_lock(f)
                 fh = f
                 break
             except OSError:
@@ -68,7 +105,7 @@ def hold(pool, label=""):
         yield
     finally:
         try:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+            _unlock(fh)
         except OSError:
             pass
         fh.close()

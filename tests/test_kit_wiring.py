@@ -174,7 +174,8 @@ def test_register_bed_then_find_bed_roundtrip(music_kit, tmp_path):
     src = tmp_path / "bed.mp3"
     src.write_bytes(b"lofi-bytes")
     dst = brandkit.register_bed(str(src), "lofi", 42.5)
-    assert dst and os.path.exists(dst) and "/music/lofi/" in dst
+    assert dst and os.path.exists(dst) and \
+        os.path.join("music", "lofi") + os.sep in dst
     man = brandkit.music_manifest()
     assert man["beds"][0]["genre"] == "lofi"
     assert man["beds"][0]["duration_s"] == 42.5

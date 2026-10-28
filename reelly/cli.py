@@ -67,9 +67,10 @@ class _CutGfx:
 
 
 BRAINS = ["auto", "codex", "claude", "gemini", "gpt"]
-BRAIN_HELP = ("editor brain: auto (default) uses a signed-in subscription CLI "
-              "(codex, then claude) and falls back to heuristics; gemini and "
-              "gpt bill per call and need --allow-paid")
+BRAIN_HELP = ("editor brain: auto (default) uses the signed-in codex CLI "
+              "(subscription) and falls back to heuristics; claude must be "
+              "asked for by name; gemini and gpt bill per call and need "
+              "--allow-paid")
 
 
 def _global_flags(argv):

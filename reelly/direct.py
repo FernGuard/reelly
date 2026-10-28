@@ -363,7 +363,9 @@ def cli_ready(tool):
 def resolve_brain(brain):
     """The brain this run will actually use, or None for heuristics only.
 
-    auto -> codex, then claude (whichever is signed in), else None.
+    auto -> codex when signed in, else None. claude only when asked for by
+    name: its sign-in check reads the macOS keychain, which from ssh or a
+    background job raises a dialog on the user's screen.
     codex/claude asked for by name but not signed in -> None, said loudly.
     gemini/gpt without --allow-paid -> SystemExit with the opt-in message."""
     brain = brain or "auto"
@@ -371,7 +373,7 @@ def resolve_brain(brain):
         if config.paid_blocked(PAID_BRAINS[brain]):
             raise SystemExit(config.paid_disabled_message(PAID_BRAINS[brain]))
         return brain
-    order = ("codex", "claude") if brain == "auto" else (brain,)
+    order = ("codex",) if brain == "auto" else (brain,)
     for tool in order:
         if cli_ready(tool):
             return tool

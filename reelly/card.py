@@ -540,6 +540,11 @@ class _Browser:
         self.proc = await asyncio.create_subprocess_exec(
             CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
             "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+            # Never touch the OS keychain: a fresh profile on macOS asks for
+            # "Chrome Safe Storage", and from ssh/launchd/CI that raises a
+            # keychain dialog on the user's screen once per launch.
+            "--use-mock-keychain", "--password-store=basic",
+            "--disable-features=DialMediaRouteProvider,MediaRouter",
             "--allow-file-access-from-files", "--autoplay-policy=no-user-gesture-required",
             "--force-device-scale-factor=1", f"--window-size={W},{H}",
             f"--remote-debugging-port={self.port}",

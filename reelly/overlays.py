@@ -330,6 +330,8 @@ def _render_png(workdir, name, body, size=None):
                         .replace("BODY", body))
     dst = os.path.join(workdir, name + ".png")
     subprocess.run([CHROME, "--headless", "--disable-gpu", "--hide-scrollbars",
+                    # no OS keychain: from ssh/launchd it raises a dialog per launch
+                    "--use-mock-keychain", "--password-store=basic",
                     "--default-background-color=00000000", f"--window-size={w},{h}",
                     "--virtual-time-budget=6000", f"--screenshot={dst}", f"file://{hp}"],
                    check=True, capture_output=True)

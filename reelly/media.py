@@ -37,6 +37,17 @@ def duration(path):
     return float(probe(path).get("format", {}).get("duration", 0) or 0)
 
 
+def filter_path(path):
+    """A file path safe to put INSIDE an ffmpeg filter option
+    (metadata=print:file=..., movie=...). The filtergraph parser strips one
+    level of escaping before the option parser sees the value, so the value
+    is single-quoted (the graph level) with its colons escaped inside (the
+    option level): C:\\x.txt -> 'C\\:/x.txt'. Forward slashes throughout;
+    a quote in the path closes, escapes and reopens the quoting."""
+    p = str(path).replace("\\", "/").replace(":", "\\:")
+    return "'" + p.replace("'", "'\\\\''") + "'"
+
+
 def has_audio(path):
     """True when the file carries at least one audio stream. Silent gameplay
     captures and screen grabs often carry none."""

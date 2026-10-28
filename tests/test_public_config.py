@@ -75,6 +75,7 @@ def test_doctor_never_prints_secrets(monkeypatch, tmp_path, capsys):
     assert "sk-test" not in out
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; Windows uses ACLs")
 def test_write_user_config_is_owner_only(tmp_path):
     path = tmp_path / "config.json"
     config.write_user_config({"openai_api_key": "x"}, path=str(path))

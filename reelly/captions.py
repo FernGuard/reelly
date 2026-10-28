@@ -7,9 +7,13 @@ from PIL import Image, ImageDraw, ImageFont
 from . import layout as _layout
 
 FONTS = [
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",       # macOS
     "/System/Library/Fonts/Helvetica.ttc",
     "/System/Library/Fonts/SFNS.ttf",
+    "C:\\Windows\\Fonts\\arialbd.ttf",                         # Windows
+    "C:\\Windows\\Fonts\\segoeuib.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",    # Linux
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 ]
 
 # "Dynamic minimalism" (the 2026 taste bar): clean sans, white text with ONE
