@@ -31,19 +31,60 @@ It is:
 
 FRAME_W, FRAME_H = 1080, 1920
 
-# Social-platform safe area (G2/CO3). Nothing of ours is placed outside it.
-SAFE_TOP = 220        # handle / status / "Following|For You"
-SAFE_BOTTOM = 1620    # above the caption block + nav bar
-SAFE_RIGHT = 940      # left of the like/comment/share rail
+# ONE layout that holds on TikTok, Reels AND Shorts (owner decision
+# 2026-10-28): the platform chrome is modelled as REGIONS, the union of all
+# three, and no text of ours may enter any of them. Practitioner safe-zone
+# guides, not official specs (none exist for organic posts); check a real
+# phone before publishing. Per platform (1080x1920):
+#   header   TikTok ~130-220, Reels ~270, Shorts ~288 tall
+#   bottom   TikTok from ~1440, Reels ~1250, Shorts ~1248 (caption, handle,
+#            sound, nav)
+#   rail     TikTok/Reels ~120-140 wide, Shorts ~192; the like/comment/share
+#            column lives in the LOWER part of the screen, not the top band
+UI_ZONES = {
+    "header": (0, 0, 1080, 288),
+    "bottom_ui": (0, 1250, 1080, 1920),
+    "right_rail": (888, 800, 1080, 1920),
+    "left_edge": (0, 0, 60, 1920),
+}
+SAFE_TOP = 288        # below the tallest header (Shorts)
+SAFE_BOTTOM = 1250    # above the tallest caption/nav block (Reels, Shorts)
+SAFE_RIGHT = 940      # right edge above the rail (top half)
 SAFE_LEFT = 60
+RAIL_X, RAIL_Y = 888, 800   # the action rail: x >= RAIL_X from y >= RAIL_Y
+
+
+def safe_span(y0, y1):
+    """(x0, x1) free of platform chrome for a band of rows y0..y1."""
+    right = RAIL_X if y1 > RAIL_Y else SAFE_RIGHT
+    return SAFE_LEFT, right
+
+
+def centered_width(y0, y1):
+    """Widest box CENTRED on the frame that stays inside safe_span: text
+    layers are centred, so the narrower side sets the width."""
+    x0, x1 = safe_span(y0, y1)
+    mid = FRAME_W // 2
+    return 2 * min(mid - x0, x1 - mid)
+
+
+def ui_hits(x0, y0, x1, y1):
+    """Names of the UI_ZONES a box overlaps (empty = safe)."""
+    return [name for name, (a, b, c, d) in UI_ZONES.items()
+            if x0 < c and x1 > a and y0 < d and y1 > b]
 
 GAME_LABEL_H = 64     # the small persistent game-name strip
 LINE_H = 130          # rough two-line text-block height, for band reservation
 
 # Full-frame / fallback text bands: a reframed 16:9 picture sits mid-frame with
-# near-black bars above and below. Text lives in the bars / thirds.
-FULL_CENTER = (210, 470)
-FULL_BOTTOM = (1300, 1580)
+# near-black bars above and below. Text lives in the bars / thirds. The hook
+# band starts below the tallest platform header; the game-name strip sits
+# under it, still in the top bar of a 1.5x reframe (picture from y 504). The
+# bottom band ends above the tallest caption/nav block, so on a reframed
+# 16:9 it overlaps the picture's lower edge: captioned cuts pay that price to
+# stay readable on every platform.
+FULL_CENTER = (SAFE_TOP + 2, 430)
+FULL_BOTTOM = (1110, SAFE_BOTTOM)
 
 
 def _split_geometry(comp):
@@ -62,11 +103,10 @@ def _zones_split(comp):
     ch, scr_y, out_h = _split_geometry(comp)
     gl0 = max(ch + 8, scr_y - GAME_LABEL_H)
     below0 = scr_y + out_h
-    # Karaoke goes in the neutral band BELOW the screen (off the footage), even
-    # though it dips into the platform's lower zone -- that beats sitting on the
-    # gameplay. Only fall back (bottom=None -> thirds) when the screen runs so
-    # low there is genuinely no band beneath it.
-    BOTTOM_FLOOR = FRAME_H - 40
+    # Karaoke goes in the neutral band BELOW the screen (off the footage), and
+    # that band must end above the platform caption/nav block (SAFE_BOTTOM).
+    # With no room there (bottom=None) the karaoke falls back to the thirds.
+    BOTTOM_FLOOR = SAFE_BOTTOM
     bottom = ((below0 + 8, BOTTOM_FLOOR)
               if (BOTTOM_FLOOR - below0) >= 110 else None)
     return {"center": (ch + 8, gl0 - 8),
@@ -77,7 +117,7 @@ def _zones_split(comp):
 def _zones_full(comp):
     """No-facecam / fallback: letterbox bars (preferred) as text zones."""
     return {"center": FULL_CENTER,
-            "game_label": (FULL_CENTER[1] - GAME_LABEL_H, FULL_CENTER[1]),
+            "game_label": (FULL_CENTER[1], FULL_CENTER[1] + GAME_LABEL_H),
             "bottom": FULL_BOTTOM}
 
 

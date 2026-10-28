@@ -4,6 +4,8 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont
 
+from . import layout as _layout
+
 FONTS = [
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
@@ -160,8 +162,13 @@ def text_png(text, path, width=1000, size=58, fill="white", stroke="black",
     return path
 
 
+# Caption cues sit in the bottom band, beside the platforms' action rail, so
+# their box is the centred width the layout allows there (not the full 960).
+CUE_WIDTH = _layout.centered_width(*_layout.FULL_BOTTOM)
+
+
 def cue_png(text, path):
-    return text_png(text, path, width=960, size=56)
+    return text_png(text, path, width=CUE_WIDTH, size=56)
 
 
 def block_height(text, width=1000, size=58, stroke_w=None, role=None):
@@ -237,7 +244,7 @@ def ink(default="#FCFCFB"):
         return default
 
 
-def karaoke_png(word_texts, hi_index, path, width=960, size=56,
+def karaoke_png(word_texts, hi_index, path, width=None, size=56,
                 accent=None, fill="white", stroke="black", stroke_w=None):
     """Cue text with the currently spoken word highlighted in Hot Pink (M4
     word-highlight captions, the researched short-form norm).
@@ -247,6 +254,7 @@ def karaoke_png(word_texts, hi_index, path, width=960, size=56,
     -- and mixed case exactly as spoken. accent=None means the karaoke highlight
     (Hot Pink); pass an explicit accent to override. stroke_w=None means the
     style's thin outline + soft shadow (the old 6px slab read dated)."""
+    width = width or CUE_WIDTH
     accent = accent or karaoke_highlight()
     if fill == "white":
         fill = ink("white")
@@ -315,18 +323,29 @@ HOOK_ROLE = "headline"
 # x 140..940. A wide display face fits by stepping the size down (to a floor)
 # before it is allowed to wrap, because the layout gives the hook ONE line
 # slot with the game-name strip right under it.
-HOOK_WIDTH, HOOK_SIZE, HOOK_MIN_SIZE = 800, 74, 58
+HOOK_WIDTH = _layout.centered_width(*_layout.FULL_CENTER)      # 800
+HOOK_SIZE, HOOK_MIN_SIZE = 74, 58
 
 
-def hook_size(text):
+def hook_size(text, width=None):
     """Largest size from HOOK_SIZE down to HOOK_MIN_SIZE at which the hook
-    sets on one line inside HOOK_WIDTH (HOOK_MIN_SIZE if none does)."""
+    sets on one line inside `width` (HOOK_WIDTH by default)."""
+    width = width or HOOK_WIDTH
     stroke_w = _stroke_px(None)
-    probe = ImageDraw.Draw(Image.new("RGBA", (HOOK_WIDTH, 10)))
+    probe = ImageDraw.Draw(Image.new("RGBA", (width, 10)))
     for size in range(HOOK_SIZE, HOOK_MIN_SIZE - 1, -2):
-        if probe.textlength(text, font=_font(size, HOOK_ROLE)) <= HOOK_WIDTH - 2 * stroke_w:
+        if probe.textlength(text, font=_font(size, HOOK_ROLE)) <= width - 2 * stroke_w:
             return size
     return HOOK_MIN_SIZE
+
+
+def text_extent(text, width, size, role=None):
+    """Widest rendered line of a text block (same wrap as text_png), px."""
+    stroke_w = _stroke_px(None)
+    font = _font(size, role)
+    d = ImageDraw.Draw(Image.new("RGBA", (width, 10)))
+    lines = _wrap(d, text, font, width - 2 * stroke_w) or [""]
+    return int(max(d.textlength(ln, font=font) for ln in lines)) + 2 * stroke_w
 
 
 def hook_png(text, path):

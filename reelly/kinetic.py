@@ -300,12 +300,14 @@ def hook_line(text, out_dir, dur, hot=None, enter=True, hot_reason=None,
                        hot=hot, enter=enter, hot_reason=hot_reason, label=label)
 
 
-def cta_line(text, out_dir, dur, hot=None, hot_reason=None):
+def cta_line(text, out_dir, dur, hot=None, hot_reason=None, y=902):
     """The end-card call to action: words enter, the ACTION word pops in the
-    accent, and the line holds to the last frame (it never leaves)."""
-    from . import captions
-    return render_line(text, out_dir, dur, size=captions.hook_size(text),
-                       width=captions.HOOK_WIDTH, role=captions.HOOK_ROLE,
+    accent, and the line holds to the last frame (it never leaves). Its box is
+    the centred width the layout allows at its height (beside the rail)."""
+    from . import captions, layout
+    width = layout.centered_width(y, y + 120)
+    return render_line(text, out_dir, dur, size=captions.hook_size(text, width),
+                       width=width, role=captions.HOOK_ROLE,
                        hot=hot, enter=True, leave=False, kind="cta",
                        hot_reason=hot_reason, label="cta")
 

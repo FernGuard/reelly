@@ -202,7 +202,8 @@ def _kinetic_cta(plan, product, workdir, len_s):
             workdir, f"{plan.get('id', 'cut')}_outro_scrim.png"), draw_text=False)
         pattern, _, _, pad = kinetic.cta_line(
             cta, os.path.join(workdir, "kin_cta"), len_s,
-            hot=plan.get("cta_hot"), hot_reason=plan.get("cta_hot_reason"))
+            hot=plan.get("cta_hot"), hot_reason=plan.get("cta_hot_reason"),
+            y=int(1920 * CTA_Y_FRAC))
         return scrim, (pattern, int(1920 * CTA_Y_FRAC) - pad)
     except Exception as e:   # noqa: BLE001 -- static card instead
         print(f"[outro] kinetic CTA failed ({e}); static card instead")

@@ -29,12 +29,14 @@ from . import config
 
 W, H = 1080, 1920
 # Platform chrome (G2/CO3). Nothing of ours is placed outside this.
-SAFE = {"top": 200, "bottom": 1500, "left": 60, "right": 940}
+from . import layout as _safe   # the ONE safe area (layout.UI_ZONES)
+SAFE = {"top": _safe.SAFE_TOP, "bottom": _safe.SAFE_BOTTOM,
+        "left": _safe.SAFE_LEFT, "right": _safe.SAFE_RIGHT}
 COLS, ROWS = 12, 24          # grid over the frame; cell is 90 x 80 px
 # Karaoke cues are drawn centred at y=1430 and wrap to two lines on a long
 # phrase, so the band they can occupy is much taller than one line. Reserving
 # only the single line is how an end card ended up sitting on top of a caption.
-CAPTION_BAND = (1315, 1580)
+CAPTION_BAND = tuple(_safe.FULL_BOTTOM)   # where the layout burns caption cues
 SAMPLE_W = 360               # analyse at 1/3 scale, plenty for a detail map
 
 INK, PAPER, ACCENT, MARKER = "#090c0a", "#FCFCFB", "#17cdff", "#ffd60a"

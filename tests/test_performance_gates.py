@@ -181,13 +181,17 @@ def test_no_cta_means_no_clamp():
     assert overlays.clear_for_endcard((16.0, 24.0), 26.0, False) == (16.0, 24.0)
 
 
-def test_end_card_zone_is_the_lower_third():
-    """CTAs go where a thumb already is, not wherever the frame is calmest."""
+def test_end_card_sits_as_low_as_the_shared_safe_area_allows():
+    """CTAs go where a thumb already is, not wherever the frame is calmest --
+    but never under the platform caption/nav block (one layout for TikTok,
+    Reels and Shorts ends at SAFE["bottom"]). A card taller than the lower
+    band is bottom-aligned to the safe edge."""
     from reelly import placement as P
     g = [[(60.0, 5.0)] * P.COLS for _ in range(P.ROWS)]
     x, y, _ = P.best_box(g, 700, 180, bands=[], avoid=(),
                          band=(int(P.H * 0.60), P.SAFE["bottom"]))
-    assert y >= P.H * 0.60 and y + 180 <= P.SAFE["bottom"]
+    assert y + 180 <= P.SAFE["bottom"]
+    assert y >= P.SAFE["bottom"] - 180 - 16
 
 
 def test_end_card_never_lands_on_the_caption_band():

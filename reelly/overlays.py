@@ -28,7 +28,9 @@ ACCENT = "#17cdff"      # brand accent (Blue Smoke), shared with placement.py
 # Platform-safe zone for 1080x1920 (TikTok/Reels/Shorts chrome consensus).
 # Floating text lives inside these bounds; only content-anchored marks may
 # enter the margins, never their labels. (G2)
-SAFE_TOP, SAFE_BOTTOM_Y, SAFE_RIGHT_X, SAFE_LEFT_X = 200, 1500, 940, 60
+from . import layout as _safe   # the ONE safe area (layout.UI_ZONES)
+SAFE_TOP, SAFE_BOTTOM_Y, SAFE_RIGHT_X, SAFE_LEFT_X = (
+    _safe.SAFE_TOP, _safe.SAFE_BOTTOM, _safe.SAFE_RIGHT, _safe.SAFE_LEFT)
 FADE = 0.22
 
 HEAD = """<!doctype html><html><head><meta charset="utf-8">

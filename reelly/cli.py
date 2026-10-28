@@ -376,7 +376,20 @@ def main(argv=None):
                     help="start brand.json fresh instead of updating it")
     brs.add_parser("list", help="list the brands in the local kit")
 
+    sz_ = sub.add_parser("safezones", help="draw the TikTok/Reels/Shorts chrome "
+                                           "over frames of a render (proof sheet)")
+    sz_.add_argument("video")
+    sz_.add_argument("--at", default="0,1,5,9",
+                     help="comma list of seconds to sample (default 0,1,5,9)")
+    sz_.add_argument("--out", help="PNG path (default <video>_safezones.png)")
+
     args = ap.parse_args(argv)
+    if args.cmd == "safezones":
+        from . import safezones
+        times = [float(x) for x in args.at.split(",") if x.strip()]
+        out = args.out or os.path.splitext(args.video)[0] + "_safezones.png"
+        print(safezones.sheet(args.video, times, out))
+        return
     if args.cmd == "brand":
         import json as _json
         from . import brandkit

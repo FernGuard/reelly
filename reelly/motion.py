@@ -276,18 +276,21 @@ def _image_request(model, prompt, refs=(), num_images=1, aspect="9:16"):
 # be low. The right rail is heavier than the left (like/share/comment buttons
 # live there). The CTA keeps its own lower band but now also clears faces.
 FRAME_W, FRAME_H = 1080, 1920
-SAFE_TOP = 120             # px clearance from the top edge
-SAFE_BOTTOM = 320          # px clearance from the bottom edge
-SAFE_LEFT = 60
-SAFE_RIGHT = 120
+# Clearances from the frame edges, derived from the ONE safe area
+# (layout.UI_ZONES): header, caption/nav block, left edge, action rail.
+from . import layout as _safe
+SAFE_TOP = _safe.SAFE_TOP                          # 288
+SAFE_BOTTOM = _safe.FRAME_H - _safe.SAFE_BOTTOM    # 670
+SAFE_LEFT = _safe.SAFE_LEFT                        # 60
+SAFE_RIGHT = _safe.FRAME_W - _safe.RAIL_X          # 192
 # A lettering line is CENTRED on the frame (CSS left:50%/translateX(-50%)), so
-# the rail it reaches first is the closer of the two -- the 120px right rail,
-# not the 60px left. The widest a centred line can be without crossing either is
+# the rail it reaches first is the closer of the two -- the right action rail
+# (192px at its widest, Shorts), not the 60px left. The widest a centred line can be without crossing either is
 # twice its distance to the nearer rail. The old gate compared width against
 # FRAME_W-SAFE_LEFT-SAFE_RIGHT (=900), which is the width of a LEFT-ANCHORED safe
 # box; a centred 900px line still overran the right action rail by 30px.
 MAX_LETTER_W = int(2 * min(FRAME_W / 2 - SAFE_LEFT,
-                           (FRAME_W - SAFE_RIGHT) - FRAME_W / 2))  # = 840
+                           (FRAME_W - SAFE_RIGHT) - FRAME_W / 2))  # = 696
 # Reserved layout zones (reviewer 2026-08-13): the frame is three bands -- a TOP
 # text band (hook/payoff), a MIDDLE subject band, and a BOTTOM CTA band. Text
 # lives ONLY in the top/bottom bands and the subject ONLY in the middle, so type

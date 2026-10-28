@@ -154,39 +154,92 @@ def caption_coverage(plan, words):
             f"{in_cues}/{len(wtl)} words reach cues")
 
 
-def _text_layers(plan, words):
+def _text_layers(plan, words, with_x=False):
     """Every burned text layer as (t0, t1, y0, y1, label), mirroring the
-    geometry _burn_final actually renders (same y anchors, same wrap)."""
-    from . import captions, speech
+    geometry the render actually uses: y anchors from the ONE layout
+    authority (layout.plan_text, which finalize reads), the same wrap and
+    fonts. with_x=True appends (x0, x1) of the drawn text, centred."""
+    from . import captions, layout as _layout, speech
     from .finalize import _shifted_words
     comp = plan.get("composition")
-    layout = comp.get("cam") if comp else None
-    hook_y, cue_y = (40, 820) if layout == "split" else (210, 1430)
+    template = comp.get("cam") if comp else None
+    L = _layout.plan_text(plan, template)
+    hook_y = L.get("hook", {}).get("y", _layout.FULL_CENTER[0] + 6)
+    cue_y = L.get("karaoke", {}).get("y", _layout.FULL_BOTTOM[0] + 6)
+    mid = _layout.FRAME_W // 2
     layers = []
+
+    def add(t0, t1, y0, h, label, text_w):
+        row = (t0, t1, int(y0), int(y0 + h), label)
+        if with_x:
+            row += (int(mid - text_w / 2), int(mid + text_w / 2))
+        layers.append(row)
+
     hook = plan.get("hook") or {}
     if hook.get("text"):
-        h = captions.hook_block_height(hook["text"])
-        layers.append((0.0, float(hook.get("show_s", 3.6)),
-                       hook_y, hook_y + h, "hook"))
+        size = captions.hook_size(hook["text"])
+        add(0.0, float(hook.get("show_s", 3.6)), hook_y,
+            captions.hook_block_height(hook["text"]), "hook",
+            captions.text_extent(hook["text"], captions.HOOK_WIDTH, size,
+                                 captions.HOOK_ROLE))
     for o in plan.get("overlay_lines") or []:
         t0 = float(o["t"])
-        h = captions.hook_block_height(o["text"])
-        layers.append((t0, t0 + float(o.get("show_s", 3.0)),
-                       hook_y, hook_y + h, f"overlay@{t0:.0f}s"))
+        size = captions.hook_size(o["text"])
+        add(t0, t0 + float(o.get("show_s", 3.0)), hook_y,
+            captions.hook_block_height(o["text"]), f"overlay@{t0:.0f}s",
+            captions.text_extent(o["text"], captions.HOOK_WIDTH, size,
+                                 captions.HOOK_ROLE))
+    gname = str(plan.get("game_name") or "").strip()
+    if gname and "game_name" in L:
+        content = float(plan.get("content_s") or plan.get("duration_s") or 0)
+        add(0.0, content, L["game_name"]["y"],
+            captions.block_height(gname, width=760, size=40, stroke_w=6),
+            "game_name", captions.text_extent(gname, 760, 40))
     payoff = plan.get("payoff") or {}
     if payoff.get("jump") and payoff.get("local_t") is not None:
         t0 = float(payoff["local_t"])
-        chip_y = 970 if layout == "split" else 1310
-        h = captions.block_height(">> " + payoff.get("chip", "moments later"),
-                                  width=560, size=42, stroke_w=5)
-        layers.append((t0, t0 + 1.6, chip_y, chip_y + h, "payoff_chip"))
+        chip_y = cue_y - 4                    # as finalize._burn_events places it
+        chip = ">> " + payoff.get("chip", "moments later")
+        add(t0, t0 + 1.6, chip_y,
+            captions.block_height(chip, width=560, size=42, stroke_w=5),
+            "payoff_chip", captions.text_extent(chip, 560, 42))
     if plan.get("captions") != "none":
         wtl, _ = _shifted_words(words, plan["segments"])
         for s, e, wlist in speech.group_cue_words(wtl):
             text = " ".join(w["t"] for w in wlist)
-            h = captions.block_height(text, width=960, size=56)
-            layers.append((s, e, cue_y, cue_y + h, f"cue@{s:.1f}s"))
+            add(s, e, cue_y,
+                captions.block_height(text, width=captions.CUE_WIDTH, size=56),
+                f"cue@{s:.1f}s", captions.text_extent(text, captions.CUE_WIDTH, 56))
     return layers
+
+
+def ui_zones(plan, words):
+    """No text of ours may sit under platform chrome (layout.UI_ZONES, the
+    union of the TikTok, Reels and Shorts header, caption/nav block and action
+    rail). Burned layers plus the end-card CTA when the outro is typeset."""
+    from . import captions, layout as _layout, outro as outro_mod
+    bad = []
+    rows = _text_layers(plan, words, with_x=True)
+    ob = plan.get("outro") or {}
+    cta = (plan.get("cta") or "").strip()
+    if ob and cta and outro_mod.card_kind(plan, None) == "typeset":
+        y = int(_layout.FRAME_H * outro_mod.CTA_Y_FRAC)
+        width = _layout.centered_width(y, y + 120)
+        size = captions.hook_size(cta, width)
+        w = captions.text_extent(cta, width, size, captions.HOOK_ROLE)
+        h = captions.block_height(cta, width=width, size=size, role=captions.HOOK_ROLE)
+        mid = _layout.FRAME_W // 2
+        rows.append((0, 0, y, y + h, "end_card_cta",
+                     int(mid - w / 2), int(mid + w / 2)))
+    # the drawn glyphs, not the padded PNG box: trim the shadow/stroke pad
+    for _, _, y0, y1, label, x0, x1 in rows:
+        hits = _layout.ui_hits(x0, y0 + 4, x1, y1 - captions._shadow_pad() - 4)
+        if hits:
+            bad.append(f"{label} (x {x0}-{x1}, y {y0}-{y1}) enters {', '.join(hits)}")
+    if bad:
+        return ("ui_zones", "FAIL", "; ".join(bad[:4]))
+    return ("ui_zones", "PASS",
+            f"{len(rows)} text layer(s) clear of the TikTok/Reels/Shorts chrome")
 
 
 def caption_collisions(plan, words, t_eps=0.05):
@@ -527,6 +580,7 @@ def run(project, tag=None, visual=False):
         if plan:
             rep["results"].append(caption_coverage(plan, words))
             rep["results"].append(caption_collisions(plan, words))
+            rep["results"].append(ui_zones(plan, words))
             rep["results"].append(plain.verdict(plan))
             rep["results"].append(retention.bait(plan))
             rep["results"].append(safety.verdict(plan))
