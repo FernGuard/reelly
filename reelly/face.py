@@ -67,9 +67,72 @@ def _detector():
     return vision.FaceDetector.create_from_options(opts)
 
 
+def _probe():
+    """Child-process body for mediapipe_usable: build the detectors and run
+    them once on a blank frame. A process that survives this can use them."""
+    import numpy as np
+    from mediapipe.tasks.python import BaseOptions, vision
+    import mediapipe as mp
+    frame = mp.Image(image_format=mp.ImageFormat.SRGB,
+                     data=np.zeros((64, 64, 3), dtype=np.uint8))
+    if os.path.exists(MESH_MODEL):
+        lm = vision.FaceLandmarker.create_from_options(
+            vision.FaceLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=MESH_MODEL), num_faces=1))
+        lm.detect(frame)
+    if os.path.exists(MODEL):
+        fd = _detector()
+        fd.detect(frame)
+    return True
+
+
+@functools.lru_cache(maxsize=1)
+def mediapipe_usable():
+    """Can this PROCESS run mediapipe face detection without dying?
+
+    mediapipe does not raise when it cannot reach a GPU service (macOS over
+    ssh, headless CI): a C++ CHECK aborts the whole interpreter, so no
+    try/except can catch it and a render dies mid-cut. So the first use is a
+    probe in a CHILD process; if the child is killed, face detection is off
+    for this run and every face path degrades to "no face found".
+    REELLY_FACE=off skips detection; REELLY_FACE=on trusts it without a probe."""
+    import subprocess
+    import sys
+    mode = os.environ.get("REELLY_FACE", "").strip().lower()
+    if mode in ("off", "0", "no"):
+        return False
+    if mode in ("on", "1", "yes"):
+        return True
+    pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = pkg_parent + (os.pathsep + env["PYTHONPATH"]
+                                      if env.get("PYTHONPATH") else "")
+    try:
+        r = subprocess.run([sys.executable, "-c",
+                            "from reelly import face; face._probe()"],
+                           capture_output=True, timeout=180, env=env,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"[face ] face detection unavailable ({e}); continuing without it")
+        return False
+    if r.returncode < 0 or b"Check failed" in (r.stderr or b""):
+        print("[face ] face detection unavailable in this session (mediapipe "
+              "aborted: no GPU service, e.g. over ssh); continuing without "
+              "face tracking")
+        return False
+    if r.returncode != 0:
+        # an ordinary Python error (missing model, bad install): the in-process
+        # path raises the same error and already degrades on it
+        return True
+    return True
+
+
 @functools.lru_cache(maxsize=1)
 def _landmarker():
-    """Singleton FaceLandmarker, or None if the model can't be had."""
+    """Singleton FaceLandmarker, or None if the model can't be had (or this
+    process cannot run mediapipe at all)."""
+    if not mediapipe_usable():
+        return None
     if not _ensure_model():
         return None
     try:
@@ -85,6 +148,8 @@ def _landmarker():
 @functools.lru_cache(maxsize=1)
 def _blaze():
     """Singleton BlazeFace detector for the fallback path."""
+    if not mediapipe_usable():
+        return None
     try:
         return _detector()
     except Exception:

@@ -37,6 +37,18 @@ def duration(path):
     return float(probe(path).get("format", {}).get("duration", 0) or 0)
 
 
+def has_audio(path):
+    """True when the file carries at least one audio stream. Silent gameplay
+    captures and screen grabs often carry none."""
+    try:
+        streams = probe(path).get("streams")
+    except Exception:   # noqa: BLE001 -- unreadable: let the caller's ffmpeg say why
+        return True
+    if not streams:     # no stream info at all is "unknown", not "silent"
+        return True
+    return any(s.get("codec_type") == "audio" for s in streams)
+
+
 def fmt(sec):
     return f"{int(sec) // 60:02d}:{int(sec) % 60:02d}"
 

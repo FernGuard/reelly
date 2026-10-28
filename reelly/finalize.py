@@ -299,8 +299,10 @@ def _raw_cache_key(plan, video, facecam, follow):
              "comp": plan.get("composition"),
              "reframe": plan.get("reframe", 1.0),
              "follow": bool(follow),
-             # facemesh vs blaze frame the facecam crop differently
-             "detector": face.detector_kind(),
+             # facemesh vs blaze frame the facecam crop differently; with no
+             # facecam there is no crop to frame, and building a detector here
+             # was what killed headless renders (mediapipe abort over ssh)
+             "detector": face.detector_kind() if facecam else "n/a",
              # intermediate encoder selection (incl. REELLY_SW/HW_ENCODE state)
              "encode": config.intermediate_encode_args(),
              "src": [os.path.basename(video), st.st_mtime, st.st_size]}

@@ -42,6 +42,51 @@ from . import (config, ingest, media, scenes, slots, speech, timing, topics,
 # runs share the two decode slots instead of each bringing their own pair.
 
 
+_FP_EDGE = 8 << 20      # bytes hashed from each end of a source file
+
+
+def fingerprint(path):
+    """Content identity of a source file, cheap on multi-GB recordings: size
+    plus SHA-256 of its first and last 8 MB. A re-export, a different take
+    or another video under the same project name all change it."""
+    import hashlib
+    size = os.path.getsize(path)
+    h = hashlib.sha256(str(size).encode())
+    with open(path, "rb") as f:
+        h.update(f.read(_FP_EDGE))
+        if size > 2 * _FP_EDGE:
+            f.seek(-_FP_EDGE, os.SEEK_END)
+            h.update(f.read(_FP_EDGE))
+    return {"name": os.path.basename(path), "size": size,
+            "sha256_edges": h.hexdigest()}
+
+
+def _sources_changed(an, video, facecam, crop):
+    """True when this analysis folder was built from different sources (or
+    a different crop) than the ones given now. Writes the current identity
+    either way, so the next run compares against what is actually cached.
+    The stage cache below is existence-only, so without this a re-run on a
+    different video under the same name silently returned the old results."""
+    os.makedirs(an, exist_ok=True)
+    p = os.path.join(an, "source.json")
+    now = {"screen": fingerprint(video),
+           "facecam": fingerprint(facecam) if facecam else None,
+           "crop": crop or None}
+    try:
+        before = json.load(open(p))
+    except (OSError, ValueError):
+        before = None
+    json.dump(now, open(p, "w"), indent=1)
+    if before is None:
+        # no record: a fresh folder, or one analysed before fingerprints
+        # existed. Only the latter can be stale; re-run it to be sure.
+        return any(f != "source.json" for f in os.listdir(an))
+    same = lambda a, b: (a or {}).get("sha256_edges") == (b or {}).get("sha256_edges")
+    return not (same(before.get("screen"), now["screen"])
+                and same(before.get("facecam"), now["facecam"])
+                and before.get("crop") == now["crop"])
+
+
 def _step(label, path, force, fn):
     if os.path.exists(path) and not force:
         print(f"[skip] {label} (cached: {os.path.basename(path)})")
@@ -82,6 +127,19 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
     # and extra Gemini/GPT spend later with a black deliverable.
     # Five spread luma probes; all black => stop.
     media.assert_not_black(video)
+
+    if not force and _sources_changed(an, video, facecam, crop):
+        print("[note] the sources differ from the ones this analysis was built "
+              "from (or it predates source fingerprints): re-running every "
+              "stage instead of reusing results that describe another video")
+        force = True
+        # Clear the old artifacts first: a stage that fails on the new source
+        # must leave NO result, never the old video's. Sub-caches keyed on the
+        # video's own identity (visual_chunks/) stay.
+        for fn in os.listdir(an):
+            fp = os.path.join(an, fn)
+            if fn != "source.json" and os.path.isfile(fp):
+                os.remove(fp)
 
     # --- the DAG (see module docstring): one function per dependency chain --
     def chain_session():  # C: probe -> facecam waveform sync

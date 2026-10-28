@@ -211,3 +211,4 @@ def test_music_without_kit_bed_ships_without_a_bed(monkeypatch, tmp_path):
                         lambda *a, **k: pytest.fail("FAL must not be called"))
     plan = {"id": "cut_01", "duration_s": 8.0, "title": "t"}
     assert audio_post._music_generate(plan, str(tmp_path / "m.mp3")) is None
+

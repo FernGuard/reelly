@@ -205,10 +205,20 @@ def needs_rerun(out_json):
         return False
     if art.get("status") == "ok":
         return False
-    if art.get("status") == "unavailable" and token() is None:
-        print("[diar ] diarization still unavailable (no HuggingFace token); "
-              "skipping the retry -- add a token to re-enable")
-        return False
+    if art.get("status") == "unavailable":
+        # Name the blocker that is actually still there: the extra not being
+        # installed was reported as a missing token before.
+        try:
+            _import_pipeline()
+        except ImportError:
+            print("[diar ] diarization still unavailable (pyannote.audio is not "
+                  "installed); skipping the retry -- install the diarize extra "
+                  "to re-enable")
+            return False
+        if token() is None:
+            print("[diar ] diarization still unavailable (no HuggingFace "
+                  "token); skipping the retry -- add a token to re-enable")
+            return False
     return True
 
 

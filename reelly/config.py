@@ -404,6 +404,19 @@ def doctor(as_json=False):
                    else "not found (needed for overlay cards). Install Chrome or set CHROME_PATH"),
     })
 
+    try:
+        from . import face as _face
+        fd_ok = _face.mediapipe_usable()
+    except Exception:   # noqa: BLE001 -- mediapipe not installed / broken
+        fd_ok = False
+    checks.append({
+        "id": "face detection",
+        "status": "ok" if fd_ok else "skip",
+        "detail": ("mediapipe runs in this session" if fd_ok else
+                   "unavailable in this session (no GPU service, e.g. over "
+                   "ssh, or mediapipe missing): renders continue without "
+                   "face tracking"),
+    })
     paid_on = paid_allowed()
     checks.append({
         "id": "paid calls",

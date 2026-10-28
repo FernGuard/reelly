@@ -93,6 +93,13 @@ def _parakeet_transcribe(wav, out_json):
 
 
 def transcribe(video, out_json, model=None):
+    if not media.has_audio(video):
+        # nothing to hear: an empty transcript, not a failed analysis
+        print("[asr  ] no audio track in the source; empty transcript "
+              "(picture-only footage)")
+        res = {"segments": [], "text": "", "no_audio": True}
+        json.dump(res, open(out_json, "w"))
+        return res
     wav = out_json + ".tmp.wav"
     media.extract_wav(video, wav)
     try:

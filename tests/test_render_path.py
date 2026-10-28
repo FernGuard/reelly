@@ -110,10 +110,15 @@ class TestKaraokeDedupe(unittest.TestCase):
 
 class TestRawCache(unittest.TestCase):
     def _key(self, td, segments, bump_mtime=0, detector="facemesh",
-             encode=("-c:v", "libx264")):
+             encode=("-c:v", "libx264"), facecam=False):
         src = os.path.join(td, "screen.mp4")
         if not os.path.exists(src):
             open(src, "w").write("x")
+        cam = None
+        if facecam:
+            cam = os.path.join(td, "facecam.mp4")
+            if not os.path.exists(cam):
+                open(cam, "w").write("c")
         if bump_mtime:
             t = os.path.getmtime(src) + bump_mtime
             os.utime(src, (t, t))
@@ -124,7 +129,7 @@ class TestRawCache(unittest.TestCase):
              mock.patch.object(finalize.config, "intermediate_encode_args",
                                return_value=list(encode)):
             return finalize._raw_cache_key(
-                {"id": "cut_01", "segments": segments}, src, None, False)
+                {"id": "cut_01", "segments": segments}, src, cam, False)
 
     def test_same_inputs_same_key(self):
         with tempfile.TemporaryDirectory() as td:
@@ -142,10 +147,14 @@ class TestRawCache(unittest.TestCase):
 
     def test_detector_change_busts_key(self):
         # facemesh and blaze frame the facecam crop differently: a raw cut
-        # rendered under one must miss under the other
+        # rendered under one must miss under the other. Without a facecam
+        # there is no crop to frame, so the detector is not part of the key.
         with tempfile.TemporaryDirectory() as td:
-            self.assertNotEqual(self._key(td, [[0, 5]], detector="facemesh"),
-                                self._key(td, [[0, 5]], detector="blaze"))
+            self.assertNotEqual(
+                self._key(td, [[0, 5]], detector="facemesh", facecam=True),
+                self._key(td, [[0, 5]], detector="blaze", facecam=True))
+            self.assertEqual(self._key(td, [[0, 5]], detector="facemesh"),
+                             self._key(td, [[0, 5]], detector="blaze"))
 
     def test_encoder_change_busts_key(self):
         with tempfile.TemporaryDirectory() as td:
