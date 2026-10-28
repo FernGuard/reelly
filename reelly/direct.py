@@ -206,6 +206,17 @@ def resolve_project(project):
     raise SystemExit(f"project not found: {project}")
 
 
+def source_crop(root):
+    """The analysis-time source crop ('W:H:X:Y') recorded in
+    analysis/source.json, or None. The render applies the same crop, so a
+    capture's editor chrome never reaches a deliverable."""
+    try:
+        c = json.load(open(os.path.join(root, "analysis", "source.json"))).get("crop")
+    except (OSError, ValueError):
+        return None
+    return c if isinstance(c, str) and re.fullmatch(r"\d+:\d+:\d+:\d+", c) else None
+
+
 def _source_video(root):
     src = os.path.join(root, "source")
     for f in sorted(os.listdir(src)):

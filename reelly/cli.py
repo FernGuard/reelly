@@ -2,7 +2,7 @@
 
   reelly setup [--json]
   reelly analyze <video> [--facecam F] [--name N] [--out DIR] [--skip-visual]
-                 [--force] [--crop W:H:X:Y]
+                 [--force] [--crop W:H:X:Y|auto]
   reelly budget
   reelly budget sprint <cap> [--days N] [--reason TEXT]
   reelly budget endsprint
@@ -104,7 +104,9 @@ def main(argv=None):
     a.add_argument("--out", help="projects root (default: config.DEFAULT_PROJECTS)")
     a.add_argument("--skip-visual", action="store_true", help="skip the Gemini pass")
     a.add_argument("--force", action="store_true", help="ignore cached artifacts")
-    a.add_argument("--crop", help="W:H:X:Y crop to hide a baked-in facecam corner")
+    a.add_argument("--crop", help="W:H:X:Y source crop, or 'auto' to find the game "
+                                  "view inside capture chrome (Unity editor, OBS "
+                                  "borders). Applied to analysis AND render")
 
     d = sub.add_parser("direct", help="editor brain: cut plans from an analysis bundle")
     d.add_argument("project", help="project name or path")

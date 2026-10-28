@@ -290,7 +290,7 @@ def _burn_final(src, dst, plan, words_tl, dur, workdir, layout, product_key):
 RAW_CACHE_VERSION = 2
 
 
-def _raw_cache_key(plan, video, facecam, follow):
+def _raw_cache_key(plan, video, facecam, follow, src_crop=None):
     """Cache key for a cut's concatenated pre-caption raw.mp4: everything the
     segment render depends on. Captions/music/overlay changes do NOT move it."""
     from . import follow as follow_mod
@@ -303,6 +303,7 @@ def _raw_cache_key(plan, video, facecam, follow):
              "follow_action": (follow_mod.FOLLOW_VERSION if follow_mod.enabled()
                                else "off"),
              "focus": plan.get("focus"),
+             "src_crop": src_crop,
              "follow": bool(follow),
              # facemesh vs blaze frame the facecam crop differently; with no
              # facecam there is no crop to frame, and building a detector here
@@ -454,9 +455,11 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     _cut_segments(video, p["segments"], dst, comp=comp,
                                   facecam=facecam, follow_faces=follow,
                                   focus=p.get("focus"),
+                                  src_crop=direct.source_crop(root),
                                   reframe=p.get("reframe", 1.0))
             raw = _cached_raw(root, p, sfx,
-                              _raw_cache_key(p, video, facecam, follow),
+                              _raw_cache_key(p, video, facecam, follow,
+                                             direct.source_crop(root)),
                               force, _render_raw)
             # Tail hygiene safety net (cut_04 screening bug): a legacy plan
             # whose frozen content end sits on a rising sound onset ships a

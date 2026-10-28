@@ -64,7 +64,7 @@ def _atempo_chain(speed):
     return ",".join(parts)
 
 
-def _reframe_vf(zoom=1.0, x_expr=None):
+def _reframe_vf(zoom=1.0, x_expr=None, src_crop=None):
     """16:9 source into a 9:16 frame over a blurred bed.
 
     zoom=1.0 fits the full width, which leaves a 16:9 source occupying only
@@ -79,7 +79,8 @@ def _reframe_vf(zoom=1.0, x_expr=None):
     fg = ("[fg]scale=1080:-2[fgs];" if zoom == 1.0 else
           f"[fg]scale=w={round(1080 * zoom)}:h=-2,"
           f"crop=1080:ih:{x}:0[fgs];")
-    return ("split=2[bg][fg];"
+    pre = f"crop={src_crop}," if src_crop else ""
+    return (pre + "split=2[bg][fg];"
             "[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
             "crop=1080:1920,boxblur=24:2,eq=brightness=-0.05:saturation=1.15[bgb];"
             + fg +
@@ -177,14 +178,15 @@ def _face_shots(video, s, e, td, i):
     return parts
 
 
-def _follow_plan(video, s, e, reframe, focus):
+def _follow_plan(video, s, e, reframe, focus, crop=None):
     """(zoom, crop x expression) for one segment: follow the action on a
     zoomed cinematic reframe, else (reframe, None) = the fixed centre."""
     from . import follow
     if not follow.enabled() or float(reframe or 1.0) <= 1.0:
         return reframe, None
     try:
-        fp = follow.plan_segment(video, s, e, base_zoom=float(reframe), focus=focus)
+        fp = follow.plan_segment(video, s, e, base_zoom=float(reframe), focus=focus,
+                                 crop=crop)
     except Exception as e:  # noqa: BLE001 -- the centre crop still renders
         print(f"         follow: failed ({e}); centre crop")
         return reframe, None
@@ -195,7 +197,7 @@ def _follow_plan(video, s, e, reframe, focus):
 
 
 def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
-                  follow_faces=False, reframe=1.0, focus=None):
+                  follow_faces=False, reframe=1.0, focus=None, src_crop=None):
     """Extract + reframe each segment (cam composited if present), then concat.
     Cinematic reframes follow the action (follow.py); `focus` (a number, or
     one per segment) pins the crop centre instead."""
@@ -262,7 +264,7 @@ def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
             seg_focus = (focus[i] if isinstance(focus, (list, tuple)) and i < len(focus)
                          else focus if isinstance(focus, (int, float)) else None)
             fzoom, fx = ((reframe, None) if layout else
-                         _follow_plan(video, s, e, reframe, seg_focus))
+                         _follow_plan(video, s, e, reframe, seg_focus, src_crop))
             # hwaccel is a per-input option (before the -i it accelerates);
             # never on the mask (-loop image) input or the concat pass below
             args = [config.FFMPEG, "-y", "-v", "error", *config.hwdecode_args(),
@@ -304,12 +306,12 @@ def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
                 args += ["-filter_complex", _tonemapped(fc), "-map", vmap, "-map", "0:a"]
             elif speed != 1.0:
                 args += ["-filter_complex",
-                         _tonemapped(f"[0:v]{_reframe_vf(fzoom, fx)},setpts=PTS/{speed}[vsp]"),
+                         _tonemapped(f"[0:v]{_reframe_vf(fzoom, fx, src_crop)},setpts=PTS/{speed}[vsp]"),
                          "-map", "[vsp]", "-map", "0:a"]
             elif sdr_v:
-                args += ["-vf", sdr_v + "," + _reframe_vf(fzoom, fx)]
+                args += ["-vf", sdr_v + "," + _reframe_vf(fzoom, fx, src_crop)]
             else:
-                args += ["-vf", _reframe_vf(fzoom, fx)]
+                args += ["-vf", _reframe_vf(fzoom, fx, src_crop)]
             # 30ms boundary fades: a cut landing mid-waveform clicks, and the
             # downstream adeclick pass only partially rescues it
             adur = (e - s) / speed

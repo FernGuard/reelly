@@ -125,15 +125,17 @@ def _frames_near(an_dir, s0, seg_end):
     return out[:N_FRAMES]
 
 
-def _sheet(video, times, out):
-    """A 3x2 contact sheet of the candidate frames, letters in reading order."""
+def _sheet(video, times, out, crop=None):
+    """A 3x2 contact sheet of the candidate frames, letters in reading order
+    (cropped to the game view when the capture has chrome)."""
     from PIL import Image
     tiles = []
     with tempfile.TemporaryDirectory() as td:
         for i, t in enumerate(times):
             p = os.path.join(td, f"f{i}.jpg")
             subprocess.run([config.FFMPEG, "-y", "-v", "error", "-ss", f"{t:.3f}",
-                            "-i", video, "-frames:v", "1", "-vf", "scale=480:-2", p],
+                            "-i", video, "-frames:v", "1", "-vf",
+                            (f"crop={crop}," if crop else "") + "scale=480:-2", p],
                            check=True)
             tiles.append(Image.open(p).convert("RGB"))
     w, h = tiles[0].size
@@ -322,7 +324,8 @@ def compose(plan, an_dir, video, brain, project, vr=None, used_openers=(),
         if use_images:
             try:
                 images = [_sheet(video, [float(f["t"]) for f in frames],
-                                 os.path.join(td, "openings.jpg"))]
+                                 os.path.join(td, "openings.jpg"),
+                                 crop=direct.source_crop(os.path.dirname(an_dir)))]
             except Exception as e:  # noqa: BLE001 -- text-only is still useful
                 print(f"  [hooks] {plan['id']}: no frame sheet ({e}); text only")
         def _call(text, label):

@@ -128,6 +128,13 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
     # Five spread luma probes; all black => stop.
     media.assert_not_black(video)
 
+    if crop == "auto":
+        from . import activity
+        crop = activity.gameview_box(video)
+        print(f"[crop ] capture chrome: "
+              + (f"game view {crop} (everything outside it is cut from the "
+                 f"analysis AND the render)" if crop else "none found, full frame"))
+
     if not force and _sources_changed(an, video, facecam, crop):
         print("[note] the sources differ from the ones this analysis was built "
               "from (or it predates source fingerprints): re-running every "

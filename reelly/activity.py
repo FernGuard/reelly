@@ -135,3 +135,73 @@ def _active_box_uncached(video, segments, src_wh, samples, pad, min_w_frac):
     by = min(max(0.0, cy - bh / 2), H - bh)
     even = lambda v: int(v) // 2 * 2
     return even(bx), even(by), even(bw), even(bh)
+
+
+# --- capture chrome ---------------------------------------------------------
+# Game captures often include the tool around the game: the Unity editor's
+# toolbar, panels and status bar, OBS borders, a desktop. That chrome never
+# changes, while a running game changes somewhere near every edge of its view
+# (lights, particles, animated backdrops) over a clip. Shipping a frame of
+# editor UI in a post is the failure this guards against.
+CHANGE_LEVEL = 4            # 0-255 per-channel std that counts as "changed"
+ROW_SHARE = 0.10            # a row is game when this much of it changes
+COL_SHARE = 0.02            # a column is game when ANY real part of it changes
+INSET = 2                   # px trimmed inward: compression fringe on the border
+
+
+def _longest_run(flags):
+    best, start = (0, 0), None
+    for i, f in enumerate(list(flags) + [False]):
+        if f and start is None:
+            start = i
+        if not f and start is not None:
+            if i - start > best[1] - best[0]:
+                best = (start, i)
+            start = None
+    return best
+
+
+def gameview_box(video, samples=(0.1, 0.25, 0.4, 0.55, 0.7, 0.85), aspect=16 / 9,
+                 min_share=0.4):
+    """'W:H:X:Y' of the game view inside capture chrome, or None when the
+    frame is the game (no chrome) or nothing plausible is found.
+
+    Rows: the longest run of rows with real change (a status bar with
+    changing console text sits below a static gap, so it is its own run).
+    Columns: the bounding box of ANY change inside those rows (a still board
+    must not shrink the view). Then a small inset, and the height snaps to
+    `aspect` from the top edge when within 15% of it."""
+    import subprocess
+    from . import media
+    probe = media.probe(video)
+    v = next(s for s in probe["streams"] if s.get("codec_type") == "video")
+    W, H = int(v["width"]), int(v["height"])
+    dur = float(probe.get("format", {}).get("duration") or 0) or 1.0
+    fr = []
+    for k in samples:
+        r = subprocess.run([config.FFMPEG, "-v", "error", "-ss", f"{dur * k:.3f}",
+                            "-i", video, "-frames:v", "1", "-f", "rawvideo",
+                            "-pix_fmt", "rgb24", "-"], capture_output=True, check=True)
+        if len(r.stdout) == W * H * 3:
+            fr.append(np.frombuffer(r.stdout, np.uint8).reshape(H, W, 3).astype(np.int16))
+    if len(fr) < 3:
+        return None
+    active = np.stack(fr).std(axis=0).max(axis=2) >= CHANGE_LEVEL
+    y0, y1 = _longest_run(active.mean(axis=1) > ROW_SHARE)
+    if y1 <= y0:
+        return None
+    cols = np.where(active[y0:y1].mean(axis=0) > COL_SHARE)[0]
+    if not len(cols):
+        return None
+    x0, x1 = int(cols.min()), int(cols.max()) + 1
+    if x0 <= 4 and x1 >= W - 4 and y0 <= 4 and y1 >= H - 4:
+        return None                         # no chrome: the frame is the game
+    x0, x1, y0, y1 = x0 + INSET, x1 - INSET, y0 + INSET, y1 - INSET
+    w, h = x1 - x0, y1 - y0
+    if w < min_share * W or h < min_share * H:
+        return None                         # implausible: do not guess
+    snapped = round(w / aspect)
+    if abs(h - snapped) / snapped <= 0.15 and y0 + snapped <= H:
+        h = snapped
+    w, h, x0, y0 = w // 2 * 2, h // 2 * 2, (x0 + 1) // 2 * 2, (y0 + 1) // 2 * 2
+    return f"{w}:{h}:{x0}:{y0}"
