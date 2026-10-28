@@ -85,15 +85,17 @@ class _Seq(str):
         return obj
 
 
-def _text_layer(text, workdir, name, dur, hot=None):
+def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None):
     """(path, y_shift) for a hook-style line: a kinetic sequence when the
-    kinetic layer is on, else the static Pillow PNG. A kinetic failure falls
-    back to the static PNG; it never fails the burn."""
+    kinetic layer is on, else the static Pillow PNG. A line on screen at t0=0
+    is readable on frame 0 (no entrance). A kinetic failure falls back to the
+    static PNG; it never fails the burn."""
     from . import kinetic
     if kinetic.enabled():
         try:
             pattern, _, _, pad = kinetic.hook_line(
-                text, os.path.join(workdir, f"kin_{name}"), dur, hot=hot)
+                text, os.path.join(workdir, f"kin_{name}"), dur, hot=hot,
+                enter=t0 > 0.0, hot_reason=hot_reason, label=name)
             return _Seq(pattern), -pad
         except Exception as e:  # noqa: BLE001 -- static fallback, never break the burn
             print(f"        kinetic '{name}' failed ({e}); static text instead")
@@ -156,14 +158,16 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     hook = plan.get("hook") or {}
     if hook.get("text"):
         show = float(hook.get("show_s", 3.6))
-        hp, dy = _text_layer(hook["text"], workdir, "hook", show, hook.get("hot"))
+        hp, dy = _text_layer(hook["text"], workdir, "hook", show, hook.get("hot"),
+                             t0=0.0, hot_reason=hook.get("hot_reason"))
         events.append((hp, hook_y + dy, 0.0, show))
 
     # P-TEXT: timed lines beyond the hook; on captions:"none" cuts they carry
     # all of the writing.
     for oi, o in enumerate(plan.get("overlay_lines") or []):
         t0, show = float(o["t"]), float(o.get("show_s", 3.0))
-        op, dy = _text_layer(o["text"], workdir, f"ov{oi}", show, o.get("hot"))
+        op, dy = _text_layer(o["text"], workdir, f"ov{oi}", show, o.get("hot"),
+                             t0=t0, hot_reason=o.get("hot_reason"))
         events.append((op, hook_y + dy, t0, t0 + show))
 
     payoff = plan.get("payoff") or {}

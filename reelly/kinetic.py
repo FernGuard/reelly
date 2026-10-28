@@ -9,13 +9,27 @@ TRANSPARENT canvas, as a PNG sequence that finalize composites exactly where
 the static PNG used to sit.
 
 THE MOTION (one line, local time 0..dur)
-- Words enter in reading order, staggered: rise a third of an em, unblur and
-  fade in on the type curve. Never all at once.
-- The hot word (the plan's `hot`, else the last word) takes the brand accent
-  and lands with one small scale pop after it arrives.
+- A line that opens the video (the hook, t = 0) is FULLY READABLE ON FRAME 0:
+  no entrance. Feeds autoplay muted and show the first frame while the viewer
+  decides, and Shorts loop back to it, so the words must already be there.
+  Its only motion is the hot word's pop a beat later.
+- Later lines enter in reading order, staggered: rise a third of an em,
+  unblur and fade in on the type curve. Never all at once.
+- The hot word takes the brand accent and lands with one small scale pop.
 - Then everything HOLDS, still, so it can be read. The hold is one capture
   reused for every frame (no re-render of an unchanged page).
-- The line leaves on a short ease-out lift and fade that ends at `dur`.
+- The line leaves on a short ease-out lift and fade that ends at `dur`
+  (the end-card CTA does not leave: it holds to the last frame).
+
+WHICH WORD IS HOT (choose_hot; the reason is logged on every render)
+1. The plan's `hot` (word or index), with its `hot_reason`: an author or the
+   editor brain decided.
+2. A call to action: its ACTION, the first content word ("Wishlist on
+   Steam"). That is the one thing the viewer is asked to do.
+3. Any other line: END FOCUS, the last CONTENT word. English puts the new
+   information at the end; function words (is, are, they, the, of...) never
+   carry it. "Someone is knocking." -> knocking; "Of course they are." ->
+   course.
 
 Fonts and colours come from the brand kit (headline face for the hook, ink
 for text, accent for the hot word), loaded from local files. Without a kit it
@@ -35,7 +49,12 @@ FPS = 30
 STAGGER = 0.07          # s between word entrances
 ENTER = 0.46            # s for one word to arrive
 POP_AT, POP = 0.30, 0.36  # hot word: pop starts this long after it lands, lasts POP
-POP_SCALE = 1.12
+# The pop is a LIFT, not a big scale: a word scaled 12% grows wider than the
+# word spaces around it and swallows them. Up a little, 6% bigger, back down.
+# It grows from its bottom centre, so the growth splits evenly into the two
+# word spaces (and a line-end word moves at most ~2% of its width outward).
+POP_SCALE = 1.04
+POP_LIFT = 0.14           # em
 EXIT = 0.26             # s for the line to leave
 PAD = 28                # px around the text for the rise, the pop and the shadow
 # Same curves as card.py: type settles softly, exits accelerate away.
@@ -53,26 +72,66 @@ def enabled():
     return bool(ch) and (os.path.isfile(ch) or bool(shutil.which(ch)))
 
 
-def hot_index(words, hot=None):
-    """Which word carries the accent: an explicit index or word from the plan,
-    else the last word (short-form lines put the punch at the end)."""
+# Function words: grammar, not meaning. They never take the accent.
+FUNCTION_WORDS = frozenset("""
+a an the of to in on at by for from with as into onto over under up down out
+off about after before than then so and or but if because while that this
+these those it its it's is am are was were be been being have has had do does
+did done will would can could should may might must shall i i'm you you're he
+she we they they're me him her us them my your his our their mine yours there
+here what who whom which when where how just very really too also quite some
+any one ones such
+""".split())
+_PUNCT = ".,!?;:\"'()[]{}…"
+
+
+def _bare(word):
+    return word.lower().strip(_PUNCT)
+
+
+def _content(words):
+    return [i for i, w in enumerate(words)
+            if _bare(w) and _bare(w) not in FUNCTION_WORDS]
+
+
+def choose_hot(words, hot=None, kind="line", reason=None):
+    """(index, reason) of the word that carries the accent and the pop.
+
+    See the module doc for the rules. `kind` is "line" or "cta"."""
     if not words:
-        return None
-    if isinstance(hot, int) and 0 <= hot < len(words):
-        return hot
+        return None, "no words"
+    if isinstance(hot, int) and not isinstance(hot, bool) and 0 <= hot < len(words):
+        return hot, reason or "set in the plan"
     if isinstance(hot, str) and hot.strip():
-        want = hot.strip().lower().strip(".,!?;:")
+        want = _bare(hot)
         for i, w in enumerate(words):
-            if w.lower().strip(".,!?;:") == want:
-                return i
-    return len(words) - 1
+            if _bare(w) == want:
+                return i, reason or "set in the plan"
+    content = _content(words)
+    if kind == "cta":
+        if content:
+            return content[0], "call to action: the action the viewer takes"
+        return 0, "call to action: first word (no content word)"
+    if content:
+        return content[-1], "end focus: the last content word carries the news"
+    return len(words) - 1, "end focus: last word (no content word)"
 
 
-def timeline(n_words, dur, hot=None):
-    """(settle_t, exit_t): when the last motion before the hold ends, and when
-    the exit starts. Entrances are squeezed if a short window cannot fit them,
-    so a line never exits before it has fully arrived."""
-    exit_t = max(0.0, dur - EXIT)
+def hot_index(words, hot=None, kind="line"):
+    """Index-only form of choose_hot."""
+    return choose_hot(words, hot, kind)[0]
+
+
+def timeline(n_words, dur, hot=None, enter=True, leave=True):
+    """(settle_t, exit_t, stagger): when the last motion before the hold
+    ends, when the exit starts (dur when the line does not leave) and the word
+    stagger. Entrances are squeezed if a short window cannot fit them, so a
+    line never exits before it has fully arrived. Without an entrance the
+    words are there at t = 0 and the hot word pops at POP_AT."""
+    exit_t = max(0.0, dur - EXIT) if leave else dur
+    if not enter:
+        settle = POP_AT + POP if hot is not None else 0.0
+        return min(settle, exit_t), exit_t, 0.0
     stagger = STAGGER
     last_in = (n_words - 1) * stagger + ENTER
     if last_in > exit_t * 0.6 and n_words > 1:          # short window: tighten
@@ -109,14 +168,14 @@ def wrap_lines(text, size, width, role="headline"):
 
 
 def page_html(text, size, width, height, dur, role="headline", fill=None,
-              accent=None, hot=None, lines=None):
+              accent=None, hot=None, lines=None, enter=True, leave=True):
     """The line page. Every animation is declared paused; frames are taken
     by seeking document time (card._SEEK), so the render is deterministic."""
     from . import brandkit, captions
     words = text.split()
     lines = lines or [words]
     hi = hot_index(words, hot)
-    settle, exit_t, stagger = timeline(len(words), dur, hi)
+    settle, exit_t, stagger = timeline(len(words), dur, hi, enter, leave)
     face, stack = _font_face(role)
     fill = fill or captions.ink("#FCFCFB")
     accent = accent or brandkit.accent()
@@ -132,17 +191,12 @@ def page_html(text, size, width, height, dur, role="headline", fill=None,
         if i in breaks:
             spans.append("<br>")
         delay = i * stagger
-        anim = f"kin-in {ENTER:.3f}s {EASE_TYPE} {delay:.3f}s both"
+        anim = (f"kin-in {ENTER:.3f}s {EASE_TYPE} {delay:.3f}s both" if enter
+                else "kin-still 1s linear 0s both")
         inner = html.escape(w)
         if i == hi:
-            pop_delay = delay + ENTER + POP_AT
-            # Grow toward the inside of the line: a word at a line end that
-            # scaled from its centre would push past the safe edge.
-            starts = i == 0 or i in breaks
-            ends = i == len(words) - 1 or (i + 1) in breaks
-            origin = ("50%" if starts and ends else "20%" if starts
-                      else "80%" if ends else "50%")
-            inner = (f'<span class="pop" style="transform-origin:{origin} 75%;'
+            pop_delay = (delay + ENTER + POP_AT) if enter else POP_AT
+            inner = (f'<span class="pop" style="transform-origin:50% 100%;'
                      f'animation:kin-pop {POP:.3f}s {EASE_POP} {pop_delay:.3f}s '
                      f'both">{inner}</span>')
         spans.append(f'<span class="w{" hot" if i == hi else ""}" '
@@ -157,14 +211,16 @@ html,body{{width:{width}px;height:{height}px;background:transparent;overflow:hid
   font-family:{stack};font-weight:800;font-size:{size}px;line-height:1.22;
   color:{fill};-webkit-text-stroke:2px rgba(0,0,0,.9);paint-order:stroke fill;
   text-shadow:0 7px 12px rgba(0,0,0,.85);
-  animation:kin-out {EXIT:.3f}s {EASE_OUT} {exit_t:.3f}s both}}
+  {f"animation:kin-out {EXIT:.3f}s {EASE_OUT} {exit_t:.3f}s both" if leave else ""}}}
 .w{{display:inline-block;will-change:transform,opacity,filter}}
 .hot{{color:{accent}}}
 .pop{{display:inline-block}}
 @keyframes kin-in{{from{{opacity:0;transform:translateY(.34em);filter:blur(8px)}}
   to{{opacity:1;transform:none;filter:blur(0)}}}}
-@keyframes kin-pop{{0%{{transform:scale(1)}}45%{{transform:scale({POP_SCALE})}}
-  100%{{transform:scale(1)}}}}
+@keyframes kin-pop{{0%{{transform:none}}
+  45%{{transform:translateY(-{POP_LIFT}em) scale({POP_SCALE})}}
+  100%{{transform:none}}}}
+@keyframes kin-still{{from{{opacity:1}}to{{opacity:1}}}}
 @keyframes kin-out{{from{{opacity:1;transform:none}}
   to{{opacity:0;transform:translateY(-.22em)}}}}
 </style></head><body><div class="line">{' '.join(spans).replace(' <br> ', '<br>')}</div>
@@ -199,7 +255,8 @@ async def _render(page, frames, width, height, out_dir, still):
 
 
 def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
-                fps=FPS):
+                fps=FPS, enter=True, leave=True, kind="line", hot_reason=None,
+                label=None):
     """Render one kinetic line to out_dir/k%05d.png covering local 0..dur.
 
     Returns (pattern, canvas_w, canvas_h, pad): the PNG sequence pattern for
@@ -208,18 +265,23 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     from . import captions
     os.makedirs(out_dir, exist_ok=True)
     words = text.split()
-    hi = hot_index(words, hot)
-    settle, exit_t, _ = timeline(len(words), dur, hi)
+    hi, why = choose_hot(words, hot, kind, hot_reason)
+    if hi is not None:
+        print(f"        kinetic {label or kind}: hot '{_bare(words[hi])}' ({why})"
+              + ("" if enter else "; readable on frame 0"))
+    settle, exit_t, _ = timeline(len(words), dur, hi, enter, leave)
     text_h = captions.block_height(text, width=width, size=size, role=role)
     cw, ch = width + 2 * PAD, text_h + 2 * PAD
     page = os.path.join(out_dir, "line.html")
     with open(page, "w") as f:
         f.write(page_html(text, size, cw, ch, dur, role=role, hot=hi,
-                          lines=wrap_lines(text, size, width, role)))
+                          lines=wrap_lines(text, size, width, role),
+                          enter=enter, leave=leave))
     n = max(1, int(round(dur * fps)))
     frames = [(i, i / fps) for i in range(n)]
+    hold_end = exit_t if leave else dur + 1.0
     asyncio.run(_render(page, frames, cw, ch, out_dir,
-                        (settle, exit_t) if exit_t > settle else None))
+                        (settle, hold_end) if hold_end > settle else None))
     shutil.rmtree(os.path.join(out_dir, ".profile"), ignore_errors=True)
     made = len([f for f in os.listdir(out_dir) if f.startswith("k") and f.endswith(".png")])
     if made < n:
@@ -227,13 +289,25 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     return os.path.join(out_dir, "k%05d.png"), cw, ch, PAD
 
 
-def hook_line(text, out_dir, dur, hot=None):
+def hook_line(text, out_dir, dur, hot=None, enter=True, hot_reason=None,
+              label=None):
     """The hook / timed line, kinetic: same box, size fitting and font role as
-    captions.hook_png, so layout and the collision gate measure the same text."""
+    captions.hook_png, so layout and the collision gate measure the same text.
+    enter=False for a line on screen at t = 0 (readable on frame 0)."""
     from . import captions
     return render_line(text, out_dir, dur, size=captions.hook_size(text),
                        width=captions.HOOK_WIDTH, role=captions.HOOK_ROLE,
-                       hot=hot)
+                       hot=hot, enter=enter, hot_reason=hot_reason, label=label)
+
+
+def cta_line(text, out_dir, dur, hot=None, hot_reason=None):
+    """The end-card call to action: words enter, the ACTION word pops in the
+    accent, and the line holds to the last frame (it never leaves)."""
+    from . import captions
+    return render_line(text, out_dir, dur, size=captions.hook_size(text),
+                       width=captions.HOOK_WIDTH, role=captions.HOOK_ROLE,
+                       hot=hot, enter=True, leave=False, kind="cta",
+                       hot_reason=hot_reason, label="cta")
 
 
 def is_sequence(path):

@@ -145,21 +145,68 @@ def backdrop_png(video, style, path):
     return _gradient_png(path), "gradient"
 
 
-def _typeset_card(cta, path, size=(1080, 1920)):
+CTA_Y_FRAC = 0.47       # the typeset CTA line's top, as a fraction of height
+
+
+def _typeset_card(cta, path, size=(1080, 1920), draw_text=True):
     """Last-resort card when no kit endcard and no registered wordmark
     exist: translucent scrim + the CTA line (memory: typeset CTA only as
-    fallback)."""
+    fallback). draw_text=False gives the scrim alone, for a kinetic CTA."""
     from PIL import Image, ImageDraw
     from . import captions
     W, H = size
     img = Image.new("RGBA", (W, H), (*INK, 153))     # ~60% scrim
+    if not draw_text:
+        img.save(path)
+        return path
     d = ImageDraw.Draw(img)
     f = captions._font(52, "headline")
     tw = d.textlength(cta, font=f)
-    d.text(((W - tw) / 2, int(H * 0.47)), cta, font=f,
+    d.text(((W - tw) / 2, int(H * CTA_Y_FRAC)), cta, font=f,
            fill=captions.ink("#FCFCFB"))
     img.save(path)
     return path
+
+
+def card_kind(plan, product):
+    """Which card the outro will use: "endcard" (baked kit card), "logo"
+    (wordmark + ask) or "typeset" (the ask on a scrim). Mirrors card_png."""
+    try:
+        from . import brandkit, products
+        key = products.ALIASES.get(product, product) if product else None
+        cta = (plan.get("cta") or "").strip()
+        src = str(plan.get("cta_source", "")).strip().lower()
+        authored = "manual" in src or "hand-authored" in src
+        if not (authored and cta):
+            p = brandkit.endcard(product) if product else None
+            if p and p.endswith(".png"):
+                return "endcard"
+        logo = products.brand_logo(key) if key else None
+        return "logo" if logo and os.path.exists(logo) else "typeset"
+    except Exception:   # noqa: BLE001
+        return "typeset"
+
+
+def _kinetic_cta(plan, product, workdir, len_s):
+    """(scrim_png, (pattern, y)) when the outro is the typeset card and the
+    kinetic layer is on: the scrim without text, plus the ask as kinetic type
+    whose ACTION word pops in the accent. None otherwise (static card)."""
+    from . import kinetic
+    if not kinetic.enabled() or card_kind(plan, product) != "typeset":
+        return None
+    cta = (plan.get("cta") or "").strip()
+    if not cta:
+        return None
+    try:
+        scrim = _typeset_card(cta, os.path.join(
+            workdir, f"{plan.get('id', 'cut')}_outro_scrim.png"), draw_text=False)
+        pattern, _, _, pad = kinetic.cta_line(
+            cta, os.path.join(workdir, "kin_cta"), len_s,
+            hot=plan.get("cta_hot"), hot_reason=plan.get("cta_hot_reason"))
+        return scrim, (pattern, int(1920 * CTA_Y_FRAC) - pad)
+    except Exception as e:   # noqa: BLE001 -- static card instead
+        print(f"[outro] kinetic CTA failed ({e}); static card instead")
+        return None
 
 
 def card_png(plan, product, workdir):
@@ -196,8 +243,9 @@ def card_png(plan, product, workdir):
                              dst)
 
 
-def build_segment(backdrop, card, len_s, dst, fps=30):
+def build_segment(backdrop, card, len_s, dst, fps=30, seq=None):
     """Encode the outro segment: static backdrop, card fading in, no audio.
+    seq=(pattern, y): a kinetic CTA sequence composited over the card.
 
     Codec parameters MIRROR finalize._burn_pass (libx264 veryfast crf 20,
     -r 30, yuv420p) so the concat with the burned content stream can run
@@ -206,12 +254,17 @@ def build_segment(backdrop, card, len_s, dst, fps=30):
     fc = (f"[0:v]scale=1080:1920,setsar=1[b];"
           f"[1:v]scale=1080:1920,format=rgba,"
           f"fade=t=in:st=0.03:d={FADE_IN_S}:alpha=1[c];"
-          f"[b][c]overlay=0:0,format=yuv420p[v]")
+          f"[b][c]overlay=0:0" + ("[bc];" if seq else ",format=yuv420p[v]"))
+    extra = []
+    if seq:
+        extra = ["-framerate", str(fps), "-i", seq[0]]
+        fc += (f"[bc][2:v]overlay=(W-w)/2:{int(seq[1])}:eof_action=repeat,"
+               f"format=yuv420p[v]")
     subprocess.run(
         [config.FFMPEG, "-y", "-v", "error",
          "-loop", "1", "-framerate", str(fps), "-i", backdrop,
-         "-loop", "1", "-framerate", str(fps), "-i", card,
-         "-filter_complex", fc, "-map", "[v]", "-t", f"{len_s:.3f}",
+         "-loop", "1", "-framerate", str(fps), "-i", card] + extra +
+        ["-filter_complex", fc, "-map", "[v]", "-t", f"{len_s:.3f}",
          "-r", str(fps), "-an",
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", dst],
         check=True, capture_output=True)
@@ -256,9 +309,11 @@ def append(content_video, backdrop_source, plan, product, workdir):
     style = ob.get("style") or style_from_kit()
     bp, used_style = backdrop_png(backdrop_source or content_video, style,
                                   os.path.join(workdir, "outro_backdrop.png"))
-    card = card_png(plan, product, workdir)
+    kin = _kinetic_cta(plan, product, workdir, len_s)
+    card = kin[0] if kin else card_png(plan, product, workdir)
     seg = build_segment(bp, card, len_s,
-                        os.path.join(workdir, "outro_seg.mp4"))
+                        os.path.join(workdir, "outro_seg.mp4"),
+                        seq=kin[1] if kin else None)
     dst = os.path.join(workdir, "content_outro.mp4")
     try:
         content_d = float(media.probe(content_video)["format"]["duration"])
