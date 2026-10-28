@@ -32,6 +32,8 @@ from a conservative public default. One practitioner's claim does not override
 measured results, so it is logged as a hypothesis to test, not a rule.
 """
 import os
+
+import numpy as np
 import subprocess
 
 from . import config
@@ -69,7 +71,7 @@ def _samples(path, every=0.5, w=32, h=56):
                         os.path.join(td, "f%05d.png")], check=True)
         out = []
         for f in sorted(os.listdir(td)):
-            out.append(list(Image.open(os.path.join(td, f)).convert("L").getdata()))
+            out.append(np.asarray(Image.open(os.path.join(td, f)).convert("L")).ravel().tolist())
     return out
 
 
@@ -124,7 +126,7 @@ def loopable(path):
         try:
             from PIL import Image
             pa, pb = Image.open(a).convert("L"), Image.open(b).convert("L")
-            px_a, px_b = list(pa.getdata()), list(pb.getdata())
+            px_a, px_b = np.asarray(pa).ravel().tolist(), np.asarray(pb).ravel().tolist()
             diff = sum(abs(x - y) for x, y in zip(px_a, px_b)) / (len(px_a) * 255)
         except Exception:
             return ("loopable", "SKIP", "could not compare frames")

@@ -208,6 +208,21 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     # Opt-in pointer overlays (circle/brackets) pointing at what the narrator
     # names -- transcript-driven, vision-located, guarded.
     events += _pointer_events(plan, words_tl, workdir, video)
+    # D3/D7 measured: a plate goes UNDER any layer whose brand ink does not
+    # separate from the footage behind it (composited first = drawn below)
+    from . import brandkit, legibility
+    if legibility.enabled() and video:
+        try:
+            res = legibility.measure(plan, video, captions.ink("#FCFCFB"))
+            plan["_text_contrast"] = res
+            plates = legibility.plates(res, workdir, brandkit.surface() or "#0b0b0c")
+            for r in res:
+                if r["scrim"] > 0:
+                    print(f"        legibility: {r['label']} on a {r['scrim']:.0%} plate "
+                          f"(backdrop luma {r['backdrop_luma']}, gap {r['luma_gap']})")
+            events = plates + events
+        except Exception as e:  # noqa: BLE001 -- measuring must never break the burn
+            print(f"        legibility: not measured ({e})")
     return events
 
 
@@ -482,6 +497,9 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
             with timing.stage(f"{p['id']} caption burn", tpath):
                 vid = _burn_final(raw, os.path.join(td, "burn.mp4"), p, words_tl,
                                   dur, td, layout, product)
+            from . import legibility as _leg
+            if "_text_contrast" in p:
+                _leg.record(root, p["id"], p.pop("_text_contrast"))
             if ob:
                 with timing.stage(f"{p['id']} outro", tpath):
                     # backdrop from the PRE-CAPTION raw so no burned text

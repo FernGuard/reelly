@@ -213,6 +213,29 @@ def _text_layers(plan, words, with_x=False):
     return layers
 
 
+def text_contrast(root, plan):
+    """D3/D7 on the burned social text, from finalize's measurement
+    (qc/text_contrast.json): FAIL when even the heaviest plate leaves a layer
+    unreadable, PASS otherwise (saying which layers needed a plate)."""
+    p = os.path.join(root, "qc", "text_contrast.json")
+    try:
+        rows = json.load(open(p)).get(plan.get("id"), None)
+    except (OSError, ValueError):
+        rows = None
+    if rows is None:
+        return ("text_contrast", "SKIP", "not measured (finalize predates the check, "
+                "or REELLY_LEGIBILITY=off)")
+    bad = [r for r in rows if not r.get("pass", True)]
+    plated = [f"{r['label']} ({r['scrim']:.0%})" for r in rows if r.get("scrim", 0) > 0]
+    if bad:
+        return ("text_contrast", "FAIL", "; ".join(
+            f"{r['label']} unreadable even on a full plate (backdrop luma "
+            f"{r.get('backdrop_luma')}): change the colour or the moment" for r in bad[:3]))
+    return ("text_contrast", "PASS",
+            f"{len(rows)} layer(s) measured" + (f"; plated: {', '.join(plated)}" if plated
+                                                else "; none needed a plate"))
+
+
 def ui_zones(plan, words):
     """No text of ours may sit under platform chrome (layout.UI_ZONES, the
     union of the TikTok, Reels and Shorts header, caption/nav block and action
@@ -581,6 +604,7 @@ def run(project, tag=None, visual=False):
             rep["results"].append(caption_coverage(plan, words))
             rep["results"].append(caption_collisions(plan, words))
             rep["results"].append(ui_zones(plan, words))
+            rep["results"].append(text_contrast(root, plan))
             rep["results"].append(plain.verdict(plan))
             rep["results"].append(retention.bait(plan))
             rep["results"].append(safety.verdict(plan))

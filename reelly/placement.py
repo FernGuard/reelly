@@ -22,6 +22,8 @@ Everything returns plain numbers, so the planner can record them in the cut
 plan and a human can read why a mark is where it is.
 """
 import os
+
+import numpy as np
 import subprocess
 import tempfile
 
@@ -64,8 +66,8 @@ def grid(video, t):
                 box = (int(c * cw), int(r * ch), int((c + 1) * cw), int((r + 1) * ch))
                 tile, etile = im.crop(box), edges.crop(box)
                 n = max(1, tile.width * tile.height)
-                luma = sum(tile.getdata()) / n
-                detail = sum(etile.getdata()) / n
+                luma = float(np.asarray(tile, dtype=np.float64).sum()) / n
+                detail = float(np.asarray(etile, dtype=np.float64).sum()) / n
                 row.append((luma, detail))
             out.append(row)
         return out
