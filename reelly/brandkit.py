@@ -259,6 +259,63 @@ def font_css():
     return "\n".join(rules)
 
 
+def add_brand(name, fonts=None, accent=None, ink=None, surface=None,
+              force=False):
+    """Create or update brands/<name>/ in the LOCAL kit: copy each font file
+    in, write brand.json. Brand assets never live in the repository; this is
+    the one-step way for any user to register their own.
+
+    fonts: {role: path} (roles: headline, caption, cta, kicker). Colours are
+    #RRGGBB. Returns the brand folder. Raises ValueError on bad input."""
+    import shutil
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name or "") or name in (".", ".."):
+        raise ValueError(f"brand name must be letters, digits, . _ - : {name!r}")
+    for label, c in (("accent", accent), ("ink", ink), ("surface", surface)):
+        if c is not None and not _HEX.fullmatch(c):
+            raise ValueError(f"{label} must be #RRGGBB, got {c!r}")
+    d = os.path.join(kit_dir(), "brands", name)
+    spec = {}
+    if os.path.exists(os.path.join(d, "brand.json")) and not force:
+        try:
+            with open(os.path.join(d, "brand.json")) as f:
+                spec = json.load(f) or {}
+        except (OSError, ValueError):
+            spec = {}
+    spec["name"] = name
+    spec.setdefault("fonts", {})
+    os.makedirs(d, exist_ok=True)
+    for role, src in (fonts or {}).items():
+        if role not in ROLE_FALLBACK:
+            raise ValueError(f"unknown font role {role!r}; use one of "
+                             f"{', '.join(ROLE_FALLBACK)}")
+        if not os.path.isfile(src) or not src.lower().endswith((".ttf", ".otf")):
+            raise ValueError(f"{role}: need a .ttf or .otf file, got {src!r} "
+                             "(cut variable or web fonts to a static .ttf first)")
+        fn = f"{role}{os.path.splitext(src)[1].lower()}"
+        shutil.copyfile(src, os.path.join(d, fn))
+        spec["fonts"][role] = fn
+    for key, c in (("accent", accent), ("ink", ink), ("surface", surface)):
+        if c is not None:
+            spec[key] = c
+    with open(os.path.join(d, "brand.json"), "w") as f:
+        json.dump(spec, f, indent=1)
+    return d
+
+
+def list_brands():
+    """{name: brand.json dict} for every brand in the local kit."""
+    root = os.path.join(kit_dir(), "brands")
+    out = {}
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return out
+    for n in names:
+        if os.path.isdir(os.path.join(root, n)):
+            out[n] = brand(n)
+    return out
+
+
 def copy_bank():
     """Parsed copy_bank.yaml. Written as a code-generated default on first
     use, so the repo ships schema+code and the kit dir owns the data."""

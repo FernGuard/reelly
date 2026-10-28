@@ -88,18 +88,18 @@ def test_setup_reports_paid_off_and_present_keys_as_idle(monkeypatch, capsys):
 # --- CLI global flags -----------------------------------------------------------
 
 def test_global_flags_work_after_the_subcommand(monkeypatch):
-    rest = cli._global_flags(["cut", "proj", "--allow-paid", "--brand", "curses",
+    rest = cli._global_flags(["cut", "proj", "--allow-paid", "--brand", "game-a",
                               "--for", "tiktok"])
     assert rest == ["cut", "proj", "--for", "tiktok"]
     assert os.environ["REELLY_ALLOW_PAID"] == "1"
-    assert os.environ["REELLY_BRAND"] == "curses"
+    assert os.environ["REELLY_BRAND"] == "game-a"
     monkeypatch.delenv("REELLY_ALLOW_PAID")
     monkeypatch.delenv("REELLY_BRAND")
 
 
 def test_brand_equals_form(monkeypatch):
-    assert cli._global_flags(["finalize", "--brand=toxtli", "p"]) == ["finalize", "p"]
-    assert os.environ["REELLY_BRAND"] == "toxtli"
+    assert cli._global_flags(["finalize", "--brand=game-b", "p"]) == ["finalize", "p"]
+    assert os.environ["REELLY_BRAND"] == "game-b"
     monkeypatch.delenv("REELLY_BRAND")
 
 
@@ -149,14 +149,14 @@ def test_codex_call_strips_api_keys_and_reads_the_reply(monkeypatch):
         seen["cmd"], seen["env"], seen["stdin"] = cmd, env, stdin
         out = cmd[cmd.index("-o") + 1]
         with open(out, "w") as f:
-            f.write('{"landing_ok": true, "hook": "Someone is knocking."}')
+            f.write('{"landing_ok": true, "hook": "The door opens."}')
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     added = []
     monkeypatch.setattr(direct.ledger, "add", lambda *a, **k: added.append(a))
     reply = direct._ask_cli("codex", "plan this", "proj", "label")
-    assert reply == {"landing_ok": True, "hook": "Someone is knocking."}
+    assert reply == {"landing_ok": True, "hook": "The door opens."}
     assert "OPENAI_API_KEY" not in seen["env"]
     assert "ANTHROPIC_API_KEY" not in seen["env"]
     assert seen["cmd"][:2] == ["/usr/bin/codex", "exec"]

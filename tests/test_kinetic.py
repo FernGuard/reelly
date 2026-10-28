@@ -13,14 +13,14 @@ from reelly import captions, config, finalize, kinetic
 # --- pure logic -------------------------------------------------------------------
 
 def test_hot_word_defaults_to_the_last_word():
-    assert kinetic.hot_index(["Someone", "is", "knocking."]) == 2
+    assert kinetic.hot_index(["The", "door", "opens."]) == 2
 
 
 def test_hot_word_by_index_or_by_word():
-    words = ["Of", "course", "they", "are."]
+    words = ["Not", "this", "one", "again."]
     assert kinetic.hot_index(words, 1) == 1
-    assert kinetic.hot_index(words, "they") == 2
-    assert kinetic.hot_index(words, "ARE") == 3
+    assert kinetic.hot_index(words, "one") == 2
+    assert kinetic.hot_index(words, "AGAIN") == 3
     assert kinetic.hot_index(words, "missing") == 3
     assert kinetic.hot_index([], None) is None
 
@@ -40,13 +40,13 @@ def test_short_window_squeezes_entrances_so_the_line_arrives_before_leaving():
 
 def test_page_marks_the_hot_word_and_keeps_the_given_breaks(monkeypatch):
     monkeypatch.delenv("REELLY_BRAND", raising=False)
-    page = kinetic.page_html("Someone is knocking.", 70, 856, 160, 3.6,
-                             hot=2, lines=[["Someone", "is"], ["knocking."]],
-                             accent="#a87cf0", fill="#ebeae7")
+    page = kinetic.page_html("The door opens.", 70, 856, 160, 3.6,
+                             hot=2, lines=[["The", "door"], ["opens."]],
+                             accent="#3366ff", fill="#f4f1ea")
     assert page.count('class="w hot"') == 1
-    assert "knocking.</span></span>" in page          # hot word wrapped in the pop
+    assert "opens.</span></span>" in page          # hot word wrapped in the pop
     assert page.count("<br>") == 1
-    assert "#a87cf0" in page and "#ebeae7" in page
+    assert "#3366ff" in page and "#f4f1ea" in page
     assert "white-space:nowrap" in page
     assert "animation-play-state:paused!important" in page
 
@@ -57,14 +57,14 @@ def test_page_escapes_text():
 
 
 def test_pop_grows_inward_at_a_line_end():
-    page = kinetic.page_html("Someone is knocking.", 70, 856, 160, 3.6, hot=2)
+    page = kinetic.page_html("The door opens.", 70, 856, 160, 3.6, hot=2)
     assert "transform-origin:80% 75%" in page
-    page = kinetic.page_html("Knocking is someone.", 70, 856, 160, 3.6, hot=0)
+    page = kinetic.page_html("Opens door the.", 70, 856, 160, 3.6, hot=0)
     assert "transform-origin:20% 75%" in page
 
 
 def test_wrap_lines_matches_the_static_wrap():
-    text = "Someone is knocking on the door again tonight and again"
+    text = "The door opens on a long and winding road again"
     lines = kinetic.wrap_lines(text, 74, 800)
     assert " ".join(w for ln in lines for w in ln) == text
     assert len(lines) >= 2

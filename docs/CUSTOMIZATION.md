@@ -78,6 +78,15 @@ One kit can hold several brands, for example a studio and each of its games:
   <font files>      .ttf / .otf named in brand.json
 ```
 
+Register one with a single command (files are copied into your local kit;
+nothing goes into the repository):
+
+```sh
+reelly brand add mygame --headline Display-Bold.ttf --caption Text-Bold.ttf \
+    --accent "#3366ff" --ink "#f4f1ea" --surface "#101010"
+reelly brand list
+```
+
 Pick one per run with `--brand <brand>` (anywhere on the command line) or
 `REELLY_BRAND`, or set `"default_brand"` in `kit.json`. The hook and end card
 use the `headline` font, captions and labels use `caption` (a missing headline

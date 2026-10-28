@@ -361,7 +361,47 @@ def main(argv=None):
     su.add_argument("--json", action="store_true",
                     help="machine-readable check results")
 
+    br = sub.add_parser("brand", help="manage local brands in the brand kit "
+                                      "(fonts, accent, ink, surface)")
+    brs = br.add_subparsers(dest="brand_cmd", required=True)
+    ba = brs.add_parser("add", help="create or update a brand in ~/.reelly/brandkit/brands/")
+    ba.add_argument("name")
+    ba.add_argument("--headline", help="static .ttf/.otf for hooks and end cards")
+    ba.add_argument("--caption", help="static .ttf/.otf for captions and labels")
+    ba.add_argument("--cta", help="optional .ttf/.otf for the call to action")
+    ba.add_argument("--accent", help="#RRGGBB highlight colour")
+    ba.add_argument("--ink", help="#RRGGBB text colour")
+    ba.add_argument("--surface", help="#RRGGBB plate / backdrop colour")
+    ba.add_argument("--replace", action="store_true",
+                    help="start brand.json fresh instead of updating it")
+    brs.add_parser("list", help="list the brands in the local kit")
+
     args = ap.parse_args(argv)
+    if args.cmd == "brand":
+        import json as _json
+        from . import brandkit
+        if args.brand_cmd == "add":
+            fonts = {r: getattr(args, r) for r in ("headline", "caption", "cta")
+                     if getattr(args, r)}
+            try:
+                d = brandkit.add_brand(args.name, fonts=fonts, accent=args.accent,
+                                       ink=args.ink, surface=args.surface,
+                                       force=args.replace)
+            except ValueError as e:
+                raise SystemExit(f"brand add: {e}")
+            print(f"brand '{args.name}' -> {d}")
+            print(_json.dumps(brandkit.brand(args.name), indent=1))
+            print(f"use it with: reelly <command> ... --brand {args.name}")
+        else:
+            brands = brandkit.list_brands()
+            if not brands:
+                print(f"no brands yet in {brandkit.kit_dir()}/brands "
+                      f"(add one: reelly brand add NAME --headline F.ttf --accent #RRGGBB)")
+            for n, spec in brands.items():
+                roles = ", ".join(sorted((spec.get("fonts") or {}).keys())) or "no fonts"
+                print(f"  {n:<16} accent {spec.get('accent', '-'):<8} "
+                      f"ink {spec.get('ink', '-'):<8} fonts: {roles}")
+        return
     from . import runlog
     if args.cmd == "runs":
         sys.exit(1 if runlog.report() else 0)

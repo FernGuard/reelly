@@ -60,37 +60,37 @@ def test_no_brand_is_the_old_behaviour(kit):
 
 def test_active_brand_gives_fonts_per_role(kit, monkeypatch):
     head, cap = _two_fonts()
-    d = _make_brand(kit, "curses", {"headline": head, "caption": cap},
-                    accent="#a87cf0", ink="#ebeae7", surface="#0b0b0c")
-    monkeypatch.setenv("REELLY_BRAND", "curses")
+    d = _make_brand(kit, "game-a", {"headline": head, "caption": cap},
+                    accent="#3366ff", ink="#f4f1ea", surface="#0b0b0c")
+    monkeypatch.setenv("REELLY_BRAND", "game-a")
     assert brandkit.font("headline") == str(d / f"headline{os.path.splitext(head)[1]}")
     assert brandkit.font("caption") == str(d / f"caption{os.path.splitext(cap)[1]}")
-    assert brandkit.accent() == "#a87cf0"
-    assert brandkit.ink() == "#ebeae7"
+    assert brandkit.accent() == "#3366ff"
+    assert brandkit.ink() == "#f4f1ea"
     assert brandkit.surface() == "#0b0b0c"
 
 
 def test_headline_borrows_caption_when_the_brand_has_none(kit, monkeypatch):
     _, cap = _two_fonts()
-    d = _make_brand(kit, "toxtli", {"caption": cap}, accent="#ffa322")
-    monkeypatch.setenv("REELLY_BRAND", "toxtli")
+    d = _make_brand(kit, "game-b", {"caption": cap}, accent="#ff8800")
+    monkeypatch.setenv("REELLY_BRAND", "game-b")
     assert brandkit.font("headline") == brandkit.font("caption")
     assert brandkit.font("headline").startswith(str(d))
 
 
 def test_default_brand_from_kit_json(kit):
-    _make_brand(kit, "studio", accent="#ebeae7")
+    _make_brand(kit, "studio", accent="#f4f1ea")
     (kit / "kit.json").write_text(json.dumps({"default_brand": "studio"}))
     assert brandkit.brand_name() == "studio"
-    assert brandkit.accent() == "#ebeae7"
+    assert brandkit.accent() == "#f4f1ea"
 
 
 def test_env_brand_beats_default_brand(kit, monkeypatch):
-    _make_brand(kit, "studio", accent="#ebeae7")
-    _make_brand(kit, "curses", accent="#a87cf0")
+    _make_brand(kit, "studio", accent="#f4f1ea")
+    _make_brand(kit, "game-a", accent="#3366ff")
     (kit / "kit.json").write_text(json.dumps({"default_brand": "studio"}))
-    monkeypatch.setenv("REELLY_BRAND", "curses")
-    assert brandkit.accent() == "#a87cf0"
+    monkeypatch.setenv("REELLY_BRAND", "game-a")
+    assert brandkit.accent() == "#3366ff"
 
 
 def test_missing_brand_warns_once_and_falls_back(kit, monkeypatch, capsys):
@@ -123,37 +123,37 @@ def test_bad_colors_are_ignored(kit, monkeypatch):
 
 
 def test_karaoke_highlight_is_the_brand_accent(kit, monkeypatch):
-    _make_brand(kit, "curses", accent="#a87cf0")
-    monkeypatch.setenv("REELLY_BRAND", "curses")
-    assert captions.karaoke_highlight() == "#a87cf0"
+    _make_brand(kit, "game-a", accent="#3366ff")
+    monkeypatch.setenv("REELLY_BRAND", "game-a")
+    assert captions.karaoke_highlight() == "#3366ff"
     monkeypatch.setenv("REELLY_KARAOKE_COLOR", "#00ff00")
     assert captions.karaoke_highlight() == "#00ff00"
 
 
 def test_hook_uses_the_headline_face_and_brand_ink(kit, monkeypatch, tmp_path):
     head, cap = _two_fonts()
-    _make_brand(kit, "curses", {"headline": head, "caption": cap}, ink="#ebeae7")
-    monkeypatch.setenv("REELLY_BRAND", "curses")
+    _make_brand(kit, "game-a", {"headline": head, "caption": cap}, ink="#f4f1ea")
+    monkeypatch.setenv("REELLY_BRAND", "game-a")
     roles = []
     real = captions._font
     monkeypatch.setattr(captions, "_font",
                         lambda size, role=None: (roles.append(role), real(size, role))[1])
     out = str(tmp_path / "hook.png")
-    captions.hook_png("Someone is knocking.", out)
+    captions.hook_png("The door opens.", out)
     assert roles and set(roles) == {"headline"}
     import numpy as np
     a = np.asarray(Image.open(out).convert("RGBA")).reshape(-1, 4).astype(int)
     # the brightest fully drawn pixel is the brand ink, not pure white
     solid = a[a[:, 3] == 255]
     px = solid[solid[:, :3].sum(axis=1).argmax()]
-    assert tuple(px[:3]) == (0xeb, 0xea, 0xe7)
+    assert tuple(px[:3]) == (0xf4, 0xf1, 0xea)
 
 
 def test_hook_block_height_matches_the_rendered_hook(kit, monkeypatch, tmp_path):
     head, cap = _two_fonts()
-    _make_brand(kit, "curses", {"headline": head, "caption": cap})
-    monkeypatch.setenv("REELLY_BRAND", "curses")
-    text = "Someone is knocking on the door again tonight."
+    _make_brand(kit, "game-a", {"headline": head, "caption": cap})
+    monkeypatch.setenv("REELLY_BRAND", "game-a")
+    text = "The door opens on a long and winding road."
     out = str(tmp_path / "h.png")
     captions.hook_png(text, out)
     assert Image.open(out).height == captions.hook_block_height(text)
@@ -161,12 +161,12 @@ def test_hook_block_height_matches_the_rendered_hook(kit, monkeypatch, tmp_path)
 
 def test_overlay_page_serves_brand_fonts_locally(kit, monkeypatch):
     head, cap = _two_fonts()
-    _make_brand(kit, "curses", {"headline": head, "caption": cap}, accent="#a87cf0")
-    monkeypatch.setenv("REELLY_BRAND", "curses")
+    _make_brand(kit, "game-a", {"headline": head, "caption": cap}, accent="#3366ff")
+    monkeypatch.setenv("REELLY_BRAND", "game-a")
     page = overlays._head()
     assert "fonts.googleapis.com" not in page
     assert "@font-face" in page and "file://" in page
-    assert "!important" in page and "#a87cf0" in page
+    assert "!important" in page and "#3366ff" in page
 
 
 def test_overlay_page_unchanged_without_brand_fonts(kit):
@@ -177,9 +177,9 @@ def test_hook_fits_inside_the_safe_right_edge(kit, monkeypatch, tmp_path):
     """A wide display face steps down in size instead of running past x 940."""
     import numpy as np
     head, cap = _two_fonts()
-    _make_brand(kit, "curses", {"headline": head, "caption": cap})
-    monkeypatch.setenv("REELLY_BRAND", "curses")
-    text = "Someone is knocking at the door."
+    _make_brand(kit, "game-a", {"headline": head, "caption": cap})
+    monkeypatch.setenv("REELLY_BRAND", "game-a")
+    text = "The door opens on its own."
     out = str(tmp_path / "h.png")
     captions.hook_png(text, out)
     im = Image.open(out)
@@ -193,3 +193,48 @@ def test_hook_fits_inside_the_safe_right_edge(kit, monkeypatch, tmp_path):
 
 def test_short_hook_keeps_full_size(kit):
     assert captions.hook_size("Open it.") == captions.HOOK_SIZE
+
+
+# --- reelly brand add / list ------------------------------------------------------
+
+def test_add_brand_copies_fonts_into_the_local_kit(kit):
+    head, cap = _two_fonts()
+    d = brandkit.add_brand("mygame", fonts={"headline": head, "caption": cap},
+                           accent="#3366ff", ink="#f4f1ea")
+    assert d.startswith(str(kit))
+    spec = brandkit.brand("mygame")
+    assert spec["accent"] == "#3366ff" and spec["ink"] == "#f4f1ea"
+    assert set(spec["fonts"]) == {"headline", "caption"}
+    for fn in spec["fonts"].values():
+        assert os.path.exists(os.path.join(d, fn))
+    assert "mygame" in brandkit.list_brands()
+
+
+def test_add_brand_updates_without_losing_fields(kit):
+    _, cap = _two_fonts()
+    brandkit.add_brand("g", fonts={"caption": cap}, accent="#3366ff")
+    brandkit.add_brand("g", ink="#ffffff")
+    spec = brandkit.brand("g")
+    assert spec["accent"] == "#3366ff" and spec["ink"] == "#ffffff"
+    assert "caption" in spec["fonts"]
+
+
+@pytest.mark.parametrize("kw", [{"accent": "blue"}, {"fonts": {"title": "x.ttf"}},
+                                {"fonts": {"caption": "/nope/missing.ttf"}}])
+def test_add_brand_rejects_bad_input(kit, kw):
+    with pytest.raises(ValueError):
+        brandkit.add_brand("g", **kw)
+
+
+def test_add_brand_rejects_unsafe_names(kit):
+    with pytest.raises(ValueError):
+        brandkit.add_brand("../x")
+
+
+def test_cli_brand_add_and_list(kit, capsys):
+    from reelly import cli
+    _, cap = _two_fonts()
+    cli.main(["brand", "add", "cli-game", "--caption", cap, "--accent", "#3366ff"])
+    cli.main(["brand", "list"])
+    out = capsys.readouterr().out
+    assert "cli-game" in out and "#3366ff" in out
