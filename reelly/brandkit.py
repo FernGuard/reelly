@@ -235,6 +235,17 @@ def accent():
         else FALLBACK_ACCENT
 
 
+def copy_brief():
+    """The active brand's copy brief (brand.json "copy"), {} without one.
+
+    Keys the editor brain uses: audience, promise, proof, voice (one line
+    each), cta (a fixed ask, used verbatim), cta_hot (its action word),
+    avoid (words and claims never to write). All brand data lives in the
+    user's kit, never in the repository."""
+    c = brand().get("copy")
+    return c if isinstance(c, dict) else {}
+
+
 def font_css():
     """CSS that points Chrome-rendered layers (overlays, cards) at the active
     brand's own font files instead of a font CDN, or "" with no brand fonts.

@@ -50,8 +50,8 @@ RULES.update({
               "cheapest way to lose a viewer"),
     "P-LOOP": ("end near where it started: rewatch is one of the strongest "
                "short-form signals and a loop earns it without asking"),
-    "P-BAIT": ("ask for one thing: a comment, a share, a save or a rewatch. "
-               "Saves lead on Instagram, shares and rewatch on TikTok"),
+    "P-BAIT": ("ask for exactly one thing, the one the brand needs (its brief "
+               "names it); a cut that asks for nothing gets nothing"),
     "P-REWARD": "pay off the hook within 5-15s, not at the end",
     "P-SCREEN": ("a cut is not deliverable until a human has watched it end to "
                  "end and recorded a verdict: guns/blood, retired branding, "
@@ -101,11 +101,11 @@ Write the on-screen text yourself:
 - "overlay_lines": 1 to 3 further lines timed in seconds FROM THE START OF THE CLIP, each max 10 words, spaced at least 4s apart, none in the first 4s (the hook owns that), none in the last 1.5s. Use them to carry the mood or the turn. Leave empty only if the picture genuinely says it all.
 - Every overlay line carries a "role": "tease" DELIBERATELY precedes its event (a hook, a question, building dread); "reveal" NAMES or DESCRIBES a specific on-screen moment (a result, an action, a turn that is visible when the line is up). A reveal must never appear before the moment it describes: the render will hold it back to that moment.
 - "caption": the post caption. Make it a self-insertion prompt ("you get one door, which one") or a 3-fragment lore tease. Never a bare credit line.
-- "cta": the ask, max 6 words, burned on screen at the end. It must tell a viewer what to DO, not what was made. "watch the full version", "try it yourself", "join the community". Imperative, no hype, no exclamation marks.
+- "cta": the ask, max 6 words, burned on screen at the end. It must tell a viewer what to DO, not what was made. Imperative, no hype, no exclamation marks. If a BRAND BRIEF follows, its CTA wins.
 - Pay the hook off within 5 to 15 seconds. A viewer who feels baited leaves and does not engage, and the payoff arriving at the end is the same as no payoff.
 - Never hold one picture past about 3.5 seconds. Each visual change reads as new content; a held frame reads as a stall.
 - Prefer an ending that returns near the opening image. Rewatch is one of the strongest short-form signals and a loop earns it without asking for it.
-- The "cta" must ask for exactly one thing, and it should be the thing that platform rewards: a comment or a save on Instagram, a share or a rewatch on TikTok. A cut that asks for nothing gets nothing.
+- The "cta" must ask for exactly one thing. A cut that asks for nothing gets nothing.
 - Write for someone with no project context. Every word must make sense on its own. Name what happens, not an internal label. Avoid internal workflow terms, metrics, and phase labels.
 
 Return ONLY JSON:
@@ -122,7 +122,7 @@ Return ONLY JSON:
  "stranger_appeal": 1-10,
  "why": "one line on why this works as a clip"}}"""
 
-REFINE_PROMPT = """You are a short-form video editor picking the exact lines for one vertical clip (TikTok/Reels/Shorts) from a screen recording of someone building with a creative AI tool.
+REFINE_PROMPT = """You are a short-form video editor picking the exact lines for one vertical clip (TikTok/Reels/Shorts) from a narrated recording.
 
 CANDIDATE MOMENT: {why}
 VISUAL CONTEXT in this window: {visuals}
@@ -264,7 +264,8 @@ def _refine_ai(cand, wsents, vr, peaks, project):
     resp = client.models.generate_content(
         model=config.GEMINI_MODEL,
         contents=REFINE_PROMPT.format(why=cand["why"], visuals=visuals, peaks=pk,
-                                      sents=lines, payoffs=_payoff_lines(cand, vr)),
+                                      sents=lines, payoffs=_payoff_lines(cand, vr))
+        + brief_block(),
         config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.3))
     with _LEDGER_LOCK:
         ledger.add("gemini-direct", f"refine {cand['why'][:40]}", EST_REFINE_COST, project)
@@ -291,7 +292,7 @@ def _refine_gpt(cand, wsents, vr, peaks, project):
         json={"model": GPT_MODEL,
               "messages": [{"role": "user", "content": REFINE_PROMPT.format(
                   why=cand["why"], visuals=visuals, peaks=pk, sents=lines,
-                  payoffs=_payoff_lines(cand, vr))}],
+                  payoffs=_payoff_lines(cand, vr)) + brief_block()}],
               "response_format": {"type": "json_object"}},
         timeout=180)
     with _LEDGER_LOCK:
@@ -461,7 +462,49 @@ def _refine_cli(cand, wsents, vr, peaks, project, tool):
                    for p in peaks if cand["s"] - 10 <= p["t"] <= cand["e"] + 10) or "none"
     return _ask_cli(tool, REFINE_PROMPT.format(
         why=cand["why"], visuals=visuals, peaks=pk, sents=lines,
-        payoffs=_payoff_lines(cand, vr)), project, f"refine {cand['why'][:40]}")
+        payoffs=_payoff_lines(cand, vr)) + brief_block(), project,
+        f"refine {cand['why'][:40]}")
+
+
+def brief_block():
+    """The BRAND BRIEF appended to every editor-brain prompt ("" without a
+    brand brief). It names who the clip is for, what it promises, the voice,
+    the one ask and what never to write, and it overrides the generic advice
+    in the prompt above it."""
+    from . import brandkit
+    c = brandkit.copy_brief()
+    if not c:
+        return ""
+    lines = ["", "BRAND BRIEF (this overrides any generic advice above; write every word for it):"]
+    for key, label in (("audience", "Audience"), ("promise", "What the game is"),
+                       ("proof", "What the footage can prove"), ("voice", "Voice")):
+        if c.get(key):
+            lines.append(f"- {label}: {c[key]}")
+    if c.get("cta"):
+        lines.append(f'- The CTA is fixed: "{c["cta"]}". Use it verbatim, never another ask.')
+    avoid = c.get("avoid") or []
+    if avoid:
+        lines.append("- Never write: " + ", ".join(f'"{a}"' for a in avoid))
+    lines.append("- Every claim must be visible in the footage; never invent mechanics, story or offers.")
+    return "\n".join(lines)
+
+
+def apply_brand_cta(plan):
+    """A brand with a fixed CTA gets it on every plan, verbatim, whatever the
+    model wrote; the action word (cta_hot) is what pops on the end card."""
+    from . import brandkit
+    c = brandkit.copy_brief()
+    if c.get("cta") and plan is not None:
+        if (plan.get("cta") or "").strip() != c["cta"]:
+            plan.setdefault("because", []).append(
+                f"CTA from the brand brief: {c['cta']!r} (model wrote "
+                f"{plan.get('cta')!r})")
+        plan["cta"] = c["cta"]
+        plan["cta_source"] = "brand brief, hand-authored"
+        if c.get("cta_hot"):
+            plan["cta_hot"] = c["cta_hot"]
+            plan["cta_hot_reason"] = "the brand's action word"
+    return plan
 
 
 def _ask_json(prompt, brain, project, label):
@@ -514,8 +557,8 @@ def _refine_visual(cand, vr, peaks, scenes, duration, brain, project):
     pk = ", ".join(f"{p['t']:.1f}s ({p['above_median']:+.1f}dB)" for p in peaks
                    if cand["s"] - 15 <= p["t"] <= cand["e"] + 60) or "none"
     return _ask_json(VISUAL_REFINE_PROMPT.format(
-        why=cand["why"], visuals=visuals, scenes=sc, peaks=pk, duration=duration),
-        brain, project, f"visual refine {cand['why'][:40]}")
+        why=cand["why"], visuals=visuals, scenes=sc, peaks=pk, duration=duration)
+        + brief_block(), brain, project, f"visual refine {cand['why'][:40]}")
 
 
 def _snap_scene(t, scenes, window=1.5):
@@ -1178,6 +1221,7 @@ def run(project, ai=True, max_cuts=8, brain="auto", tag=None):
                                 if brain in ("codex", "claude") else ""))
     an = os.path.join(root, "analysis")
     edl = os.path.join(root, "edl")
+    os.makedirs(edl, exist_ok=True)
     sfx = f"_{tag}" if tag else ""
     words = speech.words_from(os.path.join(an, "words.json"))
     sents = topics_mod.sentences(words)
@@ -1322,6 +1366,22 @@ def run(project, ai=True, max_cuts=8, brain="auto", tag=None):
     with timing.stage("direct refine", timing.timings_path(root)):
         _batched_refine(cands, _refine_one, _consume)
 
+    # The brand's one ask, then the hook and opening frame chosen together.
+    from . import hooks
+    used = set()
+    for plan in plans:
+        apply_brand_cta(plan)
+        if ai:
+            with timing.stage(f"hooks {plan['id']}", timing.timings_path(root)):
+                try:
+                    hooks.compose(plan, an, _source_video(root), brain, name,
+                                  vr=vr, used_openers=used)
+                except Exception as e:  # noqa: BLE001 -- keep the planned hook
+                    print(f"  [hooks] {plan['id']}: failed ({e}); keeping the planned hook")
+        first = (plan.get("hook") or {}).get("text", "").lower().split()
+        if first:
+            used.add(re.sub(r"[^a-z0-9']", "", first[0]))
+
     full = _full_edit(sm, sents)
     json.dump(plans, open(os.path.join(edl, f"cut_plans{sfx}.json"), "w"), indent=1)
     json.dump(full, open(os.path.join(edl, "full_edit.json"), "w"), indent=1)
@@ -1349,6 +1409,19 @@ def _write_md(name, plans, full, path):
               f"captions: {p.get('captions', 'burned')}"]
         for o in p.get("overlay_lines") or []:
             L.append(f"- On screen at {o['t']:.1f}s: \"{o['text']}\"")
+        if p.get("cta"):
+            L.append(f"- CTA: \"{p['cta']}\"")
+        if p.get("hook_variants"):
+            L.append("- Hook and opening-frame variants (score = 0.5 judge + 0.2 "
+                     "writer stop + 0.3 frame, + unlikely bonus, - repeated opener):")
+            for v in p["hook_variants"]:
+                judge = (f"judge {v['judge_score']:.1f}"
+                         + (f" '{v['judge_note']}'" if v.get("judge_note") else "") + ", "
+                         if "judge_score" in v else "")
+                L.append(f"    - {v['score']:.1f} [{v['path']}] \"{v['hook']}\" over "
+                         f"{v['t']:.1f}s ({judge}stop {v['stop_score']}, frame "
+                         f"{v['opening_score']}, typicality {v['typicality']})"
+                         + (" REPEATS AN OPENER" if v.get("repeats_batch_opener") else ""))
         if p.get("caption"):
             L.append(f"- Caption: {p['caption']}")
         L += [f"- Says: {p['transcript'][:300]}" if p.get("transcript") else "", "",
