@@ -310,8 +310,46 @@ def provider_key(name):
 # this.
 _HW_ENCODE = None  # None = not probed yet; True/False after the one-time probe
 
-_SW_INTERMEDIATE_ARGS = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
+# crf 16 (was 21): every social cut is re-encoded at least twice after this
+# (text burn, gfx pass), and each lossy generation compounds. The raw is a
+# throwaway file, so spending bits here costs disk, not quality.
+_SW_INTERMEDIATE_ARGS = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "16"]
 _HW_INTERMEDIATE_ARGS = ["-c:v", "h264_videotoolbox", "-b:v", "10M", "-allow_sw", "1"]
+
+
+OUTPUT_FPS_ALLOWED = (24, 25, 30, 50, 60)
+
+
+def output_fps():
+    """Frame rate of the social deliverables: REELLY_FPS, then the brand
+    kit's "fps", then 30. A game captured at 60 and shipped at 30 loses every
+    other frame, which reads as choppy on fast play (falling blocks, hits);
+    60 keeps it as smooth as it was recorded. TikTok, Reels and Shorts all
+    accept 60."""
+    v = os.environ.get("REELLY_FPS", "").strip() or None
+    if v is None:
+        try:
+            from . import brandkit
+            v = brandkit.brand().get("fps")
+        except Exception:   # noqa: BLE001 -- no kit, no override
+            v = None
+    try:
+        f = int(float(v))
+    except (TypeError, ValueError):
+        return 30
+    return f if f in OUTPUT_FPS_ALLOWED else 30
+
+
+# The encodes a viewer actually sees (text burn, outro segment, gfx pass).
+# One setting for all three so the outro still concatenates with -c copy.
+# Was veryfast/crf 20: the platforms re-encode every upload, and a richer
+# upload survives their pass with more detail (fine HUD text, block edges).
+_FINAL_ENCODE_ARGS = ["-c:v", "libx264", "-preset", "medium", "-crf", "17",
+                      "-pix_fmt", "yuv420p"]
+
+
+def final_encode_args():
+    return list(_FINAL_ENCODE_ARGS)
 
 
 def _videotoolbox_works():

@@ -244,14 +244,15 @@ def card_png(plan, product, workdir):
                              dst)
 
 
-def build_segment(backdrop, card, len_s, dst, fps=30, seq=None):
+def build_segment(backdrop, card, len_s, dst, fps=None, seq=None):
     """Encode the outro segment: static backdrop, card fading in, no audio.
     seq=(pattern, y): a kinetic CTA sequence composited over the card.
 
-    Codec parameters MIRROR finalize._burn_pass (libx264 veryfast crf 20,
-    -r 30, yuv420p) so the concat with the burned content stream can run
+    Codec parameters MIRROR finalize._burn_pass (config.final_encode_args,
+    config.output_fps) so the concat with the burned content stream can run
     with -c copy.
     """
+    fps = fps or config.output_fps()
     fc = (f"[0:v]scale=1080:1920,setsar=1[b];"
           f"[1:v]scale=1080:1920,format=rgba,"
           f"fade=t=in:st=0.03:d={FADE_IN_S}:alpha=1[c];"
@@ -266,8 +267,7 @@ def build_segment(backdrop, card, len_s, dst, fps=30, seq=None):
          "-loop", "1", "-framerate", str(fps), "-i", backdrop,
          "-loop", "1", "-framerate", str(fps), "-i", card] + extra +
         ["-filter_complex", fc, "-map", "[v]", "-t", f"{len_s:.3f}",
-         "-r", str(fps), "-an",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", dst],
+         "-r", str(fps), "-an", *config.final_encode_args(), dst],
         check=True, capture_output=True)
     return dst
 
@@ -291,8 +291,8 @@ def _concat_reencode(a, b, dst):
          "[0:v]settb=AVTB,setpts=PTS-STARTPTS[v0];"
          "[1:v]settb=AVTB,setpts=PTS-STARTPTS[v1];"
          "[v0][v1]concat=n=2:v=1:a=0,format=yuv420p[v]",
-         "-map", "[v]", "-r", "30", "-an",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", dst],
+         "-map", "[v]", "-r", str(config.output_fps()), "-an",
+         *config.final_encode_args(), dst],
         check=True, capture_output=True)
     return dst
 

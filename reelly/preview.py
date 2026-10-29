@@ -172,7 +172,7 @@ def _face_shots(video, s, e, td, i):
                         "-ss", str(a), "-to", str(b),
                         "-i", video,
                         "-vf", f"crop={cw}:{ch}:{cx}:{cy},scale=1080:1920,setsar=1",
-                        "-r", "30", *config.intermediate_encode_args(),
+                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", p], check=True)
         parts.append(p)
     return parts
@@ -321,7 +321,7 @@ def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
                 args += ["-filter:a", _atempo_chain(speed) + "," + fades]
             else:
                 args += ["-filter:a", fades]
-            args += ["-r", "30", *config.intermediate_encode_args(),
+            args += ["-r", str(config.output_fps()), *config.intermediate_encode_args(),
                      "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", p]
             subprocess.run(args, check=True)
             parts.append(p)

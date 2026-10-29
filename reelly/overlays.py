@@ -473,16 +473,15 @@ def _composite(src, out, events, workdir, music=None, speech=False):
     else:
         amap = "0:a"
 
-    # veryfast/crf 20 matches the underlying deliverable (finalize._burn_pass
-    # encodes at veryfast/crf 20): encoding the gfx pass at medium/crf 18 was a
-    # quality inversion — it spent ~3s/cut polishing a stream whose source was
-    # already veryfast/crf 20-21, which no viewer can get back.
+    # Same encode as the underlying deliverable (finalize._burn_pass uses
+    # config.final_encode_args): a better setting here cannot recover detail
+    # the burn already lost, a worse one throws away what it kept.
     # -t pins the output to the SOURCE length: the looped-PNG inputs and any
     # SFX tail must never extend a deliverable past its plan (duration gate).
     tlim = ["-t", f"{dur:.3f}"] if dur else []
     subprocess.run([config.FFMPEG, "-y", "-v", "error"] + inputs +
                    ["-filter_complex", ";".join(f), "-map", "[vout]", "-map", amap,
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    *config.final_encode_args(),
                     "-c:a", "aac", "-b:a", "192k", "-shortest", *tlim, out],
                    check=True, capture_output=True)
     # This pass re-encoded the audio, so it can overshoot exactly like the mux

@@ -45,7 +45,6 @@ import subprocess
 
 from . import config
 
-FPS = 30
 STAGGER = 0.07          # s between word entrances
 ENTER = 0.46            # s for one word to arrive
 POP_AT, POP = 0.30, 0.36  # hot word: pop starts this long after it lands, lasts POP
@@ -257,7 +256,7 @@ async def _render(page, frames, width, height, out_dir, still, profile):
 
 
 def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
-                fps=FPS, enter=True, leave=True, kind="line", hot_reason=None,
+                fps=None, enter=True, leave=True, kind="line", hot_reason=None,
                 label=None):
     """Render one kinetic line to out_dir/k%05d.png covering local 0..dur.
 
@@ -279,6 +278,7 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
         f.write(page_html(text, size, cw, ch, dur, role=role, hot=hi,
                           lines=wrap_lines(text, size, width, role),
                           enter=enter, leave=leave))
+    fps = fps or config.output_fps()
     n = max(1, int(round(dur * fps)))
     frames = [(i, i / fps) for i in range(n)]
     hold_end = exit_t if leave else dur + 1.0
@@ -326,9 +326,9 @@ def is_sequence(path):
     return "%0" in os.path.basename(str(path))
 
 
-def sequence_input(pattern, fps=FPS):
+def sequence_input(pattern, fps=None):
     """ffmpeg input args for a PNG sequence (alpha preserved)."""
-    return ["-framerate", str(fps), "-i", pattern]
+    return ["-framerate", str(fps or config.output_fps()), "-i", pattern]
 
 
 def probe_ok():

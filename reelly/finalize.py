@@ -259,7 +259,7 @@ def _burn_pass(src, dst, events, seek=None):
     for png, y, t0, t1 in events:
         if isinstance(png, _Seq):
             # kinetic sequence: frame 0 lands on t0 (minus any chunk offset)
-            inputs.extend(["-framerate", "30", "-i", png])
+            inputs.extend(["-framerate", str(config.output_fps()), "-i", png])
             trim = f"trim=start={png.offset:.3f}," if png.offset > 0 else ""
             filters.append(f"[{idx}:v]{trim}setpts=PTS-STARTPTS+{t0:.3f}/TB[k{idx}]")
             filters.append(f"[{last}][k{idx}]overlay=(W-w)/2:{y}:eof_action=pass:"
@@ -274,8 +274,7 @@ def _burn_pass(src, dst, events, seek=None):
         inputs += ["-filter_complex", ";".join(filters), "-map", f"[{last}]"]
     else:
         inputs += ["-map", "0:v"]
-    inputs += ["-an", "-r", "30",
-               "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", dst]
+    inputs += ["-an", "-r", str(config.output_fps()), *config.final_encode_args(), dst]
     subprocess.run(inputs, check=True)
     return dst
 
@@ -326,6 +325,7 @@ def _raw_cache_key(plan, video, facecam, follow, src_crop=None):
              "detector": face.detector_kind() if facecam else "n/a",
              # intermediate encoder selection (incl. REELLY_SW/HW_ENCODE state)
              "encode": config.intermediate_encode_args(),
+             "fps": config.output_fps(),
              "src": [os.path.basename(video), st.st_mtime, st.st_size]}
     if facecam:
         fs = os.stat(facecam)
