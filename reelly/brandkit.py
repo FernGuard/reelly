@@ -238,6 +238,23 @@ def accent():
         else FALLBACK_ACCENT
 
 
+def reframe():
+    """The active brand's framing for 16:9 footage in a 9:16 frame, or None.
+
+    brand.json "reframe": "full_width" (or 1.0) shows the whole width of the
+    game, smaller; a number up to 2.0 zooms in and crops the sides. A game
+    whose screen must read whole (two boards, a HUD at both edges) sets
+    full_width; None leaves Reelly's own choice."""
+    v = brand().get("reframe")
+    if isinstance(v, str) and v.strip().lower() in ("full_width", "full", "fit"):
+        return 1.0
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return max(1.0, min(2.0, f))
+
+
 def copy_brief():
     """The active brand's copy brief (brand.json "copy"), {} without one.
 

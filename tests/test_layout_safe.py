@@ -76,3 +76,23 @@ def test_judge_reads_the_layout_positions():
     hook = next(r for r in rows if r[4] == "hook")
     assert hook[2] == layout.plan_text(_plan(), None)["hook"]["y"]
     assert any(r[4] == "game_name" for r in rows)
+
+
+def test_text_sits_just_above_a_full_width_picture():
+    z = layout._zones_full(None, 1.0)
+    top = layout.picture_top(1.0)
+    assert top == 656
+    assert z["game_label"][1] == top - layout.PICTURE_GAP
+    assert z["center"][1] == z["game_label"][0]
+    assert z["center"][0] >= layout.SAFE_TOP
+
+
+def test_zoomed_pictures_keep_the_default_bands():
+    assert layout._zones_full(None, 2.0) == layout._zones_full(None, None)
+    assert layout._zones_full(None, 1.5)["center"][0] >= layout.SAFE_TOP
+
+
+def test_plan_text_follows_the_plan_reframe():
+    full = layout.plan_text({"hook": {"text": "x"}, "duration_s": 10, "reframe": 1.0}, None)
+    zoom = layout.plan_text({"hook": {"text": "x"}, "duration_s": 10, "reframe": 1.5}, None)
+    assert full["hook"]["y"] > zoom["hook"]["y"]

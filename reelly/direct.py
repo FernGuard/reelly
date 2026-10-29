@@ -1213,7 +1213,13 @@ def _full_edit(sm, sents=None, join_gap=2.5, pad=None):
 
 
 def _auto_reframe(root):
-    """Cinematic 16:9 with no facecam can lose its sides; screen recordings cannot."""
+    """Cinematic 16:9 with no facecam can lose its sides; screen recordings
+    cannot. A brand's own framing ("reframe" in brand.json, e.g. full_width
+    for a game whose whole screen must read) wins over the guess."""
+    from . import brandkit
+    pinned = brandkit.reframe()
+    if pinned is not None:
+        return pinned
     try:
         probe = media.probe(_source_video(root))
         v = next(x for x in probe["streams"] if x.get("codec_type") == "video")

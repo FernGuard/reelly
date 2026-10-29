@@ -238,3 +238,26 @@ def test_cli_brand_add_and_list(kit, capsys):
     cli.main(["brand", "list"])
     out = capsys.readouterr().out
     assert "cli-game" in out and "#3366ff" in out
+
+
+@pytest.mark.parametrize("value, want", [("full_width", 1.0), (1.0, 1.0), (1.3, 1.3),
+                                         (5, 2.0), ("nonsense", None), (None, None)])
+def test_brand_reframe(kit, monkeypatch, value, want):
+    spec = {"name": "g"}
+    if value is not None:
+        spec["reframe"] = value
+    d = kit / "brands" / "g"
+    d.mkdir(parents=True)
+    (d / "brand.json").write_text(json.dumps(spec))
+    monkeypatch.setenv("REELLY_BRAND", "g")
+    assert brandkit.reframe() == want
+
+
+def test_brand_full_width_wins_over_the_cinematic_guess(kit, monkeypatch):
+    from reelly import direct
+    d = kit / "brands" / "g"
+    d.mkdir(parents=True)
+    (d / "brand.json").write_text(json.dumps({"reframe": "full_width"}))
+    monkeypatch.setenv("REELLY_BRAND", "g")
+    monkeypatch.setattr(direct, "_source_video", lambda root: pytest.fail("no probe needed"))
+    assert direct._auto_reframe("unused") == 1.0

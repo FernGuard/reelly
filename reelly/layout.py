@@ -114,11 +114,36 @@ def _zones_split(comp):
             "bottom": bottom}
 
 
-def _zones_full(comp):
-    """No-facecam / fallback: letterbox bars (preferred) as text zones."""
-    return {"center": FULL_CENTER,
-            "game_label": (FULL_CENTER[1], FULL_CENTER[1] + GAME_LABEL_H),
-            "bottom": FULL_BOTTOM}
+PICTURE_GAP = 12          # px between the game-name strip and the picture top
+
+
+def picture_top(reframe=1.5):
+    """Top edge (y) of a 16:9 picture centred in the 9:16 frame at this
+    reframe zoom: the picture is 1080*9/16*zoom tall."""
+    z = max(1.0, min(2.0, float(reframe or 1.5)))
+    return int(round(FRAME_H / 2 - (FRAME_W * 9 / 16 * z) / 2))
+
+
+def _zones_full(comp, reframe=None):
+    """No-facecam / fallback: letterbox bars (preferred) as text zones.
+
+    The hook band and the game-name strip sit right ABOVE the picture, so
+    text and gameplay read as one block: a full-width reframe (picture from
+    y 656) moves them down; the zoomed default (from y 504) keeps
+    FULL_CENTER. Never above the platform header (SAFE_TOP)."""
+    if reframe is None:
+        return {"center": FULL_CENTER,
+                "game_label": (FULL_CENTER[1], FULL_CENTER[1] + GAME_LABEL_H),
+                "bottom": FULL_BOTTOM}
+    label_end = picture_top(reframe) - PICTURE_GAP
+    label = (label_end - GAME_LABEL_H, label_end)
+    height = FULL_CENTER[1] - FULL_CENTER[0]
+    if label[0] - height < SAFE_TOP + 2:
+        # no room above a tall (zoomed) picture: the default bands, which put
+        # the text over the picture's top edge
+        return _zones_full(comp, None)
+    center = (label[0] - height, label[0])
+    return {"center": center, "game_label": label, "bottom": FULL_BOTTOM}
 
 
 # Template registry. Add "corner"/"full" builders here next; unknown templates
@@ -126,8 +151,11 @@ def _zones_full(comp):
 TEMPLATES = {"split": _zones_split}
 
 
-def zones(comp, template):
-    return TEMPLATES.get(template or "", _zones_full)(comp)
+def zones(comp, template, reframe=None):
+    builder = TEMPLATES.get(template or "")
+    if builder:
+        return builder(comp)
+    return _zones_full(comp, reframe)
 
 
 def _y_top(band, pad=6):
@@ -203,7 +231,7 @@ def plan_text(plan, template, meme_windows=None):
     center. windows=None on karaoke means "whenever captions play" (per-word
     timing stays with the caller).
     """
-    z = zones(plan.get("composition"), template)
+    z = zones(plan.get("composition"), template, plan.get("reframe"))
     dur = float(plan.get("duration_s", 0) or 0)
     hook = plan.get("hook") or {}
     show_s = float(hook.get("show_s", 3.6) or 3.6)

@@ -91,7 +91,7 @@ Pick one per run with `--brand <brand>` (anywhere on the command line) or
 `REELLY_BRAND`, or set `"default_brand"` in `kit.json`. The hook and end card
 use the `headline` font, captions and labels use `caption` (a missing headline
 borrows caption). The accent drives karaoke highlights, chips and the outro
-tint; `ink` is the text colour. Overlay and card pages load the brand's own
+tint; `ink` is the text colour. `"reframe": "full_width"` in brand.json shows the whole width of 16:9 footage (smaller, nothing cropped); a number up to 2.0 zooms in and crops the sides. Leave it out to let Reelly choose. Overlay and card pages load the brand's own
 font files locally instead of a font CDN. Pillow needs static fonts: cut
 variable fonts to fixed instances first (for example with fontTools'
 `varLib.instancer`).
