@@ -177,3 +177,28 @@ def test_has_audio_reads_the_streams(monkeypatch):
     monkeypatch.setattr(media, "probe", lambda p: {"streams": [
         {"codec_type": "video"}, {"codec_type": "audio"}]})
     assert media.has_audio("x.mp4") is True
+
+
+def test_tail_is_judged_at_shipping_loudness(monkeypatch):
+    """A quiet raw cut hid an onset the normalised shipped file then failed
+    on: the render-time check scales to the mix target first."""
+    from reelly import audio_post, audiotail
+    quiet = [(i * 0.05, 30.0) for i in range(20)] + [(1.0, 2.0), (1.05, 2.0), (1.1, 2.0),
+                                                     (1.15, 2.0), (1.2, 2.0), (1.25, 60.0)]
+    monkeypatch.setattr(audiotail, "envelope", lambda *a, **k: quiet)
+    monkeypatch.setattr(media_probe := __import__("reelly.media", fromlist=["probe"]),
+                        "probe", lambda p: {"format": {"duration": "1.3"}})
+    monkeypatch.setattr(audio_post, "integrated_loudness", lambda p: -14.0)
+    unscaled = audiotail.raw_tail_trim("x.mp4", None, "c")
+    monkeypatch.setattr(audio_post, "integrated_loudness", lambda p: -51.0)
+    assert audiotail._ship_gain("x.mp4") > 50
+    scaled = audiotail.raw_tail_trim("x.mp4", None, "c")
+    assert scaled >= unscaled
+
+
+def test_ship_gain_is_neutral_without_a_measurement(monkeypatch):
+    from reelly import audio_post, audiotail
+    monkeypatch.setattr(audio_post, "integrated_loudness", lambda p: None)
+    assert audiotail._ship_gain("x.mp4") == 1.0
+    monkeypatch.setattr(audio_post, "integrated_loudness", lambda p: -120.0)
+    assert audiotail._ship_gain("x.mp4") == 1.0

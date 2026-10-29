@@ -421,36 +421,36 @@ def _ask_cli(tool, prompt, project, label, images=None):
     import tempfile
     exe = shutil.which(tool)
     prompt = prompt + "\n\nReply with the JSON object only."
+    r, text = None, ""
     with tempfile.TemporaryDirectory() as td:
         if tool == "codex":
             out_p = os.path.join(td, "reply.txt")
-            model = os.environ.get("REELLY_CODEX_MODEL") or config.CODEX_MODEL
-            cmd = [exe, "exec", "--skip-git-repo-check", "--ephemeral",
-                   "-s", "read-only", "-o", out_p]
-            if model:
-                cmd += ["-m", model]
-            for img in images or []:
-                cmd += ["-i", os.path.abspath(img)]
-            # `--`: --image takes several files and would read the prompt as one
-            cmd += ["--", prompt]
+            for model in _codex_models():
+                cmd = [exe, "exec", "--skip-git-repo-check", "--ephemeral",
+                       "-s", "read-only", "-o", out_p]
+                if model:
+                    cmd += ["-m", model]
+                for img in images or []:
+                    cmd += ["-i", os.path.abspath(img)]
+                # `--`: --image takes several files and would read the prompt as one
+                cmd += ["--", prompt]
+                r = _run_cli(cmd, td, tool)
+                if r is None:
+                    return None
+                text = open(out_p).read() if os.path.exists(out_p) else ""
+                if r.returncode == 0 or not _model_refused(r):
+                    _CODEX_MODEL_OK[0] = model
+                    break
+                print(f"  [codex] model {model or '(CLI default)'} refused: "
+                      f"{_cli_error(r)}; trying the next")
         else:
             if images:
                 raise ValueError("the claude CLI brain takes no images; use codex")
-            out_p = None
             cmd = [exe, "-p", "--output-format", "json",
                    "--no-session-persistence", "--strict-mcp-config", prompt]
-        try:
-            # stdin closed: both CLIs read a piped stdin as extra prompt and
-            # would otherwise wait on the parent's stdin until the timeout
-            r = subprocess.run(cmd, cwd=td, capture_output=True, text=True,
-                               timeout=CLI_TIMEOUT_S, env=_cli_env(),
-                               stdin=subprocess.DEVNULL)
-        except (OSError, subprocess.SubprocessError) as e:
-            print(f"  [{tool}] call failed ({e}); heuristic for this window")
-            return None
-        if out_p:
-            text = open(out_p).read() if os.path.exists(out_p) else ""
-        else:
+            r = _run_cli(cmd, td, tool)
+            if r is None:
+                return None
             try:
                 env_out = json.loads(r.stdout)
                 text = "" if env_out.get("is_error") else env_out.get("result", "")
@@ -460,9 +460,55 @@ def _ask_cli(tool, prompt, project, label, images=None):
         ledger.add(f"{tool}-cli", label, 0.0, project)
     reply = _json_from_text(text)
     if reply is None:
-        print(f"  [{tool}] no JSON in the reply (exit {r.returncode}); "
-              f"heuristic for this window")
+        print(f"  [{tool}] no JSON in the reply (exit {r.returncode}: "
+              f"{_cli_error(r) or 'no error text'}); heuristic for this window")
     return reply
+
+
+# The model the CLI accepted this run (None = its own default). Tried first
+# on every later call so a refused model is not retried per call.
+_CODEX_MODEL_OK = [False]
+
+
+def _codex_models():
+    """Models to try, in order. REELLY_CODEX_MODEL pins one. Otherwise the
+    CLI's own default first (it tracks what the signed-in plan supports), then
+    config.CODEX_MODEL for an older CLI whose default model needs a newer
+    version. A model ID pinned in code goes stale; the CLI default does not."""
+    pinned = os.environ.get("REELLY_CODEX_MODEL")
+    if pinned:
+        return [pinned]
+    order = [None, config.CODEX_MODEL]
+    if _CODEX_MODEL_OK[0] is not False:
+        order = [_CODEX_MODEL_OK[0]] + [m for m in order if m != _CODEX_MODEL_OK[0]]
+    return order
+
+
+def _run_cli(cmd, cwd, tool):
+    import subprocess
+    try:
+        # stdin closed: both CLIs read a piped stdin as extra prompt and
+        # would otherwise wait on the parent's stdin until the timeout
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                              timeout=CLI_TIMEOUT_S, env=_cli_env(),
+                              stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"  [{tool}] call failed ({e}); heuristic for this window")
+        return None
+
+
+def _cli_error(r):
+    """The CLI's own error message, short (never the prompt or a token)."""
+    for line in reversed(((r.stderr or "") + "\n" + (r.stdout or "")).splitlines()):
+        if "error" in line.lower():
+            m = re.search(r'"message":\s*"([^"]+)"', line)
+            return (m.group(1) if m else line.strip())[:160]
+    return ""
+
+
+def _model_refused(r):
+    e = _cli_error(r).lower()
+    return any(k in e for k in ("model", "newer version", "not supported"))
 
 
 def _refine_cli(cand, wsents, vr, peaks, project, tool):

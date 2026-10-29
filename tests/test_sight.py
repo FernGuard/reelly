@@ -146,3 +146,34 @@ def test_balanced_wrap_keeps_one_liners_and_long_text():
     assert captions.wrap_balanced(d, "Open it.", font, 800) == ["Open it."]
     long = " ".join(["word"] * 30)
     assert captions.wrap_balanced(d, long, font, 300) == captions._wrap(d, long, font, 300)
+
+
+def test_no_empty_tail_sheet(monkeypatch, tmp_path):
+    """A clip ending just past a sheet boundary must not ask for a sheet
+    with zero frames (ffmpeg fails on it)."""
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"v")
+    monkeypatch.setattr(media, "duration", lambda p: 36.05)
+    starts = []
+    monkeypatch.setattr(sight, "_one_sheet",
+                        lambda v, b, i, n, t0, *a: (starts.append(t0), ("ok", [], []))[1])
+    an = tmp_path / "analysis"
+    an.mkdir()
+    sight.review(str(video), str(an / "v.json"), str(an / "v.md"), backend="codex")
+    assert sorted(starts) == [0.0, 18.0]
+
+
+def test_a_sheet_that_cannot_be_built_is_a_hole_not_a_crash(monkeypatch, tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"v")
+    monkeypatch.setattr(media, "duration", lambda p: 10.0)
+
+    def boom(*a, **k):
+        raise RuntimeError("ffmpeg exit 234")
+
+    monkeypatch.setattr(sight, "_sheet", boom)
+    an = tmp_path / "analysis"
+    an.mkdir()
+    sight.review(str(video), str(an / "v.json"), str(an / "v.md"), backend="codex")
+    art = json.load(open(an / "v.json"))
+    assert art["complete"] is False and "234" in art["missing"][0]["error"]

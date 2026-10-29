@@ -165,7 +165,7 @@ def test_codex_call_strips_api_keys_and_reads_the_reply(monkeypatch):
     assert "ANTHROPIC_API_KEY" not in seen["env"]
     assert seen["cmd"][:2] == ["/usr/bin/codex", "exec"]
     assert seen["stdin"] is subprocess.DEVNULL
-    assert "-m" in seen["cmd"]
+    assert "-m" not in seen["cmd"]            # the CLI's own default model first
     assert added and added[0][0] == "codex-cli" and added[0][2] == 0.0
 
 
@@ -216,3 +216,31 @@ def test_music_without_kit_bed_ships_without_a_bed(monkeypatch, tmp_path):
     plan = {"id": "cut_01", "duration_s": 8.0, "title": "t"}
     assert audio_post._music_generate(plan, str(tmp_path / "m.mp3")) is None
 
+
+
+def test_codex_falls_back_to_the_pinned_model_when_the_default_is_refused(monkeypatch):
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda tool: f"/usr/bin/{tool}")
+    monkeypatch.setattr(direct, "_CODEX_MODEL_OK", [False])
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "-m" not in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", 'ERROR: {"message": "The model requires a newer version of Codex."}')
+        open(cmd[cmd.index("-o") + 1], "w").write('{"ok": true}')
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(direct.ledger, "add", lambda *a, **k: None)
+    assert direct._ask_cli("codex", "p", "proj", "l") == {"ok": True}
+    assert len(calls) == 2 and calls[1][calls[1].index("-m") + 1] == direct.config.CODEX_MODEL
+    # the accepted model is remembered: the next call goes straight to it
+    calls.clear()
+    direct._ask_cli("codex", "p", "proj", "l")
+    assert len(calls) == 1 and "-m" in calls[0]
+
+
+def test_pinned_codex_model_env(monkeypatch):
+    monkeypatch.setenv("REELLY_CODEX_MODEL", "some-model")
+    assert direct._codex_models() == ["some-model"]

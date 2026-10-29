@@ -164,11 +164,11 @@ def _one_sheet(video, backend, i, n_sheets, t0, step, n, total, crop, project,
     prompt = PROMPT.format(n=n, t0=t0, step=step,
                            times=", ".join(f"{t:g}" for t in times))
     with tempfile.TemporaryDirectory() as td:
-        img = _sheet(video, t0, step, n, os.path.join(td, "sheet.jpg"), crop)
         try:
+            img = _sheet(video, t0, step, n, os.path.join(td, "sheet.jpg"), crop)
             reply = _ask(backend, prompt, img, f"sight {media.fmt(t0)}", project)
         except Exception as e:  # noqa: BLE001 -- recorded as a hole, never silent
-            reply, err = None, str(e)
+            reply, err = None, str(e)[:200]
         else:
             err = "no JSON in the reply"
     if not isinstance(reply, dict):
@@ -219,9 +219,13 @@ def review(video, out_json, out_md, crop=None, project="", backend=None):
     step = step_for(total)
     starts = []
     t = 0.0
-    while t < total - 0.2:
+    # a sheet needs at least one sampled frame: a tail shorter than one step
+    # past the last full sheet is already covered by that sheet's last frame
+    while t < total - step:
         starts.append(t)
         t += step * PER_SHEET
+    if not starts and total > 0:
+        starts = [0.0]
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(out_json)), "visual_chunks")
     os.makedirs(cache_dir, exist_ok=True)
     workers = max(1, int(os.environ.get("REELLY_SIGHT_WORKERS", "3")))

@@ -163,6 +163,22 @@ def plan_tail_trim(video, merged, total, floor_local, cut_id):
     return merged, total, note
 
 
+MIX_LUFS = -14.0             # audio_post._loudnorm_2pass target
+
+
+def _ship_gain(path):
+    """Linear gain from the raw audio's integrated loudness to the mix target
+    (1.0 when it cannot be measured, e.g. a silent track)."""
+    from . import audio_post
+    try:
+        lufs = audio_post.integrated_loudness(path)
+    except Exception:   # noqa: BLE001
+        lufs = None
+    if lufs is None or lufs < -70:
+        return 1.0
+    return 10 ** ((MIX_LUFS - lufs) / 20.0)
+
+
 def raw_tail_trim(raw_path, floor_local, cut_id):
     """Render-time application: seconds to trim off the END of a rendered
     cut (clip-local clock), or 0.0 when the tail is clean.
@@ -174,8 +190,12 @@ def raw_tail_trim(raw_path, floor_local, cut_id):
     from . import media
     try:
         dur = float(media.probe(raw_path)["format"]["duration"])
-        hit = clipped_onset(
-            envelope(raw_path, max(0.0, dur - TAIL_SCAN_S), dur), dur)
+        env = envelope(raw_path, max(0.0, dur - TAIL_SCAN_S), dur)
+        # Judge the tail at the loudness it SHIPS at: the final mix is
+        # normalised to MIX_LUFS, and the detector works in absolute RMS, so
+        # a quiet raw cut hid onsets the shipped file then failed on.
+        gain = _ship_gain(raw_path)
+        hit = clipped_onset([(t, rms * gain) for t, rms in env], dur)
     except Exception as ex:  # noqa: BLE001 -- hygiene must never fail a render
         print(f"[tail ] {cut_id}: tail probe failed ({ex}); no trim")
         return 0.0
