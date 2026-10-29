@@ -187,7 +187,7 @@ def card_kind(plan, product):
         return "typeset"
 
 
-def _kinetic_cta(plan, product, workdir, len_s):
+def _kinetic_cta(plan, product, workdir, len_s, starts_at=None):
     """(scrim_png, (pattern, y)) when the outro is the typeset card and the
     kinetic layer is on: the scrim without text, plus the ask as kinetic type
     whose ACTION word pops in the accent. None otherwise (static card)."""
@@ -203,7 +203,9 @@ def _kinetic_cta(plan, product, workdir, len_s):
         pattern, _, _, pad = kinetic.cta_line(
             cta, os.path.join(workdir, "kin_cta"), len_s,
             hot=plan.get("cta_hot"), hot_reason=plan.get("cta_hot_reason"),
-            y=int(1920 * CTA_Y_FRAC))
+            y=int(1920 * CTA_Y_FRAC),
+            beat=(kinetic.local_beat(plan.get("_beats"), starts_at)
+                  if starts_at is not None else None))
         return scrim, (pattern, int(1920 * CTA_Y_FRAC) - pad)
     except Exception as e:   # noqa: BLE001 -- static card instead
         print(f"[outro] kinetic CTA failed ({e}); static card instead")
@@ -310,16 +312,16 @@ def append(content_video, backdrop_source, plan, product, workdir):
     style = ob.get("style") or style_from_kit()
     bp, used_style = backdrop_png(backdrop_source or content_video, style,
                                   os.path.join(workdir, "outro_backdrop.png"))
-    kin = _kinetic_cta(plan, product, workdir, len_s)
+    try:
+        content_d = float(media.probe(content_video)["format"]["duration"])
+    except Exception:   # noqa: BLE001
+        content_d = None
+    kin = _kinetic_cta(plan, product, workdir, len_s, starts_at=content_d)
     card = kin[0] if kin else card_png(plan, product, workdir)
     seg = build_segment(bp, card, len_s,
                         os.path.join(workdir, "outro_seg.mp4"),
                         seq=kin[1] if kin else None)
     dst = os.path.join(workdir, "content_outro.mp4")
-    try:
-        content_d = float(media.probe(content_video)["format"]["duration"])
-    except Exception:   # noqa: BLE001
-        content_d = None
     ok = _concat_copy(content_video, seg, dst, workdir)
     if ok and content_d is not None:
         try:

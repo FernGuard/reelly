@@ -52,6 +52,7 @@ POP_AT, POP = 0.30, 0.36  # hot word: pop starts this long after it lands, lasts
 # word spaces around it and swallows them. Up a little, 6% bigger, back down.
 # It grows from its bottom centre, so the growth splits evenly into the two
 # word spaces (and a line-end word moves at most ~2% of its width outward).
+POP_MIN = 0.12            # a beat-timed pop waits at least this long after the word lands
 POP_SCALE = 1.04
 POP_LIFT = 0.14           # em
 EXIT = 0.26             # s for the line to leave
@@ -121,7 +122,28 @@ def hot_index(words, hot=None, kind="line"):
     return choose_hot(words, hot, kind)[0]
 
 
-def timeline(n_words, dur, hot=None, enter=True, leave=True):
+def pop_time(n_words, dur, hot, enter=True, leave=True, beat=None):
+    """Local time the hot word's pop starts, None without a hot word.
+
+    Default: POP_AT after the word lands. beat=(first_beat, period) in the
+    line's local time: the pop waits for the NEXT beat instead, so the accent
+    hits with the music. It waits at most one beat and never runs past the
+    exit, and the line itself does not move (layout and the collision gate
+    measured it where it is)."""
+    import math
+    if hot is None:
+        return None
+    _, exit_t, stagger = timeline(n_words, dur, None, enter, leave)
+    land = hot * stagger + ENTER if enter else 0.0
+    default = land + POP_AT
+    if not beat or not beat[1] or beat[1] <= 0:
+        return default
+    b0, period = float(beat[0]), float(beat[1])
+    t = b0 + math.ceil((land + POP_MIN - b0) / period) * period
+    return t if t + POP <= exit_t else default
+
+
+def timeline(n_words, dur, hot=None, enter=True, leave=True, pop=None):
     """(settle_t, exit_t, stagger): when the last motion before the hold
     ends, when the exit starts (dur when the line does not leave) and the word
     stagger. Entrances are squeezed if a short window cannot fit them, so a
@@ -129,7 +151,7 @@ def timeline(n_words, dur, hot=None, enter=True, leave=True):
     words are there at t = 0 and the hot word pops at POP_AT."""
     exit_t = max(0.0, dur - EXIT) if leave else dur
     if not enter:
-        settle = POP_AT + POP if hot is not None else 0.0
+        settle = ((pop if pop is not None else POP_AT) + POP) if hot is not None else 0.0
         return min(settle, exit_t), exit_t, 0.0
     stagger = STAGGER
     last_in = (n_words - 1) * stagger + ENTER
@@ -138,7 +160,8 @@ def timeline(n_words, dur, hot=None, enter=True, leave=True):
         last_in = (n_words - 1) * stagger + ENTER
     settle = last_in
     if hot is not None:
-        settle = max(settle, hot * stagger + ENTER + POP_AT + POP)
+        settle = max(settle, (pop if pop is not None
+                              else hot * stagger + ENTER + POP_AT) + POP)
     return min(settle, exit_t), exit_t, stagger
 
 
@@ -169,14 +192,14 @@ def wrap_lines(text, size, width, role="headline"):
 
 
 def page_html(text, size, width, height, dur, role="headline", fill=None,
-              accent=None, hot=None, lines=None, enter=True, leave=True):
+              accent=None, hot=None, lines=None, enter=True, leave=True, pop=None):
     """The line page. Every animation is declared paused; frames are taken
     by seeking document time (card._SEEK), so the render is deterministic."""
     from . import brandkit, captions
     words = text.split()
     lines = lines or [words]
     hi = hot_index(words, hot)
-    settle, exit_t, stagger = timeline(len(words), dur, hi, enter, leave)
+    settle, exit_t, stagger = timeline(len(words), dur, hi, enter, leave, pop)
     face, stack = _font_face(role)
     fill = fill or captions.ink("#FCFCFB")
     accent = accent or brandkit.accent()
@@ -196,7 +219,8 @@ def page_html(text, size, width, height, dur, role="headline", fill=None,
                 else "kin-still 1s linear 0s both")
         inner = html.escape(w)
         if i == hi:
-            pop_delay = (delay + ENTER + POP_AT) if enter else POP_AT
+            pop_delay = (pop if pop is not None
+                         else (delay + ENTER + POP_AT) if enter else POP_AT)
             inner = (f'<span class="pop" style="transform-origin:50% 100%;'
                      f'animation:kin-pop {POP:.3f}s {EASE_POP} {pop_delay:.3f}s '
                      f'both">{inner}</span>')
@@ -257,8 +281,10 @@ async def _render(page, frames, width, height, out_dir, still, profile):
 
 def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
                 fps=None, enter=True, leave=True, kind="line", hot_reason=None,
-                label=None):
+                label=None, beat=None):
     """Render one kinetic line to out_dir/k%05d.png covering local 0..dur.
+    beat=(first_beat, period) in local time times the hot word's pop to the
+    music (pop_time).
 
     Returns (pattern, canvas_w, canvas_h, pad): the PNG sequence pattern for
     ffmpeg, its size, and the padding around the text box (the caller places
@@ -267,17 +293,20 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     os.makedirs(out_dir, exist_ok=True)
     words = text.split()
     hi, why = choose_hot(words, hot, kind, hot_reason)
+    pop = pop_time(len(words), dur, hi, enter, leave, beat)
     if hi is not None:
+        on_beat = bool(beat and beat[1]) and pop != pop_time(len(words), dur, hi, enter, leave)
         print(f"        kinetic {label or kind}: hot '{_bare(words[hi])}' ({why})"
-              + ("" if enter else "; readable on frame 0"))
-    settle, exit_t, _ = timeline(len(words), dur, hi, enter, leave)
+              + ("" if enter else "; readable on frame 0")
+              + (f"; pops on the beat at {pop:.2f}s" if on_beat else ""))
+    settle, exit_t, _ = timeline(len(words), dur, hi, enter, leave, pop)
     text_h = captions.block_height(text, width=width, size=size, role=role)
     cw, ch = width + 2 * PAD, text_h + 2 * PAD
     page = os.path.join(out_dir, "line.html")
     with open(page, "w") as f:
         f.write(page_html(text, size, cw, ch, dur, role=role, hot=hi,
                           lines=wrap_lines(text, size, width, role),
-                          enter=enter, leave=leave))
+                          enter=enter, leave=leave, pop=pop))
     fps = fps or config.output_fps()
     n = max(1, int(round(dur * fps)))
     frames = [(i, i / fps) for i in range(n)]
@@ -300,17 +329,18 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
 
 
 def hook_line(text, out_dir, dur, hot=None, enter=True, hot_reason=None,
-              label=None):
+              label=None, beat=None):
     """The hook / timed line, kinetic: same box, size fitting and font role as
     captions.hook_png, so layout and the collision gate measure the same text.
     enter=False for a line on screen at t = 0 (readable on frame 0)."""
     from . import captions
     return render_line(text, out_dir, dur, size=captions.hook_size(text),
                        width=captions.HOOK_WIDTH, role=captions.HOOK_ROLE,
-                       hot=hot, enter=enter, hot_reason=hot_reason, label=label)
+                       hot=hot, enter=enter, hot_reason=hot_reason, label=label,
+                       beat=beat)
 
 
-def cta_line(text, out_dir, dur, hot=None, hot_reason=None, y=902):
+def cta_line(text, out_dir, dur, hot=None, hot_reason=None, y=902, beat=None):
     """The end-card call to action: words enter, the ACTION word pops in the
     accent, and the line holds to the last frame (it never leaves). Its box is
     the centred width the layout allows at its height (beside the rail)."""
@@ -319,7 +349,15 @@ def cta_line(text, out_dir, dur, hot=None, hot_reason=None, y=902):
     return render_line(text, out_dir, dur, size=captions.hook_size(text, width),
                        width=width, role=captions.HOOK_ROLE,
                        hot=hot, enter=True, leave=False, kind="cta",
-                       hot_reason=hot_reason, label="cta")
+                       hot_reason=hot_reason, label="cta", beat=beat)
+
+
+def local_beat(beats, t0):
+    """A cut-time beat grid (first_beat, period) as seen from a layer that
+    starts at t0, or None."""
+    if not beats or not beats[1]:
+        return None
+    return ((float(beats[0]) - t0) % float(beats[1]), float(beats[1]))
 
 
 def is_sequence(path):

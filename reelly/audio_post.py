@@ -581,11 +581,38 @@ def sfx_events(plan):
     return events
 
 
+def track_bpm(path, key=None):
+    """The tempo a track STATES: brand.json music "bpm" {key or file: n},
+    else "<n>_bpm" / "<n>bpm" in the file name (Board_125_bpm.wav). None when
+    unstated. Stated beats detection: on the Curses soundtrack the detector
+    read 123 for a 125 bpm track (0.16 s adrift after 10 s) and 70 for 140."""
+    import re
+    from . import brandkit
+    spec = (brandkit.brand().get("music") or {}).get("bpm") or {}
+    name = os.path.basename(path or "")
+    for k in (key, name):
+        try:
+            if k and k in spec and 40 <= float(spec[k]) <= 240:
+                return float(spec[k])
+        except (TypeError, ValueError):
+            pass
+    m = re.search(r"(?<!\d)(\d{2,3})[ _-]?bpm", name, re.I)
+    return float(m.group(1)) if m and 40 <= int(m.group(1)) <= 240 else None
+
+
 def beat_offset(music_path, target_t):
     """Trim offset so a musical beat lands on target_t (S5: beat-aligned).
+    Returns seconds to trim from the bed's start; 0.0 when unsure."""
+    return beat_grid(music_path, target_t)[0]
 
-    Onset flux -> autocorrelation tempo (60-180 BPM) -> comb phase fit.
-    Returns seconds to trim from the bed's start; 0.0 when unsure.
+
+def beat_grid(music_path, target_t, bpm=None):
+    """(trim_offset, period): trim the bed by trim_offset and a beat lands on
+    target_t, then every `period` seconds after (and before) it.
+
+    Onset flux -> comb phase fit. The period is the stated tempo when there
+    is one (track_bpm), else an autocorrelation estimate (60-180 BPM).
+    (0.0, 0.0) when unsure: no grid, callers keep their own timing.
     """
     import numpy as np
     from scipy import signal
@@ -594,17 +621,20 @@ def beat_offset(music_path, target_t):
                        capture_output=True)
     x = np.frombuffer(r.stdout, dtype=np.float32)
     if len(x) < 22050 * 4:
-        return 0.0
+        return 0.0, 0.0
     _, _, Z = signal.stft(x, 22050, nperseg=1024, noverlap=512)
     mag = np.abs(Z)
     flux = np.maximum(mag[:, 1:] - mag[:, :-1], 0).sum(axis=0)
     hop = 512 / 22050
-    f0 = flux - flux.mean()
-    ac = np.correlate(f0, f0, "full")[len(f0) - 1:]
-    lo, hi = int((60 / 180) / hop), int((60 / 60) / hop)
-    if hi >= len(ac) or lo >= hi:
-        return 0.0
-    period = (lo + int(np.argmax(ac[lo:hi]))) * hop
+    if bpm:
+        period = 60.0 / float(bpm)
+    else:
+        f0 = flux - flux.mean()
+        ac = np.correlate(f0, f0, "full")[len(f0) - 1:]
+        lo, hi = int((60 / 180) / hop), int((60 / 60) / hop)
+        if hi >= len(ac) or lo >= hi:
+            return 0.0, 0.0
+        period = (lo + int(np.argmax(ac[lo:hi]))) * hop
     nb = max(1, int((len(flux) * hop) / period))
     best_phi, best_score = 0.0, -1.0
     for phi in np.arange(0.0, period, hop):
@@ -613,7 +643,7 @@ def beat_offset(music_path, target_t):
         score = float(flux[idx].sum())
         if score > best_score:
             best_score, best_phi = score, phi
-    return float((best_phi - target_t) % period)
+    return float((best_phi - target_t) % period), float(period)
 
 
 def final_mix(voice_wav, music_mp3, events, dur, out_wav, project="",

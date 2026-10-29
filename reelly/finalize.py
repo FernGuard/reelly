@@ -85,7 +85,8 @@ class _Seq(str):
         return obj
 
 
-def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None):
+def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None,
+                beats=None):
     """(path, y_shift) for a hook-style line: a kinetic sequence when the
     kinetic layer is on, else the static Pillow PNG. A line on screen at t0=0
     is readable on frame 0 (no entrance). A kinetic failure falls back to the
@@ -95,7 +96,8 @@ def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None):
         try:
             pattern, _, _, pad = kinetic.hook_line(
                 text, os.path.join(workdir, f"kin_{name}"), dur, hot=hot,
-                enter=t0 > 0.0, hot_reason=hot_reason, label=name)
+                enter=t0 > 0.0, hot_reason=hot_reason, label=name,
+                beat=kinetic.local_beat(beats, t0))
             return _Seq(pattern), -pad
         except Exception as e:  # noqa: BLE001 -- static fallback, never break the burn
             print(f"        kinetic '{name}' failed ({e}); static text instead")
@@ -159,7 +161,8 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     if hook.get("text"):
         show = float(hook.get("show_s", 3.6))
         hp, dy = _text_layer(hook["text"], workdir, "hook", show, hook.get("hot"),
-                             t0=0.0, hot_reason=hook.get("hot_reason"))
+                             t0=0.0, hot_reason=hook.get("hot_reason"),
+                             beats=plan.get("_beats"))
         events.append((hp, hook_y + dy, 0.0, show))
 
     # P-TEXT: timed lines beyond the hook; on captions:"none" cuts they carry
@@ -167,7 +170,8 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     for oi, o in enumerate(plan.get("overlay_lines") or []):
         t0, show = float(o["t"]), float(o.get("show_s", 3.0))
         op, dy = _text_layer(o["text"], workdir, f"ov{oi}", show, o.get("hot"),
-                             t0=t0, hot_reason=o.get("hot_reason"))
+                             t0=t0, hot_reason=o.get("hot_reason"),
+                             beats=plan.get("_beats"))
         events.append((op, hook_y + dy, t0, t0 + show))
 
     payoff = plan.get("payoff") or {}
@@ -494,6 +498,24 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
             with timing.stage(f"{p['id']} voice stem", tpath):
                 voice = audio_post.voice_stem(raw, os.path.join(audir, f"{p['id']}_voice.wav"))
             events = audio_post.sfx_events(p)
+            # Music first: its beat grid times the text (hot-word pops land on
+            # beats), so it has to exist before the burn.
+            mus, off = None, 0.0
+            if "music" in needed_mixes:
+                with timing.stage(f"{p['id']} music/sfx", tpath):
+                    mus = audio_post.music(p, os.path.join(audir, f"{p['id']}_music.mp3"), name)
+                    payoff = p.get("payoff") or {}
+                    beat_target = (float(payoff["local_t"]) if payoff.get("jump")
+                                   else float(p["hook"].get("show_s", 3.6)))
+                    if mus:
+                        src_track, key = audio_post.brand_track(p)
+                        bpm = audio_post.track_bpm(src_track, key) if src_track else None
+                        off, period = audio_post.beat_grid(mus, beat_target, bpm=bpm)
+                        if period:
+                            p["_beats"] = (beat_target, period)
+                            print(f"        beat grid: {60 / period:.1f} bpm "
+                                  f"({'stated' if bpm else 'detected'}), "
+                                  f"a beat on {beat_target:.2f}s")
             with timing.stage(f"{p['id']} caption burn", tpath):
                 vid = _burn_final(raw, os.path.join(td, "burn.mp4"), p, words_tl,
                                   dur, td, layout, product)
@@ -505,17 +527,10 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     # backdrop from the PRE-CAPTION raw so no burned text
                     # bleeds into the darkened card background
                     vid = outro_mod.append(vid, raw, p, product, td)
+            p.pop("_beats", None)          # render-time only, never persisted
             # delivery plan: build only the mixes the requested targets need;
             # music is generated only when a music platform asked for it
             mixes = {}
-            if "music" in needed_mixes:
-                with timing.stage(f"{p['id']} music/sfx", tpath):
-                    mus = audio_post.music(p, os.path.join(audir, f"{p['id']}_music.mp3"), name)
-                    payoff = p.get("payoff") or {}
-                    beat_target = (float(payoff["local_t"]) if payoff.get("jump")
-                                   else float(p["hook"].get("show_s", 3.6)))
-                    off = (audio_post.beat_offset(mus, beat_target)
-                           if mus else 0.0)
             with timing.stage(f"{p['id']} mix", tpath):
                 # pad_to keeps the outro alive through amix(duration=first)
                 # and the mux's -shortest: the voice is padded with silence
