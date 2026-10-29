@@ -37,12 +37,17 @@ OUTRO_S = 2.8            # the designed outro length (2.5-3.0s band)
 TAIL_BREATH_S = 0.6      # natural breath the CONTENT ends on after the payoff
 FADE_IN_S = 0.25         # card fade-in at outro start
 
-# backdrop treatment: heavy blur + darken so the final frame reads as a
-# card background, not as a freeze of the action
+# backdrop treatment: heavy blur + dim so the final frame reads as a card
+# background, not as a freeze of the action. The dim MULTIPLIES (keeps 55% of
+# each pixel) instead of subtracting: brightness=-0.28 took a dark game (Curses,
+# luma ~25) to pure black, every outro opened on a black run (judge
+# black_frames at the content/outro join) and the ending read as the black
+# card the owner had already rejected. Dimmed, the game's colours stay behind
+# the ask.
 _BACKDROP_VF = ("scale=1080:1920:force_original_aspect_ratio=increase,"
                 "crop=1080:1920,boxblur=luma_radius=24:luma_power=2:"
                 "chroma_radius=12:chroma_power=2,"
-                "eq=brightness=-0.28:saturation=0.5")
+                "colorchannelmixer=rr=0.55:gg=0.55:bb=0.55,eq=saturation=0.8")
 
 INK = (9, 12, 10)        # brand ink, same base as the endcard scrim
 
@@ -155,7 +160,9 @@ def _typeset_card(cta, path, size=(1080, 1920), draw_text=True):
     from PIL import Image, ImageDraw
     from . import captions
     W, H = size
-    img = Image.new("RGBA", (W, H), (*INK, 153))     # ~60% scrim
+    # ~60% scrim under static text; ~35% under the kinetic ask, which carries
+    # its own stroke and shadow (60% on top of the dimmed backdrop was black)
+    img = Image.new("RGBA", (W, H), (*INK, 153 if draw_text else 90))
     if not draw_text:
         img.save(path)
         return path
