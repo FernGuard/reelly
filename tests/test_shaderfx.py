@@ -100,3 +100,40 @@ def test_ambient_pass_is_skipped_or_falls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(shaderfx, "render_ambient", boom)
     assert finalize._ambient_pass("raw.mp4", "a.mp4", {"reframe": 1.0}, 10.0,
                                   str(tmp_path), None) == "raw.mp4"
+
+
+def test_text_aura_is_its_own_switch(monkeypatch):
+    from reelly import brandkit
+    monkeypatch.delenv("REELLY_TEXT_FX", raising=False)
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"outro_fx": "smoke"})
+    assert shaderfx.active("text") is None
+    monkeypatch.setenv("REELLY_TEXT_FX", "smoke")
+    assert shaderfx.active("text") == "smoke"
+
+
+def test_aura_page_reads_the_kinetic_frames_and_a_blurred_copy():
+    html = shaderfx.aura_html("smoke", ["file:///w/k00000.png", "file:///w/k00001.png"],
+                              900, 220, 60, "#a87cf0", pop_t=1.1)
+    assert '"file:///w/k00001.png"' in html and "FPS = 60" in html
+    assert "x.filter = 'blur(" in html                 # soft cloud, not glyph copies
+    assert '"u_tsize": [900, 220]' in html and '"u_pop": 1.1' in html
+    assert "background:transparent" in html
+
+
+def test_seek_waits_for_an_async_draw():
+    assert "var drawn = window.__reellyDraw ? window.__reellyDraw(ms) : 1;" in card._SEEK
+    assert "Promise.all([drawn].concat(" in card._SEEK
+
+
+def test_kinetic_line_falls_back_to_plain_frames(monkeypatch, tmp_path):
+    from reelly import kinetic
+    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": "smoke")
+    def boom(*a, **k):
+        raise RuntimeError("no WebGL")
+    monkeypatch.setattr(shaderfx, "render_aura", boom)
+    assert kinetic._aura(str(tmp_path), 10, 900, 220, 60, 0.5, True, "hook") is None
+    monkeypatch.setattr(shaderfx, "render_aura", lambda *a, **k: "/a/f%05d.png")
+    pat, w, h, pad = kinetic._aura(str(tmp_path), 10, 900, 220, 60, 0.5, True, "hook")
+    off = shaderfx.TEXT_OFF
+    assert (pat, w, h, pad) == ("/a/f%05d.png", 900 + 2 * off, 220 + 2 * off,
+                                kinetic.PAD + off)

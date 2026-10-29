@@ -148,11 +148,46 @@ Object.keys(U).forEach(function(k){{
   else if (k === 'u_pops') gl.uniform1fv(l, new Float32Array(v));
   else gl['uniform' + v.length + 'f'].apply(gl, [l].concat(v));
 }});
-window.__reellyDraw = function(ms){{
+function draw(ms){{
   gl.uniform1f(u('u_t'), ms / 1000.0);
   gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); gl.finish();
-}};
+}}
+function upload(img){{
+  var tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  return tex;
+}}
+window.__reellyDraw = draw;
+var FR = {frames}, FPS = {fps}, cur = null, blur = null;
+if (FR) {{
+  // input frames (the kinetic text): load frame n for the instant, then draw
+  window.__reellyDraw = function(ms){{
+    var i = Math.max(0, Math.min(FR.length - 1, Math.round(ms / 1000 * FPS)));
+    return new Promise(function(res){{
+      var img = new Image();
+      img.onload = function(){{
+        if (cur) {{ gl.deleteTexture(cur[0]); gl.deleteTexture(cur[1]); }}
+        if (!blur) {{ blur = document.createElement('canvas');
+          blur.width = img.width; blur.height = img.height; }}
+        var x = blur.getContext('2d');
+        x.clearRect(0, 0, blur.width, blur.height);
+        x.filter = 'blur({blur_px}px)'; x.drawImage(img, 0, 0); x.filter = 'none';
+        gl.activeTexture(gl.TEXTURE1); var tb = upload(blur);
+        gl.activeTexture(gl.TEXTURE0); var tt = upload(img);
+        cur = [tt, tb];
+        gl.uniform1i(u('u_txt'), 0); gl.uniform1i(u('u_blur'), 1);
+        draw(ms); res(1);
+      }};
+      img.onerror = function(){{ res(0); }};
+      img.src = FR[i];
+    }});
+  }};
+}}
 var bg = {bg};
 if (!bg) {{ window.__reellyReady = true; window.__reellyDraw(0); }}
 else {{
@@ -171,6 +206,76 @@ else {{
 }}
 </script></body></html>"""
 
+# Text aura: reads each rendered kinetic text frame (u_txt) and builds
+# effects FROM the letters' own shape, so the type stays the pixel-exact
+# kinetic render (readable on frame 0, the footprint the layout gates
+# measured) and only the space around it moves:
+#   - dark smoky wisps rise off the letters (samples of the text alpha below
+#     each pixel, warped by the smoke field), strongest while the line
+#     arrives (u_enter), then lingering; their dark body also lifts the
+#     type off busy footage
+#   - on the beat-timed pop (u_pop) the hot word, found by its accent
+#     colour, throws an accent flare
+# The canvas is the text frame plus u_off px on every side.
+_AURA = r"""
+precision highp float;
+uniform vec2 u_res; uniform vec2 u_tsize; uniform float u_off; uniform float u_t;
+uniform float u_pop; uniform float u_enter; uniform vec3 u_accent; uniform vec3 u_ink;
+uniform float u_t0; uniform sampler2D u_txt; uniform sampler2D u_blur;
+""" + _NOISE + r"""
+vec2 tq(vec2 px, out float inside){                  // canvas px (y up) -> text uv
+  vec2 q = px - vec2(u_off);
+  inside = step(0.0, q.x) * step(0.0, q.y) * step(q.x, u_tsize.x) * step(q.y, u_tsize.y);
+  return vec2(q.x / u_tsize.x, 1.0 - q.y / u_tsize.y);
+}
+vec4 txt(vec2 px){ float i; vec2 q = tq(px, i); return texture2D(u_txt, q) * i; }
+// the same frame, Gaussian-blurred by the browser: smoke and flare come from
+// this soft cloud, never from offset copies of the sharp glyphs
+vec4 blr(vec2 px){ float i; vec2 q = tq(px, i); return texture2D(u_blur, q) * i; }
+float hot(vec4 c){ return c.a * (1.0 - smoothstep(0.12, 0.40, distance(c.rgb, u_accent))); }
+void main(){
+  vec2 px = gl_FragCoord.xy;
+  vec2 uv = px / u_res;
+  float T = u_t + u_t0;
+  vec4 me = txt(px);
+  // rising wisps: text alpha sampled BELOW this pixel, sideways warped
+  float wisp = 0.0, ember = 0.0, wsum = 0.0, esum = 0.0;
+  for (int i = 1; i <= 10; i++){
+    float k = float(i);
+    vec2 at = px + vec2(0.0, -k * 3.2);
+    float w = fbm(vec2(at.x * 0.018, at.y * 0.012 - T * 0.9));
+    at.x += (w - 0.5) * k * 5.0;
+    vec4 c = blr(at);
+    float fall = exp(-k * 0.22);
+    wisp += c.a * fall; wsum += fall;
+    // embers: only the far samples, so they rise ABOVE the word and never
+    // smear across its strokes (a near-sample flare read as a melted double)
+    if (i >= 5) { ember += hot(c) * fall; esum += fall; }
+  }
+  wisp /= wsum; ember /= max(esum, 1e-4);
+  // soft halos: a tight one (the dark body that lifts the type) and a wide
+  // one around the hot word (the flare)
+  vec4 b = blr(px);
+  float halo = b.a;
+  float hhot = hot(b);
+  float n = fbm(uv * vec2(6.0, 3.0) + vec2(0.0, -T * 0.6));
+  float arrive = u_enter * exp(-max(u_t, 0.0) * 2.2);
+  float body = clamp((0.55 * wisp * (0.45 + n) + 0.6 * halo) * (0.75 + 1.3 * arrive), 0.0, 0.78);
+  float dt = u_t - u_pop;
+  float burst = (u_pop >= 0.0 && dt > 0.0) ? exp(-dt * 3.2) : 0.0;
+  float glow = clamp((hhot * 3.2 + ember * 1.6 * n) * burst, 0.0, 0.9);
+  // the wisps carry a little accent so the smoke reads on dark footage too
+  vec3 aura = mix(u_ink, u_accent, clamp(glow * 1.4 + 0.55 * wisp * n, 0.0, 1.0));
+  float aa = max(body, glow);
+  float outA = me.a + aa * (1.0 - me.a);
+  vec3 rgb = (me.rgb * me.a + aura * aa * (1.0 - me.a)) / max(outA, 1e-4);
+  gl_FragColor = vec4(rgb, outA);
+}
+"""
+
+TEXT_OFF = 44                # px of aura room around a kinetic text frame
+
+
 # brand.json "ambient_fx" / REELLY_AMBIENT_FX: the cut-long layer
 AMBIENT_SCALE = 0.25         # the veil is very soft: quarter size is plenty
 AMBIENT_FPS = 30             # slow smoke; the encode repeats frames for 60
@@ -178,7 +283,8 @@ AMBIENT_FPS = 30             # slow smoke; the encode repeats frames for 60
 
 def active(kind="outro"):
     """The effect for this run: kind "outro" (REELLY_OUTRO_FX, brand.json
-    "outro_fx") or "ambient" (REELLY_AMBIENT_FX, "ambient_fx"); None = off."""
+    "outro_fx"), "ambient" (REELLY_AMBIENT_FX, "ambient_fx") or "text"
+    (REELLY_TEXT_FX, "text_fx"); None = off."""
     v = os.environ.get(f"REELLY_{kind.upper()}_FX", "").strip().lower()
     if not v:
         try:
@@ -197,7 +303,7 @@ def _rgb01(hex_):
         return (0.66, 0.49, 0.94)
 
 
-def _page(frag, w, h, uniforms, backdrop_png=None):
+def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=9):
     import io
     import json
     bg = "null"
@@ -208,6 +314,8 @@ def _page(frag, w, h, uniforms, backdrop_png=None):
         im.save(b, "JPEG", quality=92)
         bg = json.dumps("data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode())
     return _PAGE.format(w=w, h=h, frag=json.dumps(frag), bg=bg,
+                        frames=json.dumps(frames) if frames else "null", fps=int(fps),
+                        blur_px=int(blur_px),
                         uniforms=json.dumps({k: (list(v) if isinstance(v, (list, tuple))
                                                  else round(float(v), 4))
                                              for k, v in uniforms.items()}))
@@ -248,6 +356,31 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
             raise RuntimeError("shader page never became ready (no WebGL?)")
         for n, t in frames:
             await b.shoot(t, os.path.join(out_dir, f"f{n:05d}.png"))
+
+
+def aura_html(fx, frames, tw, th, fps, accent_hex, ink_hex="#0b0710", pop_t=None,
+              enter=True, off=TEXT_OFF, t0=0.0):
+    """The text aura page over a kinetic frame sequence (file URIs)."""
+    frag = {"smoke": _AURA}[fx]
+    w, h = tw + 2 * off, th + 2 * off
+    return _page(frag, w, h, {"u_res": (w, h), "u_tsize": (tw, th), "u_off": off,
+                              "u_accent": _rgb01(accent_hex), "u_ink": _rgb01(ink_hex),
+                              "u_pop": -1.0 if pop_t is None else pop_t,
+                              "u_enter": 1.0 if enter else 0.0, "u_t0": t0},
+                 frames=frames, fps=fps, blur_px=12)
+
+
+def render_aura(fx, in_dir, n, tw, th, fps, out_dir, pop_t=None, enter=True,
+                accent_hex=None, t0=0.0):
+    """Aura frames for a kinetic line: in_dir/k%05d.png (n frames, tw x th)
+    -> out_dir/f%05d.png at (tw + 2*TEXT_OFF) x (th + 2*TEXT_OFF)."""
+    from pathlib import Path
+    from . import brandkit
+    frames = [Path(os.path.join(in_dir, f"k{i:05d}.png")).resolve().as_uri() for i in range(n)]
+    w, h = tw + 2 * TEXT_OFF, th + 2 * TEXT_OFF
+    return _render_page(aura_html(fx, frames, tw, th, fps, accent_hex or brandkit.accent(),
+                                  pop_t=pop_t, enter=enter, t0=t0),
+                        out_dir, w, h, n / fps, fps)
 
 
 def _render_page(html_text, out_dir, w, h, dur, fps):

@@ -496,11 +496,12 @@ _SEEK = """(function(ms){
   var a = document.getAnimations();
   a.forEach(function(x){ try { x.pause(); x.currentTime = ms; } catch(e){} });
   // A canvas/WebGL page draws the frame for this instant itself.
-  if (window.__reellyDraw) { window.__reellyDraw(ms); }
+  // It may return a promise (a page that loads its next input frame first).
+  var drawn = window.__reellyDraw ? window.__reellyDraw(ms) : 1;
   // Footage is seeked to the same instant, so a clip behind a card advances
   // with the card instead of being a still or a loop running on its own clock.
   var vs = Array.prototype.slice.call(document.querySelectorAll('video'));
-  return Promise.all(vs.map(function(v){
+  return Promise.all([drawn].concat(vs.map(function(v){
     var want = (ms/1000) - parseFloat(v.dataset.start || 0);
     want = Math.max(0, Math.min(want, (v.duration || 0.04) - 0.04));
     if (Math.abs(v.currentTime - want) < 0.004) return 1;
@@ -510,7 +511,7 @@ _SEEK = """(function(ms){
       v.currentTime = want;
       setTimeout(function(){ res(1); }, 500);   // never hang a whole render
     });
-  })).then(function(){ return a.length + (window.__reellyDraw ? 1 : 0); });
+  }))).then(function(){ return a.length + (window.__reellyDraw ? 1 : 0); });
 })(%f)"""
 
 

@@ -325,7 +325,31 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     made = len([f for f in os.listdir(out_dir) if f.startswith("k") and f.endswith(".png")])
     if made < n:
         raise RuntimeError(f"kinetic: only {made}/{n} frames rendered for {text!r}")
+    if kind == "line":
+        aura = _aura(out_dir, n, cw, ch, fps, pop, enter, label or kind)
+        if aura:
+            return aura
     return os.path.join(out_dir, "k%05d.png"), cw, ch, PAD
+
+
+def _aura(out_dir, n, cw, ch, fps, pop, enter, label):
+    """The brand's text aura (shaderfx "text") around a rendered line:
+    (pattern, w, h, pad) of the wrapped frames, or None (off / failed: the
+    plain kinetic frames are used)."""
+    from . import shaderfx
+    fx = shaderfx.active("text")
+    if not fx:
+        return None
+    try:
+        pat = shaderfx.render_aura(fx, out_dir, n, cw, ch, fps, out_dir + "_aura",
+                                   pop_t=pop, enter=enter)
+        off = shaderfx.TEXT_OFF
+        print(f"        kinetic {label}: '{fx}' aura"
+              + (f", flare with the pop at {pop:.2f}s" if pop is not None else ""))
+        return pat, cw + 2 * off, ch + 2 * off, PAD + off
+    except Exception as e:   # noqa: BLE001 -- plain kinetic frames instead
+        print(f"        kinetic {label}: aura failed ({e}); plain text")
+        return None
 
 
 def hook_line(text, out_dir, dur, hot=None, enter=True, hot_reason=None,
