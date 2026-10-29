@@ -51,12 +51,50 @@ def transcript_trust(sents, duration_s):
             "reason": reason}
 
 
+def _parse_len(v):
+    try:
+        if isinstance(v, str):
+            a, b = (float(x) for x in v.replace("-", " ").split()[:2])
+        else:
+            a, b = (float(x) for x in v[:2])
+    except (TypeError, ValueError):
+        return None
+    if 5.0 <= a < b <= 180.0:
+        return a, b
+    return None
+
+
+def target_len():
+    """(lo, hi) seconds for the clip length: REELLY_CLIP_LEN ("12-20", what
+    `--length` sets) > the active brand's copy brief "clip_len" > the public
+    default TARGET_LEN. Short beat cuts suit footage made of short beats
+    (a combo lands, an attack hits); the default suits story clips."""
+    import os
+    env = _parse_len(os.environ.get("REELLY_CLIP_LEN", ""))
+    if env:
+        return env
+    try:
+        from . import brandkit
+        b = _parse_len(brandkit.copy_brief().get("clip_len"))
+        if b:
+            return b
+    except Exception:   # noqa: BLE001
+        pass
+    return TARGET_LEN
+
+
+def hard_len():
+    """The hard window around target_len (never tighter than HARD_LEN)."""
+    lo, hi = target_len()
+    return min(HARD_LEN[0], lo), max(HARD_LEN[1], hi + 4.0)
+
+
 def length_verdict(duration_s):
     """Return ``(ok|flag|drop, message)`` for the configured duration windows."""
-    lo, hi = TARGET_LEN
-    hlo, hhi = HARD_LEN
+    lo, hi = target_len()
+    hlo, hhi = hard_len()
     if lo <= duration_s <= hi:
-        return "ok", f"P-LEN {duration_s:.1f}s inside the default {lo:.0f}-{hi:.0f}s window"
+        return "ok", f"P-LEN {duration_s:.1f}s inside the {lo:.0f}-{hi:.0f}s window"
     if duration_s < hlo or duration_s > hhi:
         return "drop", (f"P-LEN {duration_s:.1f}s outside the hard {hlo:.0f}-{hhi:.0f}s "
                         f"window; configure the gate for a different format")

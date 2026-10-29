@@ -12,6 +12,8 @@ Global flags, accepted anywhere on the command line:
                    OpenAI, FAL, Anthropic). Off by default: Reelly is zero-paid.
   --brand NAME     render with the brand kit's brands/NAME (fonts, accent,
                    ink, surface). Same as REELLY_BRAND=NAME.
+  --length LO-HI   clip length window in seconds for planning (default 20-28,
+                   or the brand brief's "clip_len"). Same as REELLY_CLIP_LEN.
 """
 import argparse
 import os
@@ -86,6 +88,11 @@ def _global_flags(argv):
             i += 1
         elif a.startswith("--brand="):
             os.environ["REELLY_BRAND"] = a.split("=", 1)[1]
+        elif a == "--length" and i + 1 < len(argv):
+            os.environ["REELLY_CLIP_LEN"] = argv[i + 1]
+            i += 1
+        elif a.startswith("--length="):
+            os.environ["REELLY_CLIP_LEN"] = a.split("=", 1)[1]
         else:
             out.append(a)
         i += 1

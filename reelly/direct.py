@@ -40,7 +40,7 @@ RULES = {
 }
 
 RULES.update({
-    "P-LEN": "20-28s: the public default short-form window",
+    "P-LEN": "the clip length window (public default 20-28s; brands and --length tune it)",
     "P-HANDLES": "2+ engagement handles, or reach does not convert",
     "P-TEXT": "the best writing belongs on screen, not only in the caption",
     "P-TRUST": "never caption a transcript the ASR check rejected",
@@ -70,7 +70,7 @@ AUDIO ENERGY PEAKS (impacts, stings, reveals): {peaks}
 SOURCE RUNS: 0 to {duration:.1f}s
 
 PUBLIC DEFAULTS (tune these with your own private evidence):
-- Target 20 to 28 seconds for this template.
+- Target {len_lo:.0f} to {len_hi:.0f} seconds for this template.
 - Every clip MUST carry at least 2 of these visible engagement handles:
   - persistent_character: a character on screen long enough to attach to
   - readable_detail: on-screen text or a micro-detail worth pausing on
@@ -86,10 +86,12 @@ FORMAT LIBRARY (build to the closest shape):
 - F5 one_vs_escalation: small stake escalating to huge stake
 - F6 late_reveal: normal scene, the last 2 seconds flip it
 - F7 day_in_life: day in the life of [unexpected subject]
+- F9 one_beat: one move and its result, nothing else (a combo lands, a hit, a WIN)
 
 Pick ONE contiguous time range in SECONDS that forms one complete beat: something moving at the very first frame, a middle that escalates the SAME image, and a landing (a reveal, a result, a title card, a turn). Hard rules:
 - SINGLE SCENE ONLY: return exactly ONE unbroken range [[start_s, end_s]]. Never split across gaps or stitch multiple ranges -- a cut is one continuous take. If no single continuous stretch lands, set "landing_ok": false.
-- Total duration 20 to 28 seconds. This is not negotiable.
+- Total duration {len_lo:.0f} to {len_hi:.0f} seconds. This is not negotiable.
+- A short cut is ONE BEAT: one move and its visible result (a combo lands, an attack hits, a curse breaks, a board clears, a WIN). Setup, the move, the result on screen, a breath. A longer cut is a small story with a turn. Pick whichever the footage actually holds.
 - Open on motion. Never open on a static establishing shot or a menu.
 - The last second must land. If this moment has no landing on screen, set "landing_ok": false.
 - ENDING: the clip must END on the payoff fully COMPLETING plus a natural breath. The promised result must be fully on screen and settled before the cut ends -- never end mid-action, mid-generation, or while the result is still playing out. A branded outro is appended AFTER your content automatically; do not reserve room for a card. Report "payoff_complete_by": the second (from the clip's start) by which the payoff has fully completed. It must be at or before the clip's end.
@@ -117,7 +119,7 @@ Return ONLY JSON:
  "caption": "post caption",
  "cta": "the ask, max 6 words",
  "handles": ["persistent_character", "readable_detail"],
- "format": "F1|F2|F4|F5|F6|F7",
+ "format": "F1|F2|F4|F5|F6|F7|F9",
  "payoff_complete_by": 24.5,
  "stranger_appeal": 1-10,
  "why": "one line on why this works as a clip"}}"""
@@ -153,7 +155,7 @@ Pick the sentence indices that form ONE complete little story: setup (what they 
 - Last sentence must land: a payoff, reveal, reaction, or question. Trailing filler is forbidden.
 - ENDING: the clip must END on the payoff fully COMPLETING plus a natural breath -- the landing line fully spoken, the shown result fully on screen and settled. Never end mid-sentence, mid-action, or while the result is still generating or playing out. A branded outro is appended AFTER your content automatically; do not reserve room for a card. Report "payoff_complete_by": the second (from the clip's start) by which the payoff has fully completed, at or before the clip's end.
 - SINGLE SCENE ONLY: return exactly ONE contiguous range of sentence indices [[first_idx, last_idx]]. Do NOT return multiple ranges and do NOT skip sentences in the middle -- a cut is one unbroken take, never stitched across gaps. Splicing narration from separate moments makes the audio a non-sequitur. If the only way to make this work is to jump across boring middle sentences, this window is not a clean single-scene cut: set "landing_ok": false.
-- Total 20 to 28 seconds for the public default template. Fewer, cleaner lines beat more.
+- Total {len_lo:.0f} to {len_hi:.0f} seconds. Fewer, cleaner lines beat more.
 - If this window has no clean opener or no landing, set "landing_ok": false and stop.
 - The hook text lands on the FIRST frame of the clip and the viewer is reading it before anything else happens. Write it so it works cold over the opening line.
 - Every overlay line carries a "role": "tease" DELIBERATELY precedes its event (a hook, a question, building anticipation); "reveal" NAMES or DESCRIBES a specific spoken or on-screen moment. A reveal must never appear before the moment it describes: the render will hold it back to that moment.
@@ -275,7 +277,8 @@ def _refine_ai(cand, wsents, vr, peaks, project):
     resp = client.models.generate_content(
         model=config.GEMINI_MODEL,
         contents=REFINE_PROMPT.format(why=cand["why"], visuals=visuals, peaks=pk,
-                                      sents=lines, payoffs=_payoff_lines(cand, vr))
+                                      sents=lines, payoffs=_payoff_lines(cand, vr),
+                                      **_len_kw())
         + brief_block(),
         config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.3))
     with _LEDGER_LOCK:
@@ -303,7 +306,7 @@ def _refine_gpt(cand, wsents, vr, peaks, project):
         json={"model": GPT_MODEL,
               "messages": [{"role": "user", "content": REFINE_PROMPT.format(
                   why=cand["why"], visuals=visuals, peaks=pk, sents=lines,
-                  payoffs=_payoff_lines(cand, vr)) + brief_block()}],
+                  payoffs=_payoff_lines(cand, vr), **_len_kw()) + brief_block()}],
               "response_format": {"type": "json_object"}},
         timeout=180)
     with _LEDGER_LOCK:
@@ -521,8 +524,14 @@ def _refine_cli(cand, wsents, vr, peaks, project, tool):
                    for p in peaks if cand["s"] - 10 <= p["t"] <= cand["e"] + 10) or "none"
     return _ask_cli(tool, REFINE_PROMPT.format(
         why=cand["why"], visuals=visuals, peaks=pk, sents=lines,
-        payoffs=_payoff_lines(cand, vr)) + brief_block(), project,
+        payoffs=_payoff_lines(cand, vr), **_len_kw()) + brief_block(), project,
         f"refine {cand['why'][:40]}")
+
+
+def _len_kw():
+    """The clip length window for the prompts (performance.target_len)."""
+    lo, hi = performance.target_len()
+    return {"len_lo": lo, "len_hi": hi}
 
 
 def brief_block():
@@ -616,7 +625,8 @@ def _refine_visual(cand, vr, peaks, scenes, duration, brain, project):
     pk = ", ".join(f"{p['t']:.1f}s ({p['above_median']:+.1f}dB)" for p in peaks
                    if cand["s"] - 15 <= p["t"] <= cand["e"] + 60) or "none"
     return _ask_json(VISUAL_REFINE_PROMPT.format(
-        why=cand["why"], visuals=visuals, scenes=sc, peaks=pk, duration=duration)
+        why=cand["why"], visuals=visuals, scenes=sc, peaks=pk, duration=duration,
+        **_len_kw())
         + brief_block(), brain, project, f"visual refine {cand['why'][:40]}")
 
 
@@ -777,7 +787,7 @@ def _breathe_tail(merged, total, delivery_end, room, hard_hi=None):
     (`room`), capped by the hard length gate. Returns
     (merged, total, note_or_None); mutates merged."""
     from . import outro as outro_mod
-    hard_hi = hard_hi if hard_hi is not None else performance.HARD_LEN[1]
+    hard_hi = hard_hi if hard_hi is not None else performance.hard_len()[1]
     need = delivery_end + outro_mod.TAIL_BREATH_S
     if total >= need - 1e-6:
         return merged, total, None
