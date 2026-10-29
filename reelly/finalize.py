@@ -283,6 +283,65 @@ def _burn_pass(src, dst, events, seek=None):
     return dst
 
 
+def _pop_times(plan):
+    """Cut-time instants the hook's and the lines' hot words pop (the
+    beat-timed accents), for effects that answer them."""
+    from . import kinetic
+    beats, out = plan.get("_beats"), []
+    rows = []
+    hook = plan.get("hook") or {}
+    if hook.get("text"):
+        rows.append((hook["text"], 0.0, float(hook.get("show_s", 3.6)), hook.get("hot"),
+                     hook.get("hot_reason")))
+    for o in plan.get("overlay_lines") or []:
+        rows.append((o["text"], float(o["t"]), float(o.get("show_s", 3.0)), o.get("hot"),
+                     o.get("hot_reason")))
+    for text, t0, show, hot, why in rows:
+        words = text.split()
+        hi, _ = kinetic.choose_hot(words, hot, "line", why)
+        pop = kinetic.pop_time(len(words), show, hi, t0 > 0.0, True,
+                               kinetic.local_beat(beats, t0))
+        if pop is not None:
+            out.append(round(t0 + pop, 3))
+    return sorted(out)
+
+
+def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
+    """The brand's cut-long shader layer (shaderfx ambient) over the
+    pre-caption cut: smoke only outside the game picture and the text band,
+    so gameplay is never tinted or covered. Returns dst, or src when the
+    brand has no ambient effect or it cannot render."""
+    from . import kinetic, layout as _layout, shaderfx
+    fx = shaderfx.active("ambient")
+    if not fx or not kinetic.enabled():
+        return src
+    try:
+        H = _layout.FRAME_H
+        top = _layout.picture_top(plan.get("reframe", 1.0))
+        bottom = H - top
+        L = _layout.plan_text(plan, layout_template)
+        text_top = min(L.get("hook", {}).get("y", top), L.get("game_name", {}).get("y", top)) - 24
+        pic = (0.0, 1 - bottom / H, 1.0, 1 - top / H)          # uv, y up
+        clear = (1 - top / H, 1 - max(0, text_top) / H)
+        pops = _pop_times(plan)
+        seq = shaderfx.render_ambient(fx, os.path.join(workdir, "fx_ambient"), dur,
+                                      pic, clear, pops)
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src,
+                        "-framerate", str(shaderfx.AMBIENT_FPS), "-i", seq,
+                        "-filter_complex",
+                        "[1:v]scale=1080:1920:flags=bicubic,format=rgba[fx];"
+                        "[0:v][fx]overlay=0:0:eof_action=pass:shortest=0,format=yuv420p[v]",
+                        "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
+                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
+                        dst], check=True)
+        print(f"        ambient '{fx}': smoke outside the picture, "
+              f"{len(pops)} beat-timed swell(s)")
+        return dst
+    except Exception as e:   # noqa: BLE001 -- the cut ships without the layer
+        print(f"        ambient '{fx}' failed ({e}); no ambient layer")
+        return src
+
+
 def _burn_final(src, dst, plan, words_tl, dur, workdir, layout, product_key):
     """Video-only pass: hook, karaoke cues, payoff chip, end tag."""
     events = _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=src)
@@ -516,8 +575,10 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                             print(f"        beat grid: {60 / period:.1f} bpm "
                                   f"({'stated' if bpm else 'detected'}), "
                                   f"a beat on {beat_target:.2f}s")
+            with timing.stage(f"{p['id']} ambient fx", tpath):
+                lit = _ambient_pass(raw, os.path.join(td, "ambient.mp4"), p, dur, td, layout)
             with timing.stage(f"{p['id']} caption burn", tpath):
-                vid = _burn_final(raw, os.path.join(td, "burn.mp4"), p, words_tl,
+                vid = _burn_final(lit, os.path.join(td, "burn.mp4"), p, words_tl,
                                   dur, td, layout, product)
             from . import legibility as _leg
             if "_text_contrast" in p:

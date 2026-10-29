@@ -28,13 +28,7 @@ from . import config
 SCALE = 0.5                  # render at half size; the encode scales back up
 FX_NAMES = ("smoke",)
 
-# Cursed smoke: domain-warped fbm rising from the bottom, thinner across the
-# ask's band so the type stays clean, one ring of light when the ask's action
-# word pops (u_pulse, beat-timed), additive over the dimmed final frame.
-_SMOKE = r"""
-precision highp float;
-uniform vec2 u_res; uniform float u_t; uniform float u_pulse; uniform float u_band;
-uniform vec3 u_accent; uniform sampler2D u_bg;
+_NOISE = r"""
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p){
   vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
@@ -46,14 +40,30 @@ float fbm(vec2 p){
   for (int i = 0; i < 5; i++){ v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; }
   return v;
 }
-void main(){
-  vec2 uv = gl_FragCoord.xy / u_res;                 // y up
+// The smoke field at uv and absolute time T (one field for the whole video:
+// the cut's ambient layer and the end card sample the same smoke).
+float smoke(vec2 uv, float T){
   vec2 p = vec2(uv.x * u_res.x / u_res.y, uv.y) * 3.2;
-  float t = u_t * 0.32;
+  float t = T * 0.32;
   vec2 q = vec2(fbm(p + vec2(0.0, -t)), fbm(p + vec2(5.2, 1.3 - t)));
   vec2 r = vec2(fbm(p + 3.6 * q + vec2(1.7, 9.2) - vec2(0.0, 1.4 * t)),
                 fbm(p + 3.6 * q + vec2(8.3, 2.8)));
-  float f = fbm(p + 3.6 * r);
+  return fbm(p + 3.6 * r);
+}
+"""
+
+# Cursed smoke end card: the field rising from the bottom, thinner across the
+# ask's band so the type stays clean, one smoke-torn ring of light when the
+# ask's action word pops (u_pulse, beat-timed), additive over the dimmed
+# final frame. u_t0 continues the cut's ambient smoke without a jump.
+_SMOKE = r"""
+precision highp float;
+uniform vec2 u_res; uniform float u_t; uniform float u_t0; uniform float u_pulse;
+uniform float u_band; uniform vec3 u_accent; uniform sampler2D u_bg;
+""" + _NOISE + r"""
+void main(){
+  vec2 uv = gl_FragCoord.xy / u_res;                 // y up
+  float f = smoke(uv, u_t + u_t0);
   float rise = smoothstep(1.1, 0.05, uv.y);          // denser low, gone at the top
   float band = 1.0 - 0.6 * exp(-pow((uv.y - u_band) / 0.075, 2.0));
   float d = pow(f, 2.4) * rise * band;
@@ -66,20 +76,57 @@ void main(){
     ring = exp(-pow((dist - dt * 0.5) / 0.05, 2.0)) * (1.0 - dt / 1.3) * (0.55 + 0.9 * f);
     d += 0.25 * exp(-dt * 3.0) * rise;                // the smoke swells with it
   }
-  float fade = smoothstep(0.0, 0.45, u_t);
+  // continuing the cut's smoke (u_t0 > 0) the field is already there:
+  // it only needs to spread over the picture, not appear from nothing
+  float fade = smoothstep(u_t0 > 0.0 ? -0.35 : 0.0, 0.45, u_t);
   vec3 bg = texture2D(u_bg, vec2(uv.x, 1.0 - uv.y)).rgb;
   vec3 col = bg + u_accent * (1.2 * d + 0.7 * ring) * fade;
   gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
 }
 """
 
+# Ambient smoke for the whole cut: only OUTSIDE the game picture (u_pic,
+# the picture rect in uv, y up) and outside the text band above it (u_clear),
+# denser low, a light veil at the top, a swell on each beat-timed pop
+# (u_pops), building over the last 2 s into the end card (u_end). Straight
+# alpha over transparent: the footage is never tinted.
+_AMBIENT = r"""
+precision highp float;
+uniform vec2 u_res; uniform float u_t; uniform float u_t0; uniform vec4 u_pic;
+uniform vec2 u_clear; uniform float u_pops[8]; uniform float u_end;
+uniform float u_level; uniform vec3 u_accent;
+""" + _NOISE + r"""
+void main(){
+  vec2 uv = gl_FragCoord.xy / u_res;
+  float f = smoke(uv, u_t + u_t0);
+  float below = 1.0 - smoothstep(0.0, u_pic.y, uv.y);      // 1 at the frame bottom
+  float above = smoothstep(u_pic.w, 1.0, uv.y);             // 1 at the frame top
+  float edge = 0.012;
+  float outside = 1.0 - smoothstep(u_pic.y - edge, u_pic.y, uv.y)
+                      * (1.0 - smoothstep(u_pic.w, u_pic.w + edge, uv.y));
+  float c = (u_clear.x + u_clear.y) * 0.5, hw = (u_clear.y - u_clear.x) * 0.5 + 0.02;
+  float clear = 1.0 - exp(-pow((uv.y - c) / hw, 6.0));
+  float swell = 0.0;
+  for (int i = 0; i < 8; i++){
+    float dt = u_t - u_pops[i];
+    if (u_pops[i] >= 0.0 && dt > 0.0 && dt < 1.2) swell += exp(-dt * 3.5);
+  }
+  float ramp = smoothstep(u_end - 2.0, u_end, u_t);
+  float amount = u_level * (1.0 + 0.6 * swell) + 0.55 * ramp;
+  float d = pow(f, 2.2) * (1.5 * pow(below, 0.7) + 0.55 * pow(above, 1.3));
+  float a = clamp(d * amount * outside * clear * 1.6, 0.0, 0.85);
+  gl_FragColor = vec4(u_accent, a);
+}
+"""
+
 _PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
-html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:#000}}
+html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent}}
 canvas{{display:block}}</style></head><body>
 <canvas id="c" width="{w}" height="{h}"></canvas>
 <script>
 var gl = document.getElementById('c').getContext('webgl',
-  {{preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false}});
+  {{preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false,
+    alpha: true}});
 window.__reellyReady = false;
 function sh(type, src){{ var s = gl.createShader(type); gl.shaderSource(s, src);
   gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
@@ -94,37 +141,49 @@ gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.ST
 var loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc);
 gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 function u(n){{ return gl.getUniformLocation(prog, n); }}
-gl.uniform2f(u('u_res'), {w}, {h});
-gl.uniform3f(u('u_accent'), {ar}, {ag}, {ab});
-gl.uniform1f(u('u_pulse'), {pulse});
-gl.uniform1f(u('u_band'), {band});
-var img = new Image();
-img.onload = function(){{
-  var tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
-  gl.uniform1i(u('u_bg'), 0);
-  window.__reellyReady = true; window.__reellyDraw(0);
-}};
-img.src = '{bg}';
+var U = {uniforms};
+Object.keys(U).forEach(function(k){{
+  var v = U[k], l = u(k);
+  if (!Array.isArray(v)) gl.uniform1f(l, v);
+  else if (k === 'u_pops') gl.uniform1fv(l, new Float32Array(v));
+  else gl['uniform' + v.length + 'f'].apply(gl, [l].concat(v));
+}});
 window.__reellyDraw = function(ms){{
   gl.uniform1f(u('u_t'), ms / 1000.0);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); gl.finish();
 }};
+var bg = {bg};
+if (!bg) {{ window.__reellyReady = true; window.__reellyDraw(0); }}
+else {{
+  var img = new Image();
+  img.onload = function(){{
+    var tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+    gl.uniform1i(u('u_bg'), 0);
+    window.__reellyReady = true; window.__reellyDraw(0);
+  }};
+  img.src = bg;
+}}
 </script></body></html>"""
 
+# brand.json "ambient_fx" / REELLY_AMBIENT_FX: the cut-long layer
+AMBIENT_SCALE = 0.25         # the veil is very soft: quarter size is plenty
+AMBIENT_FPS = 30             # slow smoke; the encode repeats frames for 60
 
-def active():
-    """The outro effect for this run: REELLY_OUTRO_FX, then brand.json
-    "outro_fx", else None (off)."""
-    v = os.environ.get("REELLY_OUTRO_FX", "").strip().lower()
+
+def active(kind="outro"):
+    """The effect for this run: kind "outro" (REELLY_OUTRO_FX, brand.json
+    "outro_fx") or "ambient" (REELLY_AMBIENT_FX, "ambient_fx"); None = off."""
+    v = os.environ.get(f"REELLY_{kind.upper()}_FX", "").strip().lower()
     if not v:
         try:
             from . import brandkit
-            v = str(brandkit.brand().get("outro_fx") or "").strip().lower()
+            v = str(brandkit.brand().get(f"{kind}_fx") or "").strip().lower()
         except Exception:   # noqa: BLE001 -- no kit, no effect
             v = ""
     return v if v in FX_NAMES else None
@@ -138,21 +197,39 @@ def _rgb01(hex_):
         return (0.66, 0.49, 0.94)
 
 
-def page_html(fx, backdrop_png, w, h, accent_hex, pulse_t=None, band=0.53):
-    """The effect page: backdrop as a data-URI texture (no file-origin
-    taint), the fragment shader, the __reellyDraw hook."""
-    from PIL import Image
+def _page(frag, w, h, uniforms, backdrop_png=None):
     import io
-    frag = {"smoke": _SMOKE}[fx]
-    im = Image.open(backdrop_png).convert("RGB").resize((w, h), Image.LANCZOS)
-    b = io.BytesIO()
-    im.save(b, "JPEG", quality=92)
-    bg = "data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode()
-    ar, ag, ab = _rgb01(accent_hex)
     import json
-    return _PAGE.format(w=w, h=h, frag=json.dumps(frag), ar=f"{ar:.4f}", ag=f"{ag:.4f}",
-                        ab=f"{ab:.4f}", pulse=f"{-1.0 if pulse_t is None else pulse_t:.4f}",
-                        band=f"{band:.4f}", bg=bg)
+    bg = "null"
+    if backdrop_png:
+        from PIL import Image
+        im = Image.open(backdrop_png).convert("RGB").resize((w, h), Image.LANCZOS)
+        b = io.BytesIO()
+        im.save(b, "JPEG", quality=92)
+        bg = json.dumps("data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode())
+    return _PAGE.format(w=w, h=h, frag=json.dumps(frag), bg=bg,
+                        uniforms=json.dumps({k: (list(v) if isinstance(v, (list, tuple))
+                                                 else round(float(v), 4))
+                                             for k, v in uniforms.items()}))
+
+
+def page_html(fx, backdrop_png, w, h, accent_hex, pulse_t=None, band=0.53, t0=0.0):
+    """The end-card page: backdrop as a data-URI texture (no file-origin
+    taint), the fragment shader, the __reellyDraw hook."""
+    frag = {"smoke": _SMOKE}[fx]
+    return _page(frag, w, h, {"u_res": (w, h), "u_accent": _rgb01(accent_hex),
+                              "u_pulse": -1.0 if pulse_t is None else pulse_t,
+                              "u_band": band, "u_t0": t0}, backdrop_png)
+
+
+def ambient_html(fx, w, h, accent_hex, pic, clear, pops=(), end=0.0, level=0.45):
+    """The cut-long layer: transparent page, smoke outside `pic` (x0, y0,
+    x1, y1 in uv, y up) and outside the `clear` band (y0, y1)."""
+    frag = {"smoke": _AMBIENT}[fx]
+    pops = [float(p) for p in list(pops)[:8]] + [-1.0] * (8 - min(8, len(pops)))
+    return _page(frag, w, h, {"u_res": (w, h), "u_accent": _rgb01(accent_hex),
+                              "u_pic": pic, "u_clear": clear, "u_pops": pops,
+                              "u_end": end, "u_level": level, "u_t0": 0.0})
 
 
 async def _shoot_all(page, frames, w, h, out_dir, profile):
@@ -160,6 +237,8 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
     async with card._Browser(profile, webgl=True) as b:
         await b("Emulation.setDeviceMetricsOverride",
                 {"width": w, "height": h, "deviceScaleFactor": 1, "mobile": False})
+        await b("Emulation.setDefaultBackgroundColorOverride",
+                {"color": {"r": 0, "g": 0, "b": 0, "a": 0}})
         await b.load("file://" + page)
         for _ in range(100):
             if await b._eval("window.__reellyReady === true"):
@@ -171,19 +250,11 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
             await b.shoot(t, os.path.join(out_dir, f"f{n:05d}.png"))
 
 
-def render(fx, backdrop_png, out_dir, dur, accent_hex=None, pulse_t=None,
-           band=0.53, fps=None):
-    """Render `fx` over the backdrop to out_dir/f%05d.png (half size).
-    Returns the ffmpeg pattern. pulse_t: local time of the ask's pop (the
-    ring of light); band: the ask's height as a fraction from the bottom."""
-    from . import brandkit
-    fps = fps or config.output_fps()
+def _render_page(html_text, out_dir, w, h, dur, fps):
     os.makedirs(out_dir, exist_ok=True)
-    w, h = int(1080 * SCALE) // 2 * 2, int(1920 * SCALE) // 2 * 2
     page = os.path.join(out_dir, "fx.html")
     with open(page, "w") as f:
-        f.write(page_html(fx, backdrop_png, w, h, accent_hex or brandkit.accent(),
-                          pulse_t, band))
+        f.write(html_text)
     n = max(1, int(round(dur * fps)))
     profile = tempfile.mkdtemp(prefix="reelly-chrome-")
     try:
@@ -195,3 +266,29 @@ def render(fx, backdrop_png, out_dir, dur, accent_hex=None, pulse_t=None,
     if made < n:
         raise RuntimeError(f"shaderfx: only {made}/{n} frames rendered")
     return os.path.join(out_dir, "f%05d.png")
+
+
+def _size(scale):
+    return int(1080 * scale) // 2 * 2, int(1920 * scale) // 2 * 2
+
+
+def render(fx, backdrop_png, out_dir, dur, accent_hex=None, pulse_t=None,
+           band=0.53, fps=None, t0=0.0):
+    """The end card: `fx` over the backdrop to out_dir/f%05d.png (half
+    size). pulse_t: local time of the ask's pop (the ring of light); band:
+    the ask's height from the bottom; t0: where the cut's ambient smoke
+    left off, so the field continues."""
+    from . import brandkit
+    w, h = _size(SCALE)
+    return _render_page(page_html(fx, backdrop_png, w, h, accent_hex or brandkit.accent(),
+                                  pulse_t, band, t0),
+                        out_dir, w, h, dur, fps or config.output_fps())
+
+
+def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level=0.45):
+    """The cut-long layer (quarter size, AMBIENT_FPS, straight alpha)."""
+    from . import brandkit
+    w, h = _size(AMBIENT_SCALE)
+    return _render_page(ambient_html(fx, w, h, accent_hex or brandkit.accent(), pic, clear,
+                                     pops, end=dur, level=level),
+                        out_dir, w, h, dur, AMBIENT_FPS)
