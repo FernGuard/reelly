@@ -495,6 +495,8 @@ def _data_uri(path):
 _SEEK = """(function(ms){
   var a = document.getAnimations();
   a.forEach(function(x){ try { x.pause(); x.currentTime = ms; } catch(e){} });
+  // A canvas/WebGL page draws the frame for this instant itself.
+  if (window.__reellyDraw) { window.__reellyDraw(ms); }
   // Footage is seeked to the same instant, so a clip behind a card advances
   // with the card instead of being a still or a loop running on its own clock.
   var vs = Array.prototype.slice.call(document.querySelectorAll('video'));
@@ -508,7 +510,7 @@ _SEEK = """(function(ms){
       v.currentTime = want;
       setTimeout(function(){ res(1); }, 500);   // never hang a whole render
     });
-  })).then(function(){ return a.length; });
+  })).then(function(){ return a.length + (window.__reellyDraw ? 1 : 0); });
 })(%f)"""
 
 
@@ -527,9 +529,14 @@ def _free_port():
 class _Browser:
     """One headless Chrome, held open, driven over the DevTools protocol."""
 
-    def __init__(self, profile_dir):
+    def __init__(self, profile_dir, webgl=False):
         self.port = _free_port()
         self.profile = profile_dir
+        # WebGL pages (shaderfx) get the software GPU: deterministic on every
+        # machine, no driver or display needed (the PC worker runs headless,
+        # as SYSTEM). Everything else keeps the GPU off entirely.
+        self.gpu_flags = (["--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+                           "--ignore-gpu-blocklist"] if webgl else ["--disable-gpu"])
         self.proc = None
         self.ws = None
         self.sid = None
@@ -538,7 +545,7 @@ class _Browser:
     async def __aenter__(self):
         import websockets
         self.proc = await asyncio.create_subprocess_exec(
-            CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+            CHROME, "--headless=new", *self.gpu_flags, "--hide-scrollbars",
             "--no-first-run", "--no-default-browser-check", "--disable-extensions",
             # Never touch the OS keychain: a fresh profile on macOS asks for
             # "Chrome Safe Storage", and from ssh/launchd/CI that raises a

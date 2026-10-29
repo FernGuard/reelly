@@ -219,6 +219,32 @@ def _kinetic_cta(plan, product, workdir, len_s, starts_at=None):
         return None
 
 
+def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at):
+    """The backdrop as a living shader layer (shaderfx) when the brand asks
+    for one, timed so its ring of light leaves with the ask's beat-timed pop.
+    None when off or when the effect cannot render (the still is used)."""
+    from . import kinetic, shaderfx
+    fx = shaderfx.active()
+    cta = (plan.get("cta") or "").strip()
+    if not fx or not cta:
+        return None
+    try:
+        words = cta.split()
+        hi, _ = kinetic.choose_hot(words, plan.get("cta_hot"), "cta",
+                                   plan.get("cta_hot_reason"))
+        beat = (kinetic.local_beat(plan.get("_beats"), starts_at)
+                if starts_at is not None else None)
+        pop = kinetic.pop_time(len(words), len_s, hi, True, False, beat)
+        seq = shaderfx.render(fx, backdrop, os.path.join(workdir, "fx_outro"), len_s,
+                              pulse_t=pop, band=1.0 - CTA_Y_FRAC - 0.03)
+        print(f"[outro] {plan.get('id', '?')}: shader backdrop '{fx}'"
+              + (f", light ring with the pop at {pop:.2f}s" if pop is not None else ""))
+        return seq
+    except Exception as e:   # noqa: BLE001 -- the still backdrop instead
+        print(f"[outro] shader backdrop failed ({e}); still backdrop instead")
+        return None
+
+
 def card_png(plan, product, workdir):
     """The full-frame RGBA card for the outro: the kit endcard first ($0),
     else a card rendered from the registered wordmark + the plan's ask,
@@ -253,7 +279,7 @@ def card_png(plan, product, workdir):
                              dst)
 
 
-def build_segment(backdrop, card, len_s, dst, fps=None, seq=None):
+def build_segment(backdrop, card, len_s, dst, fps=None, seq=None, backdrop_seq=None):
     """Encode the outro segment: static backdrop, card fading in, no audio.
     seq=(pattern, y): a kinetic CTA sequence composited over the card.
 
@@ -262,7 +288,8 @@ def build_segment(backdrop, card, len_s, dst, fps=None, seq=None):
     with -c copy.
     """
     fps = fps or config.output_fps()
-    fc = (f"[0:v]scale=1080:1920,setsar=1[b];"
+    # backdrop_seq: a shaderfx PNG sequence (half size) instead of the still
+    fc = (f"[0:v]scale=1080:1920:flags=bicubic,setsar=1[b];"
           f"[1:v]scale=1080:1920,format=rgba,"
           f"fade=t=in:st=0.03:d={FADE_IN_S}:alpha=1[c];"
           f"[b][c]overlay=0:0" + ("[bc];" if seq else ",format=yuv420p[v]"))
@@ -272,9 +299,10 @@ def build_segment(backdrop, card, len_s, dst, fps=None, seq=None):
         fc += (f"[bc][2:v]overlay=(W-w)/2:{int(seq[1])}:eof_action=repeat,"
                f"format=yuv420p[v]")
     subprocess.run(
-        [config.FFMPEG, "-y", "-v", "error",
-         "-loop", "1", "-framerate", str(fps), "-i", backdrop,
-         "-loop", "1", "-framerate", str(fps), "-i", card] + extra +
+        [config.FFMPEG, "-y", "-v", "error"]
+        + (["-framerate", str(fps), "-i", backdrop_seq] if backdrop_seq
+           else ["-loop", "1", "-framerate", str(fps), "-i", backdrop])
+        + ["-loop", "1", "-framerate", str(fps), "-i", card] + extra +
         ["-filter_complex", fc, "-map", "[v]", "-t", f"{len_s:.3f}",
          "-r", str(fps), "-an", *config.final_encode_args(), dst],
         check=True, capture_output=True)
@@ -325,9 +353,10 @@ def append(content_video, backdrop_source, plan, product, workdir):
         content_d = None
     kin = _kinetic_cta(plan, product, workdir, len_s, starts_at=content_d)
     card = kin[0] if kin else card_png(plan, product, workdir)
+    fx_seq = _shader_backdrop(bp, plan, workdir, len_s, content_d) if kin else None
     seg = build_segment(bp, card, len_s,
                         os.path.join(workdir, "outro_seg.mp4"),
-                        seq=kin[1] if kin else None)
+                        seq=kin[1] if kin else None, backdrop_seq=fx_seq)
     dst = os.path.join(workdir, "content_outro.mp4")
     ok = _concat_copy(content_video, seg, dst, workdir)
     if ok and content_d is not None:
