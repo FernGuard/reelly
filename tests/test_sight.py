@@ -106,7 +106,7 @@ def test_codex_images_go_before_a_double_dash(monkeypatch, tmp_path):
     seen = {}
 
     def fake_run(cmd, **kw):
-        seen["cmd"] = cmd
+        seen["cmd"], seen["input"] = cmd, kw.get("input")
         open(cmd[cmd.index("-o") + 1], "w").write('{"ok": true}')
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
@@ -117,7 +117,9 @@ def test_codex_images_go_before_a_double_dash(monkeypatch, tmp_path):
     assert direct._ask_cli("codex", "look", "p", "l", images=[str(img)]) == {"ok": True}
     cmd = seen["cmd"]
     assert cmd[cmd.index("-i") + 1] == str(img)
-    assert cmd[-2] == "--" and cmd[-1].startswith("look")
+    # the prompt travels on stdin (`-`): a .cmd shim on Windows cuts
+    # arguments at the first newline
+    assert cmd[-2:] == ["--", "-"] and seen["input"].startswith("look")
 
 
 def test_claude_brain_refuses_images():

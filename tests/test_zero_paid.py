@@ -149,8 +149,8 @@ def test_codex_call_strips_api_keys_and_reads_the_reply(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda tool: f"/usr/bin/{tool}")
     seen = {}
 
-    def fake_run(cmd, env=None, stdin=None, **kw):
-        seen["cmd"], seen["env"], seen["stdin"] = cmd, env, stdin
+    def fake_run(cmd, env=None, stdin=None, input=None, **kw):
+        seen["cmd"], seen["env"], seen["stdin"], seen["input"] = cmd, env, stdin, input
         out = cmd[cmd.index("-o") + 1]
         with open(out, "w") as f:
             f.write('{"landing_ok": true, "hook": "The door opens."}')
@@ -164,7 +164,7 @@ def test_codex_call_strips_api_keys_and_reads_the_reply(monkeypatch):
     assert "OPENAI_API_KEY" not in seen["env"]
     assert "ANTHROPIC_API_KEY" not in seen["env"]
     assert seen["cmd"][:2] == ["/usr/bin/codex", "exec"]
-    assert seen["stdin"] is subprocess.DEVNULL
+    assert seen["input"].startswith("plan this")   # prompt on stdin, never argv
     assert "-m" not in seen["cmd"]            # the CLI's own default model first
     assert added and added[0][0] == "codex-cli" and added[0][2] == 0.0
 

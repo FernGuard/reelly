@@ -435,9 +435,13 @@ def _ask_cli(tool, prompt, project, label, images=None):
                     cmd += ["-m", model]
                 for img in images or []:
                     cmd += ["-i", os.path.abspath(img)]
-                # `--`: --image takes several files and would read the prompt as one
-                cmd += ["--", prompt]
-                r = _run_cli(cmd, td, tool)
+                # The prompt goes in on STDIN (`-`), never as an argument: on
+                # Windows codex is a .cmd shim, and cmd.exe cuts an argument at
+                # its first newline (and at 8191 chars), so every sight sheet
+                # came back with no JSON. `--`: --image takes several files and
+                # would read the `-` as one.
+                cmd += ["--", "-"]
+                r = _run_cli(cmd, td, tool, stdin_text=prompt)
                 if r is None:
                     return None
                 text = open(out_p).read() if os.path.exists(out_p) else ""
@@ -487,14 +491,16 @@ def _codex_models():
     return order
 
 
-def _run_cli(cmd, cwd, tool):
+def _run_cli(cmd, cwd, tool, stdin_text=None):
     import subprocess
     try:
-        # stdin closed: both CLIs read a piped stdin as extra prompt and
-        # would otherwise wait on the parent's stdin until the timeout
+        # stdin is the prompt (stdin_text) or closed: both CLIs read a piped
+        # stdin as (extra) prompt and would otherwise wait on the parent's
+        # stdin until the timeout
+        extra = ({"input": stdin_text, "encoding": "utf-8"} if stdin_text is not None
+                 else {"stdin": subprocess.DEVNULL})
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              timeout=CLI_TIMEOUT_S, env=_cli_env(),
-                              stdin=subprocess.DEVNULL)
+                              timeout=CLI_TIMEOUT_S, env=_cli_env(), **extra)
     except (OSError, subprocess.SubprocessError) as e:
         print(f"  [{tool}] call failed ({e}); heuristic for this window")
         return None
