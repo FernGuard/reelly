@@ -185,3 +185,49 @@ def test_hooks_that_need_three_lines_are_dropped(monkeypatch):
 def test_hook_lines_measures_the_real_render():
     assert hooks.hook_lines("Open it.") == 1
     assert hooks.hook_lines("You brought combos and the curse brought smoke and more") >= 2
+
+
+def test_brief_carries_approved_and_rejected_lines(tmp_path, monkeypatch):
+    d = tmp_path / "kit" / "brands" / "g"
+    d.mkdir(parents=True)
+    (d / "brand.json").write_text(json.dumps({"copy": {
+        "approved_lines": ["Flattering, really."], "rejected_lines": ["Green crosses the grid"]}}))
+    monkeypatch.setenv("REELLY_BRANDKIT", str(tmp_path / "kit"))
+    monkeypatch.setenv("REELLY_BRAND", "g")
+    b = direct.brief_block()
+    assert "LINES THE OWNER APPROVED" in b and '"Flattering, really."' in b
+    assert "LINES THE OWNER REJECTED" in b and '"Green crosses the grid"' in b
+
+
+def test_record_verdict_dedupes_and_keeps_the_newest(tmp_path, monkeypatch):
+    d = tmp_path / "kit" / "brands" / "g"
+    d.mkdir(parents=True)
+    (d / "brand.json").write_text(json.dumps({"copy": {"approved_lines": ["a"]}}))
+    monkeypatch.setenv("REELLY_BRANDKIT", str(tmp_path / "kit"))
+    c = brandkit.record_verdict("g", approve=["b", "a"], reject=["x"])
+    assert c["approved_lines"] == ["b", "a"] and c["rejected_lines"] == ["x"]
+    c = brandkit.record_verdict("g", approve=[f"l{i}" for i in range(50)])
+    assert len(c["approved_lines"]) == 40 and c["approved_lines"][-1] == "l49"
+    with pytest.raises(ValueError):
+        brandkit.record_verdict("missing", approve=["a"])
+
+
+def test_unshift_undoes_shift_start_exactly():
+    p = _plan()
+    before = json.loads(json.dumps(p))
+    d = hooks._shift_start(p, 4.0)
+    p["opening"] = {"shifted_s": d}
+    hooks._unshift(p)
+    for k in ("segments", "duration_s", "content_s", "payoff_complete_by", "source_range"):
+        assert p[k] == before[k], k
+    assert [o["t"] for o in p["overlay_lines"]] == [o["t"] for o in before["overlay_lines"]]
+
+
+def test_cli_brand_verdict(tmp_path, monkeypatch, capsys):
+    from reelly import cli
+    d = tmp_path / "kit" / "brands" / "g"
+    d.mkdir(parents=True)
+    (d / "brand.json").write_text("{}")
+    monkeypatch.setenv("REELLY_BRANDKIT", str(tmp_path / "kit"))
+    cli.main(["brand", "verdict", "g", "--approve", "Mop optional.", "--reject", "meh"])
+    assert "1 approved, 1 rejected" in capsys.readouterr().out

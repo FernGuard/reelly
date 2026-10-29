@@ -553,6 +553,15 @@ def brief_block():
     avoid = c.get("avoid") or []
     if avoid:
         lines.append("- Never write: " + ", ".join(f'"{a}"' for a in avoid))
+    approved = [str(x) for x in (c.get("approved_lines") or []) if str(x).strip()][-12:]
+    if approved:
+        lines.append("- LINES THE OWNER APPROVED (the voice to match: rhythm, dryness, "
+                     "specificity; never copy them verbatim):")
+        lines += [f'    "{x}"' for x in approved]
+    rejected = [str(x) for x in (c.get("rejected_lines") or []) if str(x).strip()][-12:]
+    if rejected:
+        lines.append("- LINES THE OWNER REJECTED (never write like these):")
+        lines += [f'    "{x}"' for x in rejected]
     lines.append("- Every claim must be visible in the footage; never invent mechanics, story or offers.")
     return "\n".join(lines)
 

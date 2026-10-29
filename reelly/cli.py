@@ -385,6 +385,15 @@ def main(argv=None):
     ba.add_argument("--replace", action="store_true",
                     help="start brand.json fresh instead of updating it")
     brs.add_parser("list", help="list the brands in the local kit")
+    bv = brs.add_parser("verdict", help="record owner-approved / rejected lines "
+                                        "into the brand brief (the hook writer learns them)")
+    bv.add_argument("name")
+    bv.add_argument("--approve", action="append", default=[], metavar="LINE")
+    bv.add_argument("--reject", action="append", default=[], metavar="LINE")
+    hk = sub.add_parser("hooks", help="re-write the hook + opening frame of existing cut plans")
+    hk.add_argument("project")
+    hk.add_argument("--cut", help="one cut id only")
+    hk.add_argument("--brain", choices=BRAINS, default="auto", help=BRAIN_HELP)
 
     sz_ = sub.add_parser("safezones", help="draw the TikTok/Reels/Shorts chrome "
                                            "over frames of a render (proof sheet)")
@@ -400,9 +409,25 @@ def main(argv=None):
         out = args.out or os.path.splitext(args.video)[0] + "_safezones.png"
         print(safezones.sheet(args.video, times, out))
         return
+    if args.cmd == "hooks":
+        from . import direct, hooks
+        brain = direct.resolve_brain(args.brain)
+        if not brain:
+            raise SystemExit("hooks: no signed-in subscription brain (codex) and paid "
+                             "brains are off; nothing to write with")
+        hooks.rewrite(direct.resolve_project(args.project), brain, cut_id=args.cut)
+        return
     if args.cmd == "brand":
         import json as _json
         from . import brandkit
+        if args.brand_cmd == "verdict":
+            try:
+                c = brandkit.record_verdict(args.name, args.approve, args.reject)
+            except ValueError as e:
+                raise SystemExit(f"brand verdict: {e}")
+            print(f"brand '{args.name}': {len(c.get('approved_lines', []))} approved, "
+                  f"{len(c.get('rejected_lines', []))} rejected line(s) on file")
+            return
         if args.brand_cmd == "add":
             fonts = {r: getattr(args, r) for r in ("headline", "caption", "cta")
                      if getattr(args, r)}

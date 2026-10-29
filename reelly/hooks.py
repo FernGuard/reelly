@@ -80,6 +80,9 @@ Return ONLY JSON:
 
 JUDGE_PROMPT = """You are a demanding short-form editor judging hook + opening-frame pairs written by someone else for a vertical game short. The hook is on screen from the first frame over its frame{image_note}.
 
+WHAT HAPPENS IN THE CUT (later moments are real even if not in these frames; a hook may tease them): {story}
+Lines shown later in the cut: {lines}
+
 FRAMES:
 {frames}
 
@@ -89,7 +92,7 @@ PAIRS:
 Score every pair 1-10 on three things, honestly and independently:
 - "natural": does it read like a sharp human wrote it? Awkward, padded or ungrammatical lines score low.
 - "stop": would it stop a muted stranger's scroll over THAT frame?
-- "on_brief": does it fit the voice and only claim what the footage shows?
+- "on_brief": does it fit the voice and only claim what the CUT shows (its frames or its described moments)?
 Return ONLY JSON: {{"scores": [{{"i": 0, "natural": 7, "stop": 7, "on_brief": 7, "note": "a few words"}}]}}"""
 
 
@@ -297,6 +300,53 @@ def rescore(variants, judged):
     return variants
 
 
+def _unshift(plan):
+    """Undo a previous compose's start shift, so re-writing hooks on an
+    existing plan starts from the moment the planner chose."""
+    d = float((plan.get("opening") or {}).get("shifted_s") or 0.0)
+    if d <= 0:
+        return 0.0
+    seg = plan["segments"][0]
+    seg[0] = round(float(seg[0]) - d, 2)
+    plan["source_range"] = [plan["segments"][0][0], plan["segments"][-1][1]]
+    for k in ("duration_s", "content_s", "payoff_complete_by"):
+        if isinstance(plan.get(k), (int, float)):
+            plan[k] = round(float(plan[k]) + d, 2)
+    for o in plan.get("overlay_lines") or []:
+        o["t"] = round(float(o.get("t", 0)) + d, 2)
+    plan["opening"]["shifted_s"] = 0.0
+    return d
+
+
+def rewrite(root, brain, cut_id=None):
+    """`reelly hooks PROJECT`: re-write the hook + opening frame of existing
+    cut plans (the moments stay), e.g. after new approved/rejected lines."""
+    from . import direct
+    edl = os.path.join(root, "edl", "cut_plans.json")
+    plans = json.load(open(edl))
+    an = os.path.join(root, "analysis")
+    try:
+        vr = json.load(open(os.path.join(an, "visual_review.json"))).get("sequences", [])
+    except (OSError, ValueError, AttributeError):
+        vr = []
+    used = set()
+    for plan in plans:
+        if cut_id and plan["id"] != cut_id:
+            first = (plan.get("hook") or {}).get("text", "").lower().split()
+            if first:
+                used.add(re.sub(r"[^a-z0-9']", "", first[0]))
+            continue
+        _unshift(plan)
+        direct.apply_brand_cta(plan)
+        compose(plan, an, direct._source_video(root), brain,
+                os.path.basename(root), vr=vr, used_openers=used)
+        first = (plan.get("hook") or {}).get("text", "").lower().split()
+        if first:
+            used.add(re.sub(r"[^a-z0-9']", "", first[0]))
+    json.dump(plans, open(edl, "w"), indent=1)
+    return plans
+
+
 def compose(plan, an_dir, video, brain, project, vr=None, used_openers=(),
             ask=None):
     """Choose the hook and opening frame for one plan, in place. Returns the
@@ -347,6 +397,7 @@ def compose(plan, an_dir, video, brain, project, vr=None, used_openers=(),
             judged = _call(JUDGE_PROMPT.format(
                 image_note=(" (the attached image: letters A-F in reading order)"
                             if images else ""),
+                story=_story(plan, vr), lines=lines,
                 frames=flist, pairs=pairs, brief=direct.brief_block()),
                 f"hooks judge {plan['id']}")
             variants = rescore(variants, judged)

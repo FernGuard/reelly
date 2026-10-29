@@ -266,6 +266,29 @@ def copy_brief():
     return c if isinstance(c, dict) else {}
 
 
+def record_verdict(name, approve=(), reject=(), keep=40):
+    """Append owner-approved / rejected lines to brands/<name>/brand.json
+    "copy" (deduplicated, newest last, at most `keep` each), so the next hook
+    writer and judge learn the owner's taste. Returns the copy dict."""
+    d = brand_dir(name)
+    p = os.path.join(d, "brand.json") if d else None
+    if not p or not os.path.exists(p):
+        raise ValueError(f"no brand.json for brand {name!r}")
+    with open(p) as f:
+        spec = json.load(f)
+    copy = spec.setdefault("copy", {})
+    for key, new in (("approved_lines", approve), ("rejected_lines", reject)):
+        cur = [x for x in copy.get(key, []) if isinstance(x, str)]
+        for line in new:
+            line = str(line).strip()
+            if line:
+                cur = [x for x in cur if x != line] + [line]
+        copy[key] = cur[-keep:]
+    with open(p, "w") as f:
+        json.dump(spec, f, indent=1)
+    return copy
+
+
 def font_css():
     """CSS that points Chrome-rendered layers (overlays, cards) at the active
     brand's own font files instead of a font CDN, or "" with no brand fonts.
