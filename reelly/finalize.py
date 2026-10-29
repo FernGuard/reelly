@@ -535,13 +535,19 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
             made = []
             with timing.stage(f"{p['id']} mux/peak", tpath):
                 for suffix, mix in mixes.items():
+                    # at target BEFORE the mux: every later guard rebuilds the
+                    # audio from this file, so a correction made here sticks
+                    mix = audio_post.level_mix(mix)
                     dst = os.path.join(outdir, f"{p['id']}{suffix}.mp4")
                     subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", vid, "-i", mix,
                                     "-map", "0:v", "-map", "1:a", "-c:v", "copy",
                                     "-c:a", "aac", "-b:a", "192k", "-shortest", dst],
                                    check=True)
                     # The mix was normalised, but the AAC encode just added its own
-                    # inter-sample overshoot. Verify what was actually written.
+                    # inter-sample overshoot, and a loud bed under hard transients
+                    # can leave loudnorm short of target (it stops at the peak
+                    # ceiling). Bring the written file into the judge's window;
+                    # the true-peak guard runs again inside.
                     audio_post.enforce_true_peak(dst, source_audio=mix)
                     made.append(dst)
         products.description_md(product, p, os.path.join(outdir, f"{p['id']}_DESCRIPTION.md"),

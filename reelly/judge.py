@@ -95,6 +95,15 @@ def check_file(path, expect_vertical=True, plan_dur=None):
 
     err = _analysis_stderr(path, bool(v), bool(a))
     integ, tp = _parse_loudness(err)
+    if a:
+        # Loudness is graded on an AUDIO-ONLY decode, always: the combined
+        # video+audio graph under-reads some files, and not only absurdly
+        # (2026-10-28: a -16.4 LUFS music mix read -22.4 through it, a
+        # plausible-looking wrong number the old sub- -45 check let through).
+        r_a = _ffmpeg_stderr(["-i", path, "-map", "0:a", "-af", EBUR128])
+        ia, ta = _parse_loudness(r_a)
+        if ia is not None:
+            integ, tp = ia, (ta if ta is not None else tp)
     if integ is not None and integ < -45 and a:
         # Sanity re-measure: the combined video+audio single-decode graph can
         # under-read audio on -c copy concat files (seen 2026-08-03: a healthy

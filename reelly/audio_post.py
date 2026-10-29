@@ -289,8 +289,52 @@ def _download(url, path):
     return path
 
 
+def _brand_sound(kind, key):
+    """A brand's own audio file: brands/<b>/<kind>/<file> for `key` in the
+    brand.json "<kind>" map (music tracks, sfx), or None."""
+    from . import brandkit
+    spec = brandkit.brand().get(kind)
+    if not isinstance(spec, dict) or not brandkit.brand_dir():
+        return None
+    files = spec.get("tracks", spec) if kind == "music" else spec
+    fn = files.get(key) if isinstance(files, dict) else None
+    if not isinstance(fn, str) or os.path.basename(fn) != fn:
+        return None
+    p = os.path.join(brandkit.brand_dir(), kind, fn)
+    return p if os.path.exists(p) else None
+
+
+def brand_track(plan):
+    """(path, key) of the brand's own music for this cut, or (None, None).
+
+    brand.json "music": {"tracks": {key: file}, "match": {key: [words]},
+    "default": key, "cleared": true|false}. The plan's "music" key wins;
+    else the first key whose words appear in what the cut is about (title,
+    hook, lines, the planner's reasons); else "default"."""
+    from . import brandkit
+    spec = brandkit.brand().get("music")
+    if not isinstance(spec, dict):
+        return None, None
+    key = plan.get("music") if isinstance(plan.get("music"), str) else None
+    if not key:
+        text = " ".join([str(plan.get("title", "")), str((plan.get("hook") or {}).get("text", ""))]
+                        + [str(o.get("text", "")) for o in plan.get("overlay_lines") or []]
+                        + [str(b) for b in plan.get("because") or []]).lower()
+        for k, words in (spec.get("match") or {}).items():
+            if any(str(w).lower() in text for w in words or []):
+                key = k
+                break
+    key = key or spec.get("default")
+    path = _brand_sound("music", key) if key else None
+    return (path, key) if path else (None, None)
+
+
 def sfx(name, project=""):
-    """Cached generated SFX (whoosh/riser/impact); costs cents once, ever."""
+    """Cached generated SFX (whoosh/riser/impact); costs cents once, ever.
+    A brand's own sound for `name` (brand.json "sfx") wins."""
+    own = _brand_sound("sfx", name)
+    if own:
+        return own
     os.makedirs(SFX_DIR, exist_ok=True)
     p = os.path.join(SFX_DIR, f"{name}.mp3")
     # lock the check-then-generate: two parallel cuts must not both pay for
@@ -399,6 +443,19 @@ def _music_generate(plan, out_mp3, project=""):
     so the library warms up organically -- no beds are pre-generated."""
     from . import brandkit
     if os.path.exists(out_mp3):
+        return out_mp3
+    # The brand's OWN soundtrack first: on-brand, $0, and usable on business
+    # accounts whose in-app music libraries are restricted.
+    track, key = brand_track(plan)
+    if track:
+        cleared = (brandkit.brand().get("music") or {}).get("cleared") is True
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", track, "-vn",
+                        "-c:a", "libmp3lame", "-b:a", "256k", out_mp3], check=True)
+        print(f"         music: brand track '{key}' ({os.path.basename(track)}, $0)"
+              + ("" if cleared else " -- NOT marked cleared for marketing in brand.json; "
+                 "confirm the rights before posting"))
+        with _LEDGER_LOCK:
+            ledger.add("brand-music", f"music {plan['id']} ({key})", 0.0, project)
         return out_mp3
     dur = max(10, int(plan["duration_s"]) + 2)
     bed = pick_bed(plan)
@@ -648,6 +705,38 @@ def true_peak(path):
 # adds inter-sample overshoot (measured up to +3.6 dB on dense low end), so the
 # enforced ceiling sits a fixed margin below judge.TP_MAX and is verified after.
 TP_SAFETY = 0.6
+
+
+def level_mix(src, target=-14.0, peak_db=-4.5, tolerance=0.4):
+    """A copy of the mix wav at `target` LUFS with its peaks LIMITED, not the
+    whole thing turned down (src itself when already within `tolerance`).
+
+    loudnorm stops short of target when a loud bed sits under hard transients
+    (linear mode will not cross its peak ceiling): -15.9 LUFS measured on a
+    Curses soundtrack mix. A limiter at -2 dB did not fix it: the AAC encode
+    then overshot by +1.7 dB, the true-peak guard limited the file again and
+    the shipped mp4 fell back to -15.8. Measured on three soundtrack mixes, a
+    fast limiter (2 ms attack) at -4.5 dB leaves room for the AAC overshoot,
+    and the gain is iterated against it until the levelled wav reads target
+    (the limiter eats part of each step, so one shot falls short)."""
+    i = integrated_loudness(src)
+    if i is None or abs(target - i) <= tolerance:
+        return src
+    out = src[:-4] + "_lev.wav" if src.endswith(".wav") else src + "_lev.wav"
+    lim = f"alimiter=limit={10 ** (peak_db / 20):.4f}:level=disabled:attack=2:release=60"
+    gain, after = target - i, None
+    for _ in range(4):
+        gain = max(-20.0, min(12.0, gain))
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src, "-af",
+                        f"volume={gain:.2f}dB,{lim}", "-ar", "48000", out], check=True)
+        after = integrated_loudness(out)
+        if after is None or abs(target - after) <= tolerance or gain >= 12.0:
+            break
+        gain += target - after
+    print(f"         mix levelled {i:.1f} -> "
+          f"{after if after is None else round(after, 1)} LUFS "
+          f"(+{gain:.1f} dB, peaks limited at {peak_db} dB)")
+    return out
 
 
 def enforce_true_peak(path, ceiling=None, margin=0.3, source_audio=None):

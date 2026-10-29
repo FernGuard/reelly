@@ -90,9 +90,10 @@ def test_combined_invocation_matches_separate_passes_on_real_clip(tmp_path):
     assert judge._parse_freeze(err_c) == judge._parse_freeze(err_f)
 
 
-def test_check_file_uses_a_single_analysis_decode(tmp_path, monkeypatch):
+def test_check_file_uses_a_single_video_decode(tmp_path, monkeypatch):
     """check_file used to decode the file three times (ebur128, blackdetect,
-    freezedetect); now it must be one ffmpeg invocation."""
+    freezedetect); now ONE full decode, plus one cheap audio-only decode that
+    grades loudness (the combined graph under-reads some files)."""
     clip = _make_clip(str(tmp_path / "c.mp4"))
     calls = []
     real = judge._ffmpeg_stderr
@@ -103,7 +104,8 @@ def test_check_file_uses_a_single_analysis_decode(tmp_path, monkeypatch):
 
     monkeypatch.setattr(judge, "_ffmpeg_stderr", counting)
     rep = judge.check_file(clip, expect_vertical=False)
-    assert len(calls) == 1
+    assert len(calls) == 2
+    assert calls[1][calls[1].index("-map") + 1] == "0:a"      # audio only
     gates = dict((g, s) for g, s, _ in rep["results"])
     assert gates["streams"] == "PASS"
     assert gates["black_frames"] == "PASS"      # testsrc2 is never black
