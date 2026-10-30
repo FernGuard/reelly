@@ -35,6 +35,24 @@ SPREAD = 14              # display px of distance kept on each side of an edge
 MAX_WORDS = 40
 
 
+MOTIONS = ("rise", "blocklock")
+
+
+def motion():
+    """How entering text arrives: REELLY_TEXT_MOTION, then brand.json
+    fx.text_motion, else "rise" (the kinetic default). "blocklock": each word
+    drops in like a falling block, lands with a squash, flashes as it locks."""
+    v = os.environ.get("REELLY_TEXT_MOTION", "").strip().lower()
+    if not v:
+        try:
+            from . import brandkit
+            fx = brandkit.brand().get("fx")
+            v = str((fx or {}).get("text_motion") or "").strip().lower() if isinstance(fx, dict) else ""
+        except Exception:   # noqa: BLE001
+            v = ""
+    return v if v in MOTIONS else "rise"
+
+
 def enabled():
     return os.environ.get("REELLY_GPU_TEXT", "").strip().lower() not in ("off", "0", "no")
 
@@ -132,14 +150,18 @@ attribute vec2 a_pos; attribute vec2 a_uv; attribute float a_word;
 attribute vec2 a_anchor; attribute float a_hot;
 uniform vec2 u_res; uniform vec4 u_w[40]; uniform vec2 u_line; uniform vec2 u_shift;
 uniform vec2 u_origin;
+uniform vec4 u_w2[40];                          // (lock flash 0..1, squash, -, -)
+varying float v_flash;
 varying vec2 v_uv; varying float v_a; varying float v_blur; varying float v_hot;
 void main(){
   vec4 w = u_w[int(a_word + 0.5)];              // (dy, alpha, blur px, scale)
+  vec4 w2 = u_w2[int(a_word + 0.5)];
   vec2 p = a_anchor + (a_pos - a_anchor) * w.w; // pop scale about the word's bottom centre
+  p = a_anchor + (p - a_anchor) * vec2(1.0 + w2.y, 1.0 - w2.y);   // landing squash
   p.y += w.x + u_line.x + u_shift.y; p.x += u_shift.x;
   p += u_origin;
   gl_Position = vec4(p.x / u_res.x * 2.0 - 1.0, 1.0 - p.y / u_res.y * 2.0, 0.0, 1.0);
-  v_uv = a_uv; v_a = w.y * u_line.y; v_blur = w.z; v_hot = a_hot;
+  v_uv = a_uv; v_a = w.y * u_line.y; v_blur = w.z; v_hot = a_hot; v_flash = w2.x;
 }
 """
 
@@ -148,6 +170,7 @@ precision highp float;
 uniform sampler2D u_atlas; uniform float u_pass; uniform float u_spread;
 uniform vec3 u_fill; uniform vec3 u_hotc;
 varying vec2 v_uv; varying float v_a; varying float v_blur; varying float v_hot;
+varying float v_flash;
 void main(){
   float d = texture2D(u_atlas, v_uv).r;
   float px = 1.0 / (2.0 * u_spread);            // one display px in distance units
@@ -162,11 +185,12 @@ void main(){
     a = smoothstep(0.5 - sg, 0.5 + sg, d) * 0.85;
     c = vec3(0.0);
   } else if (u_pass < 1.5) {                    // the visible 1 px of the 2 px stroke
-    a = smoothstep(0.5 - 1.0 * px - soft, 0.5 - 1.0 * px + soft, d) * 0.9;
-    c = vec3(0.0);
+    float sw = 1.0 + 2.5 * v_flash;              // the outline flares when a block locks
+    a = smoothstep(0.5 - sw * px - soft, 0.5 - sw * px + soft, d) * 0.9;
+    c = mix(vec3(0.0), u_hotc, v_flash);
   } else if (u_pass < 2.5) {
     a = smoothstep(0.5 - soft, 0.5 + soft, d);
-    c = mix(u_fill, u_hotc, v_hot);
+    c = mix(mix(u_fill, u_hotc, v_hot), vec3(1.0), 0.55 * v_flash);
   } else {                                      // the aura's blurred copy (~12 px Gaussian)
     float sg = 13.0 * px;
     a = smoothstep(0.5 - sg, 0.5 + sg, d);
@@ -262,20 +286,34 @@ if (P.aura) {{
 }}
 var eT = bez.apply(null, P.ease_type), eP = bez.apply(null, P.ease_pop), eO = bez.apply(null, P.ease_out);
 function clamp(x){{ return Math.max(0, Math.min(1, x)); }}
-var W = new Float32Array(160);
+var W = new Float32Array(160), W2 = new Float32Array(160);
+function easeIn(x){{ return x * x; }}
 window.__reellyDraw = function(ms){{
   var t = ms / 1000;
   gl.useProgram(prog);   // uniforms below belong to the text program (the aura's was current)
   for (var i = 0; i < 40; i++){{
-    var dy = 0, a = 1, blur = 0, s = 1;
-    if (P.enter){{ var e = eT(clamp((t - i * P.stagger) / P.enter_s));
+    var dy = 0, a = 1, blur = 0, s = 1, flash = 0, squash = 0;
+    if (P.enter && P.motion === 'blocklock'){{
+      // each word drops in like a falling block, lands, bounces once, locks
+      // stacking order: bottom line first, so a falling word only ever
+      // crosses empty space, never text that already landed
+      var t0 = P.rank[i] * P.stagger * 1.5, fall = 0.34, land = t0 + fall;
+      var f = clamp((t - t0) / fall);
+      a = clamp(f * 4); dy = -(1 - easeIn(f)) * 1.5 * P.size;
+      if (t >= land){{ var k2 = t - land;
+        dy += Math.sin(k2 * 38) * Math.exp(-k2 * 18) * 0.07 * P.size;
+        squash = 0.10 * Math.exp(-k2 * 22);
+        flash = Math.exp(-k2 * 9); }}
+    }} else if (P.enter){{ var e = eT(clamp((t - i * P.stagger) / P.enter_s));
       a = e; dy = (1 - e) * 0.34 * P.size; blur = (1 - e) * 8; }}
     if (i === P.hot && P.pop >= 0){{ var q = (t - P.pop) / P.pop_s;
       if (q > 0 && q < 1){{ var k = q < 0.45 ? eP(q / 0.45) : 1 - eP((q - 0.45) / 0.55);
         s = 1 + (P.pop_scale - 1) * k; dy -= P.pop_lift * P.size * k; }} }}
     W[i * 4] = dy; W[i * 4 + 1] = a; W[i * 4 + 2] = blur; W[i * 4 + 3] = s;
+    W2[i * 4] = flash; W2[i * 4 + 1] = squash;
   }}
   gl.uniform4fv(u('u_w[0]'), W);
+  gl.uniform4fv(u('u_w2[0]'), W2);
   var ly = 0, la = 1;
   if (P.leave && t >= P.exit_t){{ var o = eO(clamp((t - P.exit_t) / P.exit_s)); la = 1 - o; ly = -0.22 * P.size * o; }}
   gl.uniform2f(u('u_line'), ly, la);
@@ -369,7 +407,12 @@ def page(text, size, width, height, dur, role, hot_index, lines, enter, leave, p
                   "uniforms": {**control.host_uniforms(None), **U, "u_res": [W, H],
                                "u_tsize": [W, H], "u_off": 0.0, "u_t0": 0.0},
                   "blur": float(shaderfx._render_opts(aura).get("blur_px", 12))}
-    params = {"origin": off, "aura": aura_p,"verts": vertex_data(glyphs, anchors, place, hot_index if hot_index is not None else -1),
+    word_line = [li for li, ws in enumerate(lines) for _ in ws]
+    order = sorted(range(len(word_line)), key=lambda i: (-word_line[i], i))
+    rank = [0] * len(word_line)
+    for k, i in enumerate(order):
+        rank[i] = k
+    params = {"origin": off, "aura": aura_p, "motion": motion(), "rank": rank,"verts": vertex_data(glyphs, anchors, place, hot_index if hot_index is not None else -1),
               "atlas": "data:image/png;base64," + base64.b64encode(b.getvalue()).decode(),
               "spread": SPREAD, "size": size, "fill": _rgb01(fill_hex), "hotc": _rgb01(hot_hex),
               "enter": bool(enter), "leave": bool(leave), "stagger": stagger,

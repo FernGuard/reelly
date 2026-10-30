@@ -56,3 +56,17 @@ def test_off_switch_and_word_limit(monkeypatch):
     with pytest.raises(ValueError):
         gputext.page(" ".join(["w"] * 41), 40, 800, 200, 3.0, "headline", None,
                      [["w"] * 41], True, True, None, "#ffffff", "#a87cf0")
+
+
+def test_motion_setting(monkeypatch):
+    from reelly import brandkit
+    monkeypatch.delenv("REELLY_TEXT_MOTION", raising=False)
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {})
+    assert gputext.motion() == "rise"
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"fx": {"text_motion": "blocklock"}})
+    assert gputext.motion() == "blocklock"
+    monkeypatch.setenv("REELLY_TEXT_MOTION", "wobble")
+    assert gputext.motion() == "rise"                         # unknown: the default
+    html, _, _ = gputext.page("Wishlist on Steam", 72, 856, 200, 3.0, "headline", 0,
+                              [["Wishlist", "on", "Steam"]], True, False, 1.0, "#FCFCFB", "#a87cf0")
+    assert '"motion": "rise"' in html and "u_w2[0]" in html
