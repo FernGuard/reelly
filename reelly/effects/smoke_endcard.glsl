@@ -1,43 +1,59 @@
 /*{
-  "ISFVSN": "2",
-  "CREDIT": "Patolli / Reelly",
-  "LICENSE": "MIT",
-  "VSN": "1.0",
-  "DESCRIPTION": "Smoke rising over a dimmed backdrop, thinner across the ask's band, a smoke-torn ring of light when the ask's action word pops.",
-  "REELLY": {
-    "kind": "backdrop"
+ "ISFVSN": "2",
+ "CREDIT": "Patolli / Reelly",
+ "LICENSE": "MIT",
+ "VSN": "1.1",
+ "DESCRIPTION": "Smoke rising over a dimmed backdrop, thinner across the ask's band, a smoke-torn ring of light when the ask's action word pops. Opens with an ink-blot transition from the content's last frame (u_trans seconds, 0 = hard cut).",
+ "REELLY": {
+  "kind": "backdrop"
+ },
+ "INPUTS": [
+  {
+   "NAME": "u_accent",
+   "TYPE": "color",
+   "DEFAULT": [
+    0.659,
+    0.486,
+    0.941
+   ],
+   "SLOT": "accent"
   },
-  "INPUTS": [
-    {
-      "NAME": "u_accent",
-      "TYPE": "color",
-      "DEFAULT": [
-        0.659,
-        0.486,
-        0.941
-      ],
-      "SLOT": "accent"
-    },
-    {
-      "NAME": "u_band",
-      "TYPE": "float",
-      "DEFAULT": 0.5,
-      "MIN": 0.0,
-      "MAX": 1.0,
-      "HOST": true
-    },
-    {
-      "NAME": "u_pulse",
-      "TYPE": "float",
-      "DEFAULT": -1.0,
-      "MIN": -1.0,
-      "MAX": 60.0,
-      "HOST": true
-    }
-  ]
+  {
+   "NAME": "u_band",
+   "TYPE": "float",
+   "DEFAULT": 0.5,
+   "MIN": 0.0,
+   "MAX": 1.0,
+   "HOST": true
+  },
+  {
+   "NAME": "u_pulse",
+   "TYPE": "float",
+   "DEFAULT": -1.0,
+   "MIN": -1.0,
+   "MAX": 60.0,
+   "HOST": true
+  },
+  {
+   "NAME": "u_trans",
+   "TYPE": "float",
+   "DEFAULT": 0.55,
+   "MIN": 0.0,
+   "MAX": 2.0
+  },
+  {
+   "NAME": "u_has_from",
+   "TYPE": "float",
+   "DEFAULT": 0.0,
+   "MIN": 0.0,
+   "MAX": 1.0,
+   "HOST": true
+  }
+ ]
 }*/
 #include "lib/noise.glsl"
 #include "lib/finish.glsl"
+#include "lib/transition.glsl"
 
 void main(){
   vec2 uv = gl_FragCoord.xy / u_res;                 // y up
@@ -59,5 +75,11 @@ void main(){
   float fade = smoothstep(u_t0 > 0.0 ? -0.35 : 0.0, 0.45, u_t);
   vec3 bg = texture2D(u_bg, vec2(uv.x, 1.0 - uv.y)).rgb;
   vec3 col = bg + u_accent * (1.2 * d + 0.7 * ring) * fade;
+  // the way in: an ink blot eats the content's last frame (seamless join)
+  if (u_has_from > 0.5 && u_trans > 0.0 && u_t < u_trans){
+    vec2 w = inkWipe(uv, vec2(0.5, u_band), u_t / u_trans, u_t + u_t0);
+    vec3 from = texture2D(u_from, vec2(uv.x, 1.0 - uv.y)).rgb;
+    col = mix(from, col, w.x) + u_accent * w.y * 1.4;
+  }
   gl_FragColor = vec4(dither(min(col, vec3(1.0)), gl_FragCoord.xy), 1.0);
 }

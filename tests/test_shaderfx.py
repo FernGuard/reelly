@@ -251,3 +251,30 @@ def test_control_track_from_real_audio(tmp_path):
     assert 3 <= len(on) <= 5 and all(abs(o - round(o)) < 0.08 for o in on)
     en = control.energy(p, 4.0)
     assert len(en) == 240 and max(en) == 1.0
+
+
+def test_endcard_opens_with_the_ink_transition(tmp_path):
+    from PIL import Image
+    bg, frm = tmp_path / "bg.png", tmp_path / "from.png"
+    Image.new("RGB", (64, 64), (20, 10, 30)).save(bg)
+    Image.new("RGB", (64, 64), (200, 100, 50)).save(frm)
+    html = shaderfx.page_html("smoke-endcard", str(bg), 540, 960, from_png=str(frm))
+    assert '"u_has_from": 1.0' in html and '"u_trans": 0.55' in html
+    assert "texFrom(frm, 1, 'u_from')" in html
+    assert "inkWipe" in shaderfx.fragment("smoke_endcard")
+    assert '"u_has_from": 0.0' in shaderfx.page_html("smoke-endcard", str(bg), 540, 960)
+
+
+def test_sparse_layers_render_only_around_events(tmp_path, monkeypatch):
+    shot = []
+
+    async def fake(page, frames, w, h, out_dir, profile):
+        for n, t in frames:
+            shot.append(n)
+            shaderfx._write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), bytes(w * h * 4), w, h)
+    monkeypatch.setattr(shaderfx, "_shoot_all", fake)
+    pat, fps = shaderfx.render_ambient("impact-ambient", str(tmp_path), 2.0, (0, 0.3, 1, 0.7),
+                                       (0.7, 0.8), ctrl={"beats": [0, 0], "pops": [],
+                                                         "onsets": [1.0], "energy": [], "fps": 60})
+    assert fps == 60 and 6 <= len(shot) <= 10                 # ~0.12 s around the hit
+    assert len([f for f in os.listdir(tmp_path) if f.startswith("f0") and f.endswith(".tga")]) == 120

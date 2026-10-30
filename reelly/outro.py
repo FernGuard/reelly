@@ -219,7 +219,18 @@ def _kinetic_cta(plan, product, workdir, len_s, starts_at=None):
         return None
 
 
-def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at):
+def _last_frame_png(video, path):
+    """The content's last frame as shown (burned text and layers included):
+    the outgoing image of the transition into the end card."""
+    for back in (0.05, 0.2, 0.5):
+        r = subprocess.run([config.FFMPEG, "-y", "-v", "error", "-sseof", f"-{back}", "-i", video,
+                            "-frames:v", "1", path], capture_output=True)
+        if r.returncode == 0 and os.path.exists(path) and os.path.getsize(path):
+            return path
+    return None
+
+
+def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at, content_video=None):
     """The backdrop as a living shader layer (shaderfx) when the brand asks
     for one, timed so its ring of light leaves with the ask's beat-timed pop.
     None when off or when the effect cannot render (the still is used)."""
@@ -239,7 +250,10 @@ def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at):
                               pulse_t=pop, band=1.0 - CTA_Y_FRAC - 0.03,
                               # the cut's ambient smoke left off at starts_at
                               t0=(starts_at or 0.0) if shaderfx.active("ambient") else 0.0,
-                              ctrl=plan.get("_ctrl"), ctrl_t0=starts_at or 0.0)
+                              ctrl=plan.get("_ctrl"), ctrl_t0=starts_at or 0.0,
+                              from_png=(_last_frame_png(content_video,
+                                                        os.path.join(workdir, "outro_from.png"))
+                                        if content_video else None))
         print(f"[outro] {plan.get('id', '?')}: shader backdrop '{fx}'"
               + (f", light ring with the pop at {pop:.2f}s" if pop is not None else ""))
         return seq
@@ -356,7 +370,8 @@ def append(content_video, backdrop_source, plan, product, workdir):
         content_d = None
     kin = _kinetic_cta(plan, product, workdir, len_s, starts_at=content_d)
     card = kin[0] if kin else card_png(plan, product, workdir)
-    fx_seq = _shader_backdrop(bp, plan, workdir, len_s, content_d) if kin else None
+    fx_seq = (_shader_backdrop(bp, plan, workdir, len_s, content_d, content_video)
+              if kin else None)
     seg = build_segment(bp, card, len_s,
                         os.path.join(workdir, "outro_seg.mp4"),
                         seq=kin[1] if kin else None, backdrop_seq=fx_seq)

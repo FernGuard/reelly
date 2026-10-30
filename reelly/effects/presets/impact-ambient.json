@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "effect": "impact_ambient",
+  "placement": "ambient",
+  "description": "Brand-neutral ambient preset: comic impact starbursts on the picture's edge, only on real hits (audio onsets).",
+  "params": {},
+  "render": {
+    "scale": 0.5,
+    "fps": 60,
+    "sparse": "onsets"
+  },
+  "lite": {
+    "render": {
+      "scale": 0.5,
+      "fps": 30,
+      "sparse": "onsets"
+    }
+  }
+}

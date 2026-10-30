@@ -52,7 +52,7 @@ HOST_UNIFORMS = {
             # the control track (reelly/control.py; effects/lib/control.glsl)
             "uniform vec2 u_beat;", "uniform float u_onsets[16];",
             "uniform sampler2D u_ctrl;", "uniform float u_ctrl_n;"],
-    "backdrop": ["uniform sampler2D u_bg;"],
+    "backdrop": ["uniform sampler2D u_bg;", "uniform sampler2D u_from;"],
     "overlay": [],
     "text": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;",
              "uniform vec2 u_tsize;", "uniform float u_off;"],
@@ -220,6 +220,7 @@ html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transpar
 canvas{{display:block}}</style></head><body>
 <canvas id="c" width="{w}" height="{h}"></canvas>
 <script>
+window.onerror = function(m){{ window.__reellyError = String(m); }};
 var gl = document.getElementById('c').getContext('webgl',
   {{preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false,
     alpha: true}});
@@ -284,7 +285,7 @@ if (FR) {{
     }});
   }};
 }}
-var bg = {bg}, ctrl = {ctrl}, pending = 0;
+var bg = {bg}, ctrl = {ctrl}, frm = {frm}, pending = 0;
 function done(){{ if (--pending <= 0) {{ gl.activeTexture(gl.TEXTURE0);
   window.__reellyReady = true; window.__reellyDraw(0); }} }}
 function texFrom(src, unit, name){{
@@ -297,6 +298,7 @@ function texFrom(src, unit, name){{
 }}
 if (ctrl) texFrom(ctrl, 2, 'u_ctrl');
 if (bg) texFrom(bg, 0, 'u_bg');
+if (frm) texFrom(frm, 1, 'u_from');
 if (!pending) {{ pending = 1; done(); }}
 </script></body></html>"""
 
@@ -356,21 +358,22 @@ def _rgb01(hex_):
 
 
 def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=9,
-          ctrl=None, t_offset=0.0):
+          ctrl=None, t_offset=0.0, from_png=None):
     import io
     import json
-    bg = "null"
-    if backdrop_png:
+    def data_uri(png):
         from PIL import Image
-        im = Image.open(backdrop_png).convert("RGB").resize((w, h), Image.LANCZOS)
+        im = Image.open(png).convert("RGB").resize((w, h), Image.LANCZOS)
         b = io.BytesIO()
-        im.save(b, "JPEG", quality=92)
-        bg = json.dumps("data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode())
+        im.save(b, "JPEG", quality=94)
+        return json.dumps("data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode())
+    bg = data_uri(backdrop_png) if backdrop_png else "null"
+    frm = data_uri(from_png) if from_png else "null"
     from . import control
     uniforms = {**control.host_uniforms(ctrl, t_offset), **uniforms}
     ctrl_png = control.energy_png(ctrl.get("energy")) if ctrl and t_offset == 0 else None
     return _PAGE.format(w=w, h=h, frag=json.dumps(frag), bg=bg,
-                        ctrl=json.dumps(ctrl_png) if ctrl_png else "null",
+                        ctrl=json.dumps(ctrl_png) if ctrl_png else "null", frm=frm,
                         frames=json.dumps(frames) if frames else "null", fps=int(fps),
                         blur_px=int(blur_px),
                         uniforms=json.dumps({k: (list(v) if isinstance(v, (list, tuple))
@@ -385,15 +388,16 @@ def _render_opts(preset):
 
 
 def page_html(fx, backdrop_png, w, h, accent_hex=None, pulse_t=None, band=0.53, t0=0.0,
-              ctrl=None, ctrl_t0=None):
+              ctrl=None, ctrl_t0=None, from_png=None):
     """The end-card page (kind backdrop): backdrop as a data-URI texture (no
     file-origin taint), the effect, the __reellyDraw hook."""
     over = {"u_accent": accent_hex} if accent_hex else {}
     U = uniforms(fx, brand_params(fx), overrides=over,
-                 host={"u_pulse": -1.0 if pulse_t is None else pulse_t, "u_band": band})
+                 host={"u_pulse": -1.0 if pulse_t is None else pulse_t, "u_band": band,
+                       "u_has_from": 1.0 if from_png else 0.0})
     return _page(fragment(load_preset(fx)["effect"]), w, h,
                  {"u_res": (w, h), "u_t0": t0, **U}, backdrop_png, ctrl=ctrl,
-                 t_offset=t0 if ctrl_t0 is None else ctrl_t0)
+                 t_offset=t0 if ctrl_t0 is None else ctrl_t0, from_png=from_png)
 
 
 def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops=(),
@@ -463,9 +467,12 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
                 {"color": {"r": 0, "g": 0, "b": 0, "a": 0}})
         await b.load("file://" + page)
         await _log_renderer(b)
-        for _ in range(100):
+        for _ in range(400):                       # up to 20 s (GPU process start)
             if await b._eval("window.__reellyReady === true"):
                 break
+            err = await b._eval("window.__reellyError || ''")
+            if err:
+                raise RuntimeError(f"shader page error: {err}")
             await asyncio.sleep(0.05)
         else:
             raise RuntimeError("shader page never became ready (no WebGL?)")
@@ -507,22 +514,51 @@ def text_off(fx):
     return int(_render_opts(fx).get("text_off", TEXT_OFF))
 
 
-def _render_page(html_text, out_dir, w, h, dur, fps):
+def _blank_tga(path, w, h):
+    _write_tga(path, bytes(w * h * 4), w, h)
+    return path
+
+
+def _render_page(html_text, out_dir, w, h, dur, fps, windows=None):
+    """Render a page's frames to out_dir/f%05d.tga. windows: [(t0, t1)]
+    when the layer is SPARSE (only those instants can show anything): the
+    other frames hard-link one transparent frame instead of a render."""
     os.makedirs(out_dir, exist_ok=True)
     page = os.path.join(out_dir, "fx.html")
     with open(page, "w") as f:
         f.write(html_text)
     n = max(1, int(round(dur * fps)))
+    todo = [(i, i / fps) for i in range(n)]
+    if windows is not None:
+        todo = [(i, t) for i, t in todo if any(a - 1.0 / fps <= t <= b for a, b in windows)]
+        blank = _blank_tga(os.path.join(out_dir, "blank.tga"), w, h)
+        done = {i for i, _ in todo}
+        for i in range(n):
+            if i not in done:
+                dst = os.path.join(out_dir, f"f{i:05d}.tga")
+                try:
+                    os.link(blank, dst)
+                except OSError:
+                    shutil.copyfile(blank, dst)
     profile = tempfile.mkdtemp(prefix="reelly-chrome-")
     import time
     t0 = time.time()
     try:
-        asyncio.run(_shoot_all(page, [(i, i / fps) for i in range(n)], w, h,
-                               out_dir, profile))
+        if todo:
+            try:
+                asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
+            except RuntimeError as e:
+                if "shader page error" in str(e):
+                    raise                              # a broken effect: no retry
+                print(f"[fx   ] {e}; retrying once in a fresh browser")
+                shutil.rmtree(profile, ignore_errors=True)
+                profile = tempfile.mkdtemp(prefix="reelly-chrome-")
+                asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
     finally:
         shutil.rmtree(profile, ignore_errors=True)
     dt = time.time() - t0
-    print(f"[fx   ] {n} frames {w}x{h} in {dt:.1f}s ({n / max(dt, 1e-6):.0f} fps)")
+    print(f"[fx   ] {len(todo)} of {n} frames {w}x{h} in {dt:.1f}s"
+          f" ({len(todo) / max(dt, 1e-6):.0f} fps)")
     made = len([x for x in os.listdir(out_dir) if x.startswith("f") and x.endswith(".tga")])
     if made < n:
         raise RuntimeError(f"shaderfx: only {made}/{n} frames rendered")
@@ -534,13 +570,13 @@ def _size(scale):
 
 
 def render(fx, backdrop_png, out_dir, dur, accent_hex=None, pulse_t=None,
-           band=0.53, fps=None, t0=0.0, ctrl=None, ctrl_t0=None):
+           band=0.53, fps=None, t0=0.0, ctrl=None, ctrl_t0=None, from_png=None):
     """The end card: preset `fx` over the backdrop to out_dir/f%05d.png.
     pulse_t: local time of the ask's pop; band: the ask's height from the
     bottom; t0: where the cut's ambient field left off."""
     w, h = _size(_render_opts(fx).get("scale", SCALE))
     return _render_page(page_html(fx, backdrop_png, w, h, accent_hex, pulse_t, band, t0, ctrl,
-                                  ctrl_t0),
+                                  ctrl_t0, from_png),
                         out_dir, w, h, dur, fps or config.output_fps())
 
 
@@ -551,7 +587,11 @@ def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level
     ro = _render_opts(fx)
     w, h = _size(ro.get("scale", AMBIENT_SCALE))
     fps = int(ro.get("fps", AMBIENT_FPS))
+    windows = None
+    if ro.get("sparse") == "onsets":
+        hold = uniforms(fx, brand_params(fx)).get("u_hold", 0.2)
+        windows = [(o, o + hold) for o in (ctrl or {}).get("onsets", [])]
     pat = _render_page(ambient_html(fx, w, h, accent_hex, pic, clear, pops, end=dur, level=level,
                                     ctrl=ctrl),
-                       out_dir, w, h, dur, fps)
+                       out_dir, w, h, dur, fps, windows=windows)
     return pat, fps
