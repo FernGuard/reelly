@@ -314,7 +314,7 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     # The browser profile lives OUTSIDE out_dir and is removed best-effort: a
     # lingering Chrome process can hold its files (Windows), and that must
     # never fail the caller's own work-folder cleanup.
-    gpu = False
+    gpu, margin = False, 0
     from . import gputext, shaderfx
     tfx = shaderfx.active("text") if kind == "line" else None
     if gputext.enabled() and tfx:
@@ -336,9 +336,9 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
         t0 = _time.time()
         try:
             from . import brandkit
-            gputext.render(text, out_dir, dur, size, cw, ch, role, hi,
-                           wrap_lines(text, size, width, role), enter, leave, pop, fps,
-                           captions.ink("#FCFCFB"), brandkit.accent())
+            margin = gputext.render(text, out_dir, dur, size, cw, ch, role, hi,
+                                    wrap_lines(text, size, width, role), enter, leave, pop,
+                                    fps, captions.ink("#FCFCFB"), brandkit.accent())
             gpu = True
             print(f"        kinetic {label or kind}: GPU text, {n} frames in "
                   f"{_time.time() - t0:.1f}s")
@@ -359,6 +359,8 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     made = len([f for f in os.listdir(out_dir) if f.startswith("k") and f.endswith(".png")])
     if made < n:
         raise RuntimeError(f"kinetic: only {made}/{n} frames rendered for {text!r}")
+    if gpu and margin:                 # petals need room: the canvas grew
+        return os.path.join(out_dir, "k%05d.png"), cw + 2 * margin, ch + 2 * margin, PAD + margin
     if kind == "line":
         aura = _aura(out_dir, n, cw, ch, fps, pop, enter, label or kind)
         if aura:

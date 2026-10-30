@@ -53,6 +53,33 @@ def motion():
     return v if v in MOTIONS else "rise"
 
 
+EXITS = ("fade", "petals")
+PETAL_MARGIN = 70        # px of room above/around a line for petals to rise into
+DISSOLVE_S = 0.75        # the dissolve + petals window at the end of a leaving line
+
+
+def exit_style():
+    """How a leaving line goes: REELLY_TEXT_EXIT, then brand.json
+    fx.text_exit, else "fade" (the kinetic default). "petals": the letters
+    erode along a burning edge and petals peel off and drift up."""
+    v = os.environ.get("REELLY_TEXT_EXIT", "").strip().lower()
+    if not v:
+        try:
+            from . import brandkit
+            fx = brandkit.brand().get("fx")
+            v = str((fx or {}).get("text_exit") or "").strip().lower() if isinstance(fx, dict) else ""
+        except Exception:   # noqa: BLE001
+            v = ""
+    return v if v in EXITS else "fade"
+
+
+def _petal_colors():
+    from . import brandkit
+    fx = brandkit.brand().get("fx") if isinstance(brandkit.brand().get("fx"), dict) else {}
+    second = fx.get("petal_color") if isinstance(fx.get("petal_color"), str) else "#ffa322"
+    return _rgb01(brandkit.accent()), _rgb01(second)
+
+
 def enabled():
     return os.environ.get("REELLY_GPU_TEXT", "").strip().lower() not in ("off", "0", "no")
 
@@ -94,6 +121,10 @@ def atlas(chars, size, role):
     for ch, im, _, _ in tiles:
         sheet.paste(im, place[ch][:2])
     return sheet, place
+
+
+def words_list(lines):
+    return [w for ws in lines for w in ws]
 
 
 def layout(text, size, width, role, lines, pad):
@@ -152,6 +183,7 @@ uniform vec2 u_res; uniform vec4 u_w[40]; uniform vec2 u_line; uniform vec2 u_sh
 uniform vec2 u_origin;
 uniform vec4 u_w2[40];                          // (lock flash 0..1, squash, -, -)
 varying float v_flash;
+varying vec2 v_scr;
 varying vec2 v_uv; varying float v_a; varying float v_blur; varying float v_hot;
 void main(){
   vec4 w = u_w[int(a_word + 0.5)];              // (dy, alpha, blur px, scale)
@@ -162,15 +194,19 @@ void main(){
   p += u_origin;
   gl_Position = vec4(p.x / u_res.x * 2.0 - 1.0, 1.0 - p.y / u_res.y * 2.0, 0.0, 1.0);
   v_uv = a_uv; v_a = w.y * u_line.y; v_blur = w.z; v_hot = a_hot; v_flash = w2.x;
+  v_scr = p;
 }
 """
 
 _FS = """
 precision highp float;
 uniform sampler2D u_atlas; uniform float u_pass; uniform float u_spread;
-uniform vec3 u_fill; uniform vec3 u_hotc;
+uniform vec3 u_fill; uniform vec3 u_hotc; uniform float u_dis;
 varying vec2 v_uv; varying float v_a; varying float v_blur; varying float v_hot;
-varying float v_flash;
+varying float v_flash; varying vec2 v_scr;
+float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), u.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), u.x), u.y); }
 void main(){
   float d = texture2D(u_atlas, v_uv).r;
   float px = 1.0 / (2.0 * u_spread);            // one display px in distance units
@@ -196,8 +232,54 @@ void main(){
     a = smoothstep(0.5 - sg, 0.5 + sg, d);
     c = mix(u_fill, u_hotc, v_hot);
   }
+  if (u_dis > 0.0) {                            // erode along noise, edge burning hot
+    float n = 0.65 * vn(v_scr * 0.045) + 0.35 * vn(v_scr * 0.16);
+    float keep = smoothstep(u_dis - 0.015, u_dis + 0.015, n);
+    float edge = keep * (1.0 - smoothstep(0.0, 0.13, n - u_dis));
+    if (u_pass > 1.5 && u_pass < 2.5) c = mix(c, mix(u_hotc, vec3(1.0, 0.8, 0.45), 0.6), min(1.0, edge * 1.6));
+    // the burn edge only on and just around the letters, never in empty space
+    float near = smoothstep(0.5 - 3.0 * px, 0.5 - 0.5 * px, d);
+    if (u_pass > 0.5 && u_pass < 1.5) { c = mix(c, vec3(1.0, 0.55, 0.15), edge * near); a = max(a, edge * near * 0.9 * keep); }
+    a *= keep;
+  }
   a *= v_a;
   gl_FragColor = vec4(c * a, a);                // premultiplied
+}
+"""
+
+_PETALS_FS = """
+precision highp float;
+uniform vec2 u_res; uniform float u_t; uniform float u_d0; uniform float u_dd;
+uniform vec4 u_wd[40]; uniform float u_nw; uniform float u_size;
+uniform vec3 u_c1; uniform vec3 u_c2; uniform float u_life;
+float h(float x){ return fract(sin(x * 78.233) * 43758.5453); }
+void main(){
+  vec2 px = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y);     // canvas px, y down
+  vec4 acc = vec4(0.0);
+  for (int w = 0; w < 40; w++){
+    if (float(w) >= u_nw) break;
+    vec4 wd = u_wd[w];                                          // (cx, baseline, half width, -)
+    for (int k = 0; k < 10; k++){
+      float sd = float(w) * 13.7 + float(k) * 3.1;
+      float spawn = u_d0 + h(sd) * u_dd * 0.5;
+      float age = u_t - spawn;
+      if (age < 0.0 || age > u_life) continue;
+      vec2 o = vec2(wd.x + (h(sd + 1.0) - 0.5) * 2.0 * wd.z, wd.y - h(sd + 2.0) * 0.55 * u_size);
+      vec2 pos = o + vec2(sin(age * 3.0 + sd) * 0.18 * u_size + age * 0.35 * u_size,
+                          -age * 1.15 * u_size - age * age * 0.4 * u_size);
+      float ang = sd * 6.0 + age * (3.0 + 4.0 * h(sd + 3.0));
+      vec2 q = px - pos;
+      q = vec2(cos(ang) * q.x - sin(ang) * q.y, sin(ang) * q.x + cos(ang) * q.y);
+      float sz = u_size * mix(0.16, 0.27, h(sd + 4.0));
+      float dd = length(q / vec2(sz, sz * 0.5));
+      float al = smoothstep(1.0, 0.75, dd) * (1.0 - smoothstep(0.5 * u_life, u_life, age)) * smoothstep(0.0, 0.05, age);
+      vec3 col = mix(u_c1, u_c2, step(0.5, h(sd + 5.0)));
+      col = mix(col, vec3(1.0, 0.95, 0.85), 0.35 * smoothstep(0.5, 0.0, dd));
+      acc.rgb = col * al + acc.rgb * (1.0 - al);                 // premultiplied over
+      acc.a = al + acc.a * (1.0 - al);
+    }
+  }
+  gl_FragColor = acc;
 }
 """
 
@@ -238,7 +320,7 @@ function bez(x1, y1, x2, y2){{
 function setU(pr, U){{ Object.keys(U).forEach(function(k){{
   var v = U[k], l = gl.getUniformLocation(pr, k); if (l === null) return;
   if (!Array.isArray(v)) gl.uniform1f(l, v);
-  else if (k === 'u_events') gl.uniform4fv(l, new Float32Array(v));
+  else if (k === 'u_events' || k === 'u_wd') gl.uniform4fv(l, new Float32Array(v));
   else if (v.length > 4) gl.uniform1fv(l, new Float32Array(v));
   else gl['uniform' + v.length + 'f'].apply(gl, [l].concat(v)); }}); }}
 var tl = {{}};
@@ -284,6 +366,17 @@ if (P.aura) {{
   gl.uniform1i(gl.getUniformLocation(p2, 'u_txt'), 1); gl.uniform1i(gl.getUniformLocation(p2, 'u_blur'), 2);
   gl.useProgram(prog);
 }}
+var PT = null;
+if (P.exit_style === 'petals') {{
+  var pp = gl.createProgram();
+  gl.attachShader(pp, sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){{ gl_Position = vec4(a, 0.0, 1.0); }}'));
+  gl.attachShader(pp, sh(gl.FRAGMENT_SHADER, P.petals_fs)); gl.linkProgram(pp);
+  if (!gl.getProgramParameter(pp, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pp));
+  var pq = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pq);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  PT = {{ prog: pp, quad: pq, loc: gl.getAttribLocation(pp, 'a') }};
+  gl.useProgram(pp); setU(pp, P.petals_u); gl.useProgram(prog);
+}}
 var eT = bez.apply(null, P.ease_type), eP = bez.apply(null, P.ease_pop), eO = bez.apply(null, P.ease_out);
 function clamp(x){{ return Math.max(0, Math.min(1, x)); }}
 var W = new Float32Array(160), W2 = new Float32Array(160);
@@ -317,6 +410,9 @@ window.__reellyDraw = function(ms){{
   var ly = 0, la = 1;
   if (P.leave && t >= P.exit_t){{ var o = eO(clamp((t - P.exit_t) / P.exit_s)); la = 1 - o; ly = -0.22 * P.size * o; }}
   gl.uniform2f(u('u_line'), ly, la);
+  var dis = 0;
+  if (PT) dis = clamp((t - P.dis0) / P.dis_s);
+  gl.uniform1f(u('u_dis'), dis > 0 ? 0.02 + 1.0 * dis : 0.0);
   var n = V.length / 8;
   gl.useProgram(prog); bindText(); gl.enable(gl.BLEND);
   gl.bindFramebuffer(gl.FRAMEBUFFER, A ? A.sharp[1] : null);
@@ -324,6 +420,15 @@ window.__reellyDraw = function(ms){{
   gl.uniform1f(u('u_pass'), 0); gl.uniform2f(u('u_shift'), 0, 7); gl.drawArrays(gl.TRIANGLES, 0, n);
   gl.uniform1f(u('u_pass'), 1); gl.uniform2f(u('u_shift'), 0, 0); gl.drawArrays(gl.TRIANGLES, 0, n);
   gl.uniform1f(u('u_pass'), 2); gl.drawArrays(gl.TRIANGLES, 0, n);
+  if (PT && t >= P.dis0) {{
+    gl.useProgram(PT.prog);
+    gl.uniform1f(gl.getUniformLocation(PT.prog, 'u_t'), t);
+    for (var k1 = 0; k1 < 8; k1++) if (k1 !== PT.loc) gl.disableVertexAttribArray(k1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, PT.quad); gl.enableVertexAttribArray(PT.loc);
+    gl.vertexAttribPointer(PT.loc, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.useProgram(prog); bindText();
+  }}
   if (A) {{
     // the soft copy: a separable Gaussian of the sharp frame (premultiplied,
     // which is the correct space to blur in), sharp -> tmp -> soft
@@ -396,23 +501,47 @@ def page(text, size, width, height, dur, role, hot_index, lines, enter, leave, p
     b = io.BytesIO()
     sheet.save(b, "PNG")
     off, aura_p, W, H = 0, None, width, height
+    petals = leave and exit_style() == "petals" and dur > DISSOLVE_S + 0.3
     if aura:
         from . import control, shaderfx
         off = shaderfx.text_off(aura)
-        W, H = width + 2 * off, height + 2 * off
         U = shaderfx.uniforms(aura, shaderfx.brand_params(aura),
                               host={"u_pop": -1.0 if pop_t is None else float(pop_t),
                                     "u_enter": 1.0 if enter else 0.0, "u_fbo": 1.0})
         aura_p = {"frag": shaderfx.fragment(shaderfx.load_preset(aura)["effect"]),
-                  "uniforms": {**control.host_uniforms(None), **U, "u_res": [W, H],
-                               "u_tsize": [W, H], "u_off": 0.0, "u_t0": 0.0},
+                  "_W": None,
+                  "uniforms": {**control.host_uniforms(None), **U},
                   "blur": float(shaderfx._render_opts(aura).get("blur_px", 12))}
+    if petals:
+        off += PETAL_MARGIN
+    W, H = width + 2 * off, height + 2 * off
+    if aura_p:
+        aura_p.pop("_W", None)
+        aura_p["uniforms"].update({"u_res": [W, H], "u_tsize": [W, H], "u_off": 0.0, "u_t0": 0.0})
+    petals_p = {}
+    if petals:
+        f = _font(size, role)
+        wd = []
+        for (ax, ay), wtxt in zip(anchors, words_list(lines)):
+            wd += [ax + off, ay - (size * 1.22 - (sum(f.getmetrics()))) / 2.0 - f.getmetrics()[1] + off,
+                   f.getlength(wtxt) / 2.0, 0.0]
+        c1, c2 = _petal_colors()
+        d0 = max(settle, dur - DISSOLVE_S)
+        petals_p = {"petals_fs": _PETALS_FS, "dis0": d0, "dis_s": DISSOLVE_S * 0.75,
+                    "petals_u": {"u_res": [W, H], "u_d0": d0, "u_dd": DISSOLVE_S * 0.75,
+                                 "u_wd": (wd + [0.0, 0.0, 0.0, 0.0] * MAX_WORDS)[:MAX_WORDS * 4],
+                                 "u_nw": float(len(words)), "u_size": float(size),
+                                 "u_c1": c1, "u_c2": c2,
+                                 # every petal is gone before the layer ends
+                                 "u_life": max(0.3, dur - d0 - DISSOLVE_S * 0.75 * 0.5 - 0.03)}}
+        exit_t = dur + 1.0                             # the dissolve replaces the fade-out
     word_line = [li for li, ws in enumerate(lines) for _ in ws]
     order = sorted(range(len(word_line)), key=lambda i: (-word_line[i], i))
     rank = [0] * len(word_line)
     for k, i in enumerate(order):
         rank[i] = k
-    params = {"origin": off, "aura": aura_p, "motion": motion(), "rank": rank,"verts": vertex_data(glyphs, anchors, place, hot_index if hot_index is not None else -1),
+    params = {"origin": off, "aura": aura_p, "motion": motion(), "rank": rank,
+              "exit_style": "petals" if petals else "fade", **petals_p,"verts": vertex_data(glyphs, anchors, place, hot_index if hot_index is not None else -1),
               "atlas": "data:image/png;base64," + base64.b64encode(b.getvalue()).decode(),
               "spread": SPREAD, "size": size, "fill": _rgb01(fill_hex), "hotc": _rgb01(hot_hex),
               "enter": bool(enter), "leave": bool(leave), "stagger": stagger,
@@ -422,8 +551,9 @@ def page(text, size, width, height, dur, role, hot_index, lines, enter, leave, p
               "exit_t": exit_t, "exit_s": kinetic.EXIT,
               "ease_type": _bez(kinetic.EASE_TYPE), "ease_pop": _bez(kinetic.EASE_POP),
               "ease_out": _bez(kinetic.EASE_OUT)}
+    hold_end = petals_p.get("dis0", exit_t)
     return _PAGE.format(w=W, h=H, params=json.dumps(params), vs=json.dumps(_VS),
-                        fs=json.dumps(_FS)), settle, exit_t
+                        fs=json.dumps(_FS)), settle, hold_end, off
 
 
 def _png_writer(out_dir, w, h):
@@ -447,9 +577,8 @@ def render_aura(text, out_dir, dur, size, width, height, role, hot_index, lines,
     (width + 2*off) x (height + 2*off). Returns (pattern, W, H, off)."""
     from . import shaderfx
     os.makedirs(out_dir, exist_ok=True)
-    html, _, _ = page(text, size, width, height, dur, role, hot_index, lines, enter, leave,
-                      pop_t, fill_hex, hot_hex, aura=aura)
-    off = shaderfx.text_off(aura)
+    html, _, _, off = page(text, size, width, height, dur, role, hot_index, lines, enter,
+                           leave, pop_t, fill_hex, hot_hex, aura=aura)
     W, H = width + 2 * off, height + 2 * off
     return shaderfx.render_frames(html, out_dir, W, H, dur, fps), W, H, off
 
@@ -460,11 +589,12 @@ def render(text, out_dir, dur, size, width, height, role, hot_index, lines, ente
     Returns the hold window (settle, hold_end) that was rendered once."""
     from . import shaderfx
     os.makedirs(out_dir, exist_ok=True)
-    html, settle, exit_t = page(text, size, width, height, dur, role, hot_index, lines,
-                                enter, leave, pop_t, fill_hex, hot_hex)
+    html, settle, exit_t, off = page(text, size, width, height, dur, role, hot_index, lines,
+                                     enter, leave, pop_t, fill_hex, hot_hex)
     hold_end = exit_t if leave else dur + 1.0
     still = (settle, hold_end) if hold_end > settle else None
-    shaderfx.render_frames(html, out_dir, width, height, dur, fps,
-                           writer=_png_writer(out_dir, width, height), pattern="k%05d.png",
+    W, H = width + 2 * off, height + 2 * off
+    shaderfx.render_frames(html, out_dir, W, H, dur, fps,
+                           writer=_png_writer(out_dir, W, H), pattern="k%05d.png",
                            still=still)
-    return still
+    return off

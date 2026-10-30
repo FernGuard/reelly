@@ -39,8 +39,8 @@ def test_vertex_data_and_page():
     v = gputext.vertex_data(glyphs, anchors, place, hot=0)
     assert len(v) == len(glyphs) * 6 * 8
     assert v[7] == 1.0 and v[-1] == 0.0                     # first word hot, last not
-    html, settle, exit_t = gputext.page(text, 72, 856, 200, 3.0, "headline", 0, lines,
-                                        True, False, 1.0, "#FCFCFB", "#a87cf0")
+    html, settle, exit_t, off = gputext.page(text, 72, 856, 200, 3.0, "headline", 0, lines,
+                                             True, False, 1.0, "#FCFCFB", "#a87cf0")
     params = json.loads(re.search(r"var P = (\{.*?\});\n", html, re.S).group(1))
     assert params["ease_type"] == [0.16, 0.84, 0.28, 1.0]
     assert params["ease_pop"] == [0.3, 1.6, 0.5, 1.0] and params["hot"] == 0
@@ -67,6 +67,22 @@ def test_motion_setting(monkeypatch):
     assert gputext.motion() == "blocklock"
     monkeypatch.setenv("REELLY_TEXT_MOTION", "wobble")
     assert gputext.motion() == "rise"                         # unknown: the default
-    html, _, _ = gputext.page("Wishlist on Steam", 72, 856, 200, 3.0, "headline", 0,
+    html, _, _, _ = gputext.page("Wishlist on Steam", 72, 856, 200, 3.0, "headline", 0,
                               [["Wishlist", "on", "Steam"]], True, False, 1.0, "#FCFCFB", "#a87cf0")
     assert '"motion": "rise"' in html and "u_w2[0]" in html
+
+
+def test_petal_exit(monkeypatch):
+    from reelly import brandkit
+    monkeypatch.setenv("REELLY_TEXT_EXIT", "petals")
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"fx": {"petal_color": "#ff8800"}})
+    lines = [["Curse", "cleared."]]
+    html, settle, hold_end, off = gputext.page("Curse cleared.", 72, 856, 200, 3.0, "headline",
+                                               1, lines, True, True, 1.0, "#FCFCFB", "#a87cf0")
+    assert off == gputext.PETAL_MARGIN and '"exit_style": "petals"' in html
+    assert abs(hold_end - (3.0 - gputext.DISSOLVE_S)) < 1e-6      # the hold ends where it starts
+    assert "u_c2" in html and "u_dis" in html
+    # a line that does not leave, or is too short, keeps the plain exit
+    html2, _, _, off2 = gputext.page("Curse cleared.", 72, 856, 200, 3.0, "headline", 1, lines,
+                                     True, False, 1.0, "#FCFCFB", "#a87cf0")
+    assert off2 == 0 and '"exit_style": "fade"' in html2
