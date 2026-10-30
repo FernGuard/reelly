@@ -37,6 +37,7 @@
   ]
 }*/
 #include "lib/noise.glsl"
+#include "lib/finish.glsl"
 
 void main(){
   vec2 uv = gl_FragCoord.xy / u_res;                 // y up
@@ -58,5 +59,5 @@ void main(){
   float fade = smoothstep(u_t0 > 0.0 ? -0.35 : 0.0, 0.45, u_t);
   vec3 bg = texture2D(u_bg, vec2(uv.x, 1.0 - uv.y)).rgb;
   vec3 col = bg + u_accent * (1.2 * d + 0.7 * ring) * fade;
-  gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
+  gl_FragColor = vec4(dither(min(col, vec3(1.0)), gl_FragCoord.xy), 1.0);
 }

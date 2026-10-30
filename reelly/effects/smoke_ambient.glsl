@@ -71,6 +71,7 @@
   ]
 }*/
 #include "lib/noise.glsl"
+#include "lib/finish.glsl"
 
 void main(){
   vec2 uv = gl_FragCoord.xy / u_res;
@@ -91,5 +92,5 @@ void main(){
   float amount = u_level * (1.0 + 0.6 * swell) + 0.55 * ramp;
   float d = pow(f, 2.2) * (1.5 * pow(below, 0.7) + 0.55 * pow(above, 1.3));
   float a = clamp(d * amount * outside * clear * 1.6, 0.0, 0.85);
-  gl_FragColor = vec4(u_accent, a);
+  gl_FragColor = vec4(u_accent, ditherA(a, gl_FragCoord.xy));
 }

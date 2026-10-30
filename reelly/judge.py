@@ -139,6 +139,12 @@ def check_file(path, expect_vertical=True, plan_dur=None):
     freezes = _parse_freeze(err)
     R.append(("frozen_video", "PASS" if not freezes else "WARN",
               f"{len(freezes)} freezes >5s (screen content can be static)"))
+    if v:
+        from . import flashqc
+        try:
+            R.append(flashqc.gate(path))
+        except Exception as e:   # noqa: BLE001 -- a broken probe must not pass silently
+            R.append(("flashes", "WARN", f"flash check could not run ({e})"))
     return {"file": path, "results": R}
 
 

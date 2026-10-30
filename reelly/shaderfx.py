@@ -48,7 +48,10 @@ TYPES = {"float": "float", "color": "vec3", "vec2": "vec2", "vec3": "vec3",
          "vec4": "vec4", "float[8]": "float"}
 # Uniforms the host always provides, per effect kind (never in INPUTS).
 HOST_UNIFORMS = {
-    "all": ["uniform vec2 u_res;", "uniform float u_t;", "uniform float u_t0;"],
+    "all": ["uniform vec2 u_res;", "uniform float u_t;", "uniform float u_t0;",
+            # the control track (reelly/control.py; effects/lib/control.glsl)
+            "uniform vec2 u_beat;", "uniform float u_onsets[16];",
+            "uniform sampler2D u_ctrl;", "uniform float u_ctrl_n;"],
     "backdrop": ["uniform sampler2D u_bg;"],
     "overlay": [],
     "text": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;",
@@ -184,22 +187,34 @@ def uniforms(preset, brand_params=None, host=None, overrides=None):
     return {k: _coerce(inputs[k], v) for k, v in out.items()}
 
 
-def _brand_choice(placement):
-    """(preset name, brand params) the brand kit picks for a placement."""
+def _brand_entries(placement):
+    """[(preset name, brand params)] the brand kit plays at a placement, in
+    stack order: "fx": {placement: name | {preset, params} | [those...]},
+    else the legacy "<placement>_fx" key."""
     try:
         from . import brandkit
         b = brandkit.brand()
     except Exception:   # noqa: BLE001 -- no kit, no effect
-        return None, {}
+        return []
     entry = (b.get("fx") or {}).get(placement) if isinstance(b.get("fx"), dict) else None
     if entry is None:
         entry = b.get(f"{placement}_fx")
-    if isinstance(entry, dict):
-        return entry.get("preset"), entry.get("params") or {}
-    return entry, {}
+    out = []
+    for e in (entry if isinstance(entry, list) else [entry]):
+        if isinstance(e, dict):
+            out.append((e.get("preset"), e.get("params") or {}))
+        elif e:
+            out.append((e, {}))
+    return out
 
+
+def _brand_choice(placement):
+    e = _brand_entries(placement)
+    return e[0] if e else (None, {})
+
+
+# brand.json "ambient_fx" / REELLY_AMBIENT_FX: the cut-long layer
 SCALE = 0.5                  # render at half size; the encode scales back up
-
 _PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent}}
 canvas{{display:block}}</style></head><body>
@@ -269,59 +284,67 @@ if (FR) {{
     }});
   }};
 }}
-var bg = {bg};
-if (!bg) {{ window.__reellyReady = true; window.__reellyDraw(0); }}
-else {{
+var bg = {bg}, ctrl = {ctrl}, pending = 0;
+function done(){{ if (--pending <= 0) {{ gl.activeTexture(gl.TEXTURE0);
+  window.__reellyReady = true; window.__reellyDraw(0); }} }}
+function texFrom(src, unit, name){{
+  pending++;
   var img = new Image();
-  img.onload = function(){{
-    var tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
-    gl.uniform1i(u('u_bg'), 0);
-    window.__reellyReady = true; window.__reellyDraw(0);
-  }};
-  img.src = bg;
+  img.onload = function(){{ gl.activeTexture(gl.TEXTURE0 + unit); upload(img);
+    gl.uniform1i(u(name), unit); done(); }};
+  img.onerror = function(){{ done(); }};
+  img.src = src;
 }}
+if (ctrl) texFrom(ctrl, 2, 'u_ctrl');
+if (bg) texFrom(bg, 0, 'u_bg');
+if (!pending) {{ pending = 1; done(); }}
 </script></body></html>"""
 
 TEXT_OFF = 44                # px of aura room around a kinetic text frame
 
 
-# brand.json "ambient_fx" / REELLY_AMBIENT_FX: the cut-long layer
 AMBIENT_SCALE = 0.25         # the veil is very soft: quarter size is plenty
 AMBIENT_FPS = 30             # slow smoke; the encode repeats frames for 60
 
 
+def active_list(kind="outro"):
+    """Every preset playing at `kind` for this run, in stack order (bottom
+    first): REELLY_<KIND>_FX (comma-separated) or the brand kit. Legacy
+    "smoke" maps to the preset it always meant; unknown or misplaced presets
+    are dropped with a log line."""
+    env = os.environ.get(f"REELLY_{kind.upper()}_FX", "").strip().lower()
+    names = [x.strip() for x in env.split(",")] if env else \
+        [str(n or "").strip().lower() for n, _ in _brand_entries(kind)]
+    out = []
+    for v in names:
+        if not v or v in ("off", "none", "0"):
+            continue
+        v = LEGACY.get((kind, v), v)
+        try:
+            p = load_preset(v)
+        except EffectError as e:
+            print(f"[fx   ] {kind}: {e}; layer off")
+            continue
+        if p["placement"] != kind:
+            print(f"[fx   ] preset {v!r} plays at {p['placement']}, not {kind}; layer off")
+            continue
+        out.append(v)
+    return out
+
+
 def active(kind="outro"):
-    """The preset name playing at `kind` (outro | ambient | text) for this
-    run, or None (off): REELLY_<KIND>_FX, then the brand kit. Legacy "smoke"
-    maps to the preset it always meant; an unknown preset is refused (off)."""
-    v = os.environ.get(f"REELLY_{kind.upper()}_FX", "").strip().lower()
-    if not v:
-        v, _ = _brand_choice(kind)
-        v = str(v or "").strip().lower()
-    if not v or v in ("off", "none", "0"):
-        return None
-    v = LEGACY.get((kind, v), v)
-    try:
-        p = load_preset(v)
-    except EffectError as e:
-        print(f"[fx   ] {kind}: {e}; effect off")
-        return None
-    if p["placement"] != kind:
-        print(f"[fx   ] preset {v!r} plays at {p['placement']}, not {kind}; effect off")
-        return None
-    return v
+    """The (first) preset playing at `kind` for this run, or None (off)."""
+    lst = active_list(kind)
+    return lst[0] if lst else None
 
 
 def brand_params(preset):
-    """The brand kit's parameter overrides for a preset (fx.<placement>.params)."""
+    """The brand kit's parameter overrides for a preset."""
     p = load_preset(preset)
-    name, params = _brand_choice(p["placement"])
-    return params if LEGACY.get((p["placement"], str(name)), name) == preset else {}
+    for name, params in _brand_entries(p["placement"]):
+        if LEGACY.get((p["placement"], str(name).lower()), str(name).lower()) == preset:
+            return params
+    return {}
 
 
 def _rgb01(hex_):
@@ -332,7 +355,8 @@ def _rgb01(hex_):
         return (0.66, 0.49, 0.94)
 
 
-def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=9):
+def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=9,
+          ctrl=None, t_offset=0.0):
     import io
     import json
     bg = "null"
@@ -342,7 +366,11 @@ def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=
         b = io.BytesIO()
         im.save(b, "JPEG", quality=92)
         bg = json.dumps("data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode())
+    from . import control
+    uniforms = {**control.host_uniforms(ctrl, t_offset), **uniforms}
+    ctrl_png = control.energy_png(ctrl.get("energy")) if ctrl and t_offset == 0 else None
     return _PAGE.format(w=w, h=h, frag=json.dumps(frag), bg=bg,
+                        ctrl=json.dumps(ctrl_png) if ctrl_png else "null",
                         frames=json.dumps(frames) if frames else "null", fps=int(fps),
                         blur_px=int(blur_px),
                         uniforms=json.dumps({k: (list(v) if isinstance(v, (list, tuple))
@@ -356,18 +384,20 @@ def _render_opts(preset):
     return {**(p.get("render") or {}), **(((p.get("lite") or {}).get("render") or {}) if lite else {})}
 
 
-def page_html(fx, backdrop_png, w, h, accent_hex=None, pulse_t=None, band=0.53, t0=0.0):
+def page_html(fx, backdrop_png, w, h, accent_hex=None, pulse_t=None, band=0.53, t0=0.0,
+              ctrl=None, ctrl_t0=None):
     """The end-card page (kind backdrop): backdrop as a data-URI texture (no
     file-origin taint), the effect, the __reellyDraw hook."""
     over = {"u_accent": accent_hex} if accent_hex else {}
     U = uniforms(fx, brand_params(fx), overrides=over,
                  host={"u_pulse": -1.0 if pulse_t is None else pulse_t, "u_band": band})
     return _page(fragment(load_preset(fx)["effect"]), w, h,
-                 {"u_res": (w, h), "u_t0": t0, **U}, backdrop_png)
+                 {"u_res": (w, h), "u_t0": t0, **U}, backdrop_png, ctrl=ctrl,
+                 t_offset=t0 if ctrl_t0 is None else ctrl_t0)
 
 
 def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops=(),
-                 end=0.0, level=None):
+                 end=0.0, level=None, ctrl=None):
     """The cut-long overlay page: transparent, the effect keeps out of `pic`
     (x0, y0, x1, y1 in uv, y up) and the `clear` band (y0, y1)."""
     over = {"u_accent": accent_hex} if accent_hex else {}
@@ -376,7 +406,7 @@ def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops
     U = uniforms(fx, brand_params(fx), overrides=over,
                  host={"u_pic": pic, "u_clear": clear, "u_pops": list(pops)[:8], "u_end": end})
     return _page(fragment(load_preset(fx)["effect"]), w, h,
-                 {"u_res": (w, h), "u_t0": 0.0, **U})
+                 {"u_res": (w, h), "u_t0": 0.0, **U}, ctrl=ctrl)
 
 
 # One frame, straight off the GPU: seek/draw (awaiting a frame-loading
@@ -504,21 +534,24 @@ def _size(scale):
 
 
 def render(fx, backdrop_png, out_dir, dur, accent_hex=None, pulse_t=None,
-           band=0.53, fps=None, t0=0.0):
+           band=0.53, fps=None, t0=0.0, ctrl=None, ctrl_t0=None):
     """The end card: preset `fx` over the backdrop to out_dir/f%05d.png.
     pulse_t: local time of the ask's pop; band: the ask's height from the
     bottom; t0: where the cut's ambient field left off."""
     w, h = _size(_render_opts(fx).get("scale", SCALE))
-    return _render_page(page_html(fx, backdrop_png, w, h, accent_hex, pulse_t, band, t0),
+    return _render_page(page_html(fx, backdrop_png, w, h, accent_hex, pulse_t, band, t0, ctrl,
+                                  ctrl_t0),
                         out_dir, w, h, dur, fps or config.output_fps())
 
 
-def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level=None):
+def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level=None,
+                   ctrl=None):
     """The cut-long overlay (straight alpha) at the preset's scale and fps.
     Returns (pattern, fps)."""
     ro = _render_opts(fx)
     w, h = _size(ro.get("scale", AMBIENT_SCALE))
     fps = int(ro.get("fps", AMBIENT_FPS))
-    pat = _render_page(ambient_html(fx, w, h, accent_hex, pic, clear, pops, end=dur, level=level),
+    pat = _render_page(ambient_html(fx, w, h, accent_hex, pic, clear, pops, end=dur, level=level,
+                                    ctrl=ctrl),
                        out_dir, w, h, dur, fps)
     return pat, fps

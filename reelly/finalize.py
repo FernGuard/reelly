@@ -283,6 +283,12 @@ def _burn_pass(src, dst, events, seek=None):
     return dst
 
 
+def shaderfx_any():
+    """Is any shader layer on for this run (worth computing a control track)?"""
+    from . import shaderfx
+    return any(shaderfx.active_list(k) for k in ("ambient", "outro", "text"))
+
+
 def _pop_times(plan):
     """Cut-time instants the hook's and the lines' hot words pop (the
     beat-timed accents), for effects that answer them."""
@@ -307,14 +313,16 @@ def _pop_times(plan):
 
 
 def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
-    """The brand's cut-long shader layer (shaderfx ambient) over the
-    pre-caption cut: smoke only outside the game picture and the text band,
-    so gameplay is never tinted or covered. Returns dst, or src when the
-    brand has no ambient effect or it cannot render."""
+    """The brand's cut-long shader layers (shaderfx ambient, stacked bottom
+    first) over the pre-caption cut, only outside the picture and the text
+    band, so the content is never tinted or covered. Every layer reads the
+    cut's control track (plan "_ctrl"). Returns dst, or src when the brand
+    has no ambient layer or none renders."""
     from . import kinetic, layout as _layout, shaderfx
-    fx = shaderfx.active("ambient")
-    if not fx or not kinetic.enabled():
+    layers = shaderfx.active_list("ambient")
+    if not layers or not kinetic.enabled():
         return src
+    fx = "+".join(layers)
     try:
         H = _layout.FRAME_H
         top = _layout.picture_top(plan.get("reframe", 1.0))
@@ -324,18 +332,30 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
         pic = (0.0, 1 - bottom / H, 1.0, 1 - top / H)          # uv, y up
         clear = (1 - top / H, 1 - max(0, text_top) / H)
         pops = _pop_times(plan)
-        seq, fx_fps = shaderfx.render_ambient(fx, os.path.join(workdir, "fx_ambient"), dur,
-                                              pic, clear, pops)
-        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src,
-                        "-framerate", str(fx_fps), "-i", seq,
-                        "-filter_complex",
-                        "[1:v]scale=1080:1920:flags=bicubic,format=rgba[fx];"
-                        "[0:v][fx]overlay=0:0:eof_action=pass:shortest=0,format=yuv420p[v]",
+        inputs, chain, last = [], [], "0:v"
+        for i, name in enumerate(layers, start=1):
+            try:
+                seq, fx_fps = shaderfx.render_ambient(
+                    name, os.path.join(workdir, f"fx_ambient{i}"), dur, pic, clear, pops,
+                    ctrl=plan.get("_ctrl"))
+            except Exception as e:   # noqa: BLE001 -- the other layers still play
+                print(f"        ambient '{name}' failed ({e}); layer skipped")
+                continue
+            k = len(inputs) // 4 + 1
+            inputs += ["-framerate", str(fx_fps), "-i", seq]
+            chain.append(f"[{k}:v]scale=1080:1920:flags=bicubic,format=rgba[f{k}];"
+                         f"[{last}][f{k}]overlay=0:0:eof_action=pass:shortest=0[o{k}]")
+            last = f"o{k}"
+        if not chain:
+            return src
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src, *inputs,
+                        "-filter_complex", ";".join(chain) + f";[{last}]format=yuv420p[v]",
                         "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
                         "-r", str(config.output_fps()), *config.intermediate_encode_args(),
                         dst], check=True)
-        print(f"        ambient '{fx}': smoke outside the picture, "
-              f"{len(pops)} beat-timed swell(s)")
+        c = plan.get("_ctrl") or {}
+        print(f"        ambient '{fx}': outside the picture; control: {len(pops)} pop(s), "
+              f"{len(c.get('onsets', []))} onset(s), energy {'on' if c.get('energy') else 'off'}")
         return dst
     except Exception as e:   # noqa: BLE001 -- the cut ships without the layer
         print(f"        ambient '{fx}' failed ({e}); no ambient layer")
@@ -575,6 +595,12 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                             print(f"        beat grid: {60 / period:.1f} bpm "
                                   f"({'stated' if bpm else 'detected'}), "
                                   f"a beat on {beat_target:.2f}s")
+            if shaderfx_any():
+                from . import control
+                try:
+                    p["_ctrl"] = control.track(p, voice, dur)
+                except Exception as e:   # noqa: BLE001 -- effects run on the beat grid only
+                    print(f"        control track failed ({e}); beats and pops only")
             with timing.stage(f"{p['id']} ambient fx", tpath):
                 lit = _ambient_pass(raw, os.path.join(td, "ambient.mp4"), p, dur, td, layout)
             with timing.stage(f"{p['id']} caption burn", tpath):
@@ -589,6 +615,7 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     # bleeds into the darkened card background
                     vid = outro_mod.append(vid, raw, p, product, td)
             p.pop("_beats", None)          # render-time only, never persisted
+            p.pop("_ctrl", None)
             # delivery plan: build only the mixes the requested targets need;
             # music is generated only when a music platform asked for it
             mixes = {}

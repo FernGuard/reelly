@@ -215,3 +215,39 @@ def test_frames_are_written_as_bottom_up_tga(tmp_path):
     px = r.stdout
     assert px[:4] == bytes([0, 0, 255, 128])       # decoded top-left = top row
     assert px[-4:] == bytes([255, 0, 0, 255])      # decoded bottom-right = bottom row
+
+
+def test_layers_stack_in_brand_order(monkeypatch):
+    monkeypatch.delenv("REELLY_AMBIENT_FX", raising=False)
+    _brand(monkeypatch, {"fx": {"ambient": ["smoke-ambient",
+                                            {"preset": "embers-ambient", "params": {"u_density": 0.6}},
+                                            "lasers"]}})
+    assert shaderfx.active_list("ambient") == ["smoke-ambient", "embers-ambient"]
+    assert shaderfx.brand_params("embers-ambient") == {"u_density": 0.6}
+    monkeypatch.setenv("REELLY_AMBIENT_FX", "embers-ambient,smoke-ambient")
+    assert shaderfx.active_list("ambient") == ["embers-ambient", "smoke-ambient"]
+
+
+def test_control_track_reaches_the_page():
+    from reelly import control
+    ctrl = {"beats": [3.6, 0.48], "pops": [0.55], "onsets": [1.0, 5.0, 12.0],
+            "energy": [0.1, 0.5, 1.0], "fps": 60}
+    html = shaderfx.ambient_html("embers-ambient", 270, 480, ctrl=ctrl)
+    assert '"u_beat": [3.6, 0.48]' in html and '"u_ctrl_n": 3.0' in html
+    assert '"u_onsets": [1.0, 5.0, 12.0, -1.0' in html
+    assert "data:image/png;base64," in html                     # the energy texture
+    u = control.host_uniforms(ctrl, t_offset=10.0)              # an end card at 10 s
+    assert u["u_beat"][0] == -6.4 and u["u_onsets"][0] == 2.0 and u["u_ctrl_n"] == 0.0
+
+
+def test_control_track_from_real_audio(tmp_path):
+    import subprocess
+    from reelly import control
+    p = str(tmp_path / "hits.wav")
+    subprocess.run([config.FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "aevalsrc='0.02*sin(2*PI*220*t)+if(lt(mod(t,1),0.03),0.9*sin(2*PI*90*t),0)':d=4",
+                    p], check=True)
+    on = control.onsets(p, 4.0)
+    assert 3 <= len(on) <= 5 and all(abs(o - round(o)) < 0.08 for o in on)
+    en = control.energy(p, 4.0)
+    assert len(en) == 240 and max(en) == 1.0

@@ -238,7 +238,8 @@ def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at):
         seq = shaderfx.render(fx, backdrop, os.path.join(workdir, "fx_outro"), len_s,
                               pulse_t=pop, band=1.0 - CTA_Y_FRAC - 0.03,
                               # the cut's ambient smoke left off at starts_at
-                              t0=(starts_at or 0.0) if shaderfx.active("ambient") else 0.0)
+                              t0=(starts_at or 0.0) if shaderfx.active("ambient") else 0.0,
+                              ctrl=plan.get("_ctrl"), ctrl_t0=starts_at or 0.0)
         print(f"[outro] {plan.get('id', '?')}: shader backdrop '{fx}'"
               + (f", light ring with the pop at {pop:.2f}s" if pop is not None else ""))
         return seq
