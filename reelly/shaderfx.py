@@ -760,7 +760,10 @@ def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level
     if ro.get("sparse") == "onsets":
         windows = [(o, o + hold) for o in (ctrl or {}).get("onsets", [])]
     elif ro.get("sparse") == "events":
-        windows = [(e["t"], e["t"] + hold) for e in (ctrl or {}).get("events", [])]
+        # only the events this layer reacts to (its own u_min_s, if any)
+        min_s = uniforms(fx, brand_params(fx)).get("u_min_s", 0.0)
+        windows = [(e["t"], e["t"] + hold) for e in (ctrl or {}).get("events", [])
+                   if e.get("s", 1.0) >= min_s]
     pat = _render_page(ambient_html(fx, w, h, accent_hex, pic, clear, pops, end=dur, level=level,
                                     ctrl=ctrl),
                        out_dir, w, h, dur, fps, windows=windows)

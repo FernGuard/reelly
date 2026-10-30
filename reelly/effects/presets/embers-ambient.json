@@ -12,7 +12,7 @@
     "fps": 30,
     "bloom": {
       "threshold": 0.12,
-      "strength": 6.0,
+      "strength": 3.5,
       "sigma": 12
     }
   },

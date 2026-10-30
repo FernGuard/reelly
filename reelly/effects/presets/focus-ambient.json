@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "effect": "focus_ambient",
+  "placement": "ambient",
+  "description": "Brand-neutral ambient preset: manga focus lines converging on the biggest real impacts, drawn only around the picture.",
+  "params": {},
+  "render": {
+    "scale": 1.0,
+    "fps": 60,
+    "sparse": "events"
+  },
+  "lite": {
+    "render": {
+      "scale": 0.5,
+      "fps": 60,
+      "sparse": "events"
+    }
+  }
+}

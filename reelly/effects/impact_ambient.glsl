@@ -59,8 +59,10 @@ void main(){
       float fill = smoothstep(w + 1.0, w - 1.0, perp) * inLen;
       float line = smoothstep(w + 4.5 * unit + 1.0, w + 4.5 * unit - 1.0, perp)
                    * smoothstep(tail - 4.0 * unit, tail, along) * smoothstep(head + 4.0 * unit, head, along);
-      body = max(body, fill);
-      edge = max(edge, line);
+      // a stroke that has almost retracted fades whole (no leftover specks)
+      float left = smoothstep(4.0 * unit, 26.0 * unit, head - tail);
+      body = max(body, fill * left);
+      edge = max(edge, line * left);
     }
   }
   // outside the picture, and at most u_bite px into it
