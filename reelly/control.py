@@ -113,6 +113,7 @@ def host_uniforms(ctrl, t_offset=0.0):
 
 
 MAX_EVENTS = 8
+MAX_CANDIDATES = 12   # the vision check keeps at most MAX_EVENTS
 EVENT_GAP_S = 0.9        # one mark per moment, never a machine-gun
 
 
@@ -169,7 +170,7 @@ def _flux_per_frame(path, n, fps=FPS):
     return np.pad(flux, (0, max(0, n - len(flux))))
 
 
-def events(video, audio_path, pic, dur, fps=FPS):
+def events(video, audio_path, pic, dur, fps=FPS, limit=MAX_EVENTS):
     """Real impacts: frames where the SOUND and the PICTURE both jump (a UI
     blip or a dialogue tick moves only the sound, a camera pan only the
     picture). [{t, x, y, s}] with x, y = where in the picture it happened
@@ -195,11 +196,132 @@ def events(video, audio_path, pic, dur, fps=FPS):
         return []
     peaks, props = signal.find_peaks(score, height=max(4.0, float(np.percentile(score, 99))),
                                      distance=max(1, int(EVENT_GAP_S * fps)))
-    strongest = sorted(peaks, key=lambda i: -score[i])[:MAX_EVENTS]
+    strongest = sorted(peaks, key=lambda i: -score[i])[:limit]
     top = score[strongest[0]] if strongest else 1.0
     out = []
     for i in sorted(strongest):
         j = max(range(max(0, i - 2), min(n, i + 3)), key=lambda k: energy[k])  # the picture's frame
         out.append({"t": round(float(i) / fps, 3), "x": round(float(cx[j]), 3),
                     "y": round(float(cy[j]), 3), "s": round(float(score[i] / top), 3)})
+    return out
+
+
+GRID = (8, 4)            # columns A..H, rows 1..4 over the picture
+VERIFY_PROMPT = """You are checking moments from a short game video for an editor who adds
+comic impact marks. Each attached image i (in order, starting at 0) shows
+THREE consecutive frames of the game screen, side by side: just before, AT
+the moment, just after. A lettered grid (columns {cols}, rows 1-{rows}, row 1
+at the top) is drawn over each frame.
+
+For each image decide:
+- impact: true only if, at the middle frame, something visibly HITS,
+  EXPLODES, STRIKES, LANDS or TAKES DAMAGE in the game (a projectile
+  landing, an explosion, a blow, a damage burst). false for UI text or
+  numbers merely appearing, dialogue boxes, menus, camera moves, idle
+  animation, or a background effect.
+- cell: the grid cell at the CENTRE of the impact (e.g. "B3"), as seen in
+  the middle frame. null when impact is false.
+- what: five words or fewer.
+
+Reply with JSON only: {{"moments": [{{"i": 0, "impact": true, "cell": "B3",
+"what": "meteor explodes on board"}}]}}"""
+
+
+def _sheet(video, t, pic, path, w=480):
+    """One verification image: 3 frames (t-0.1, t, t+0.1) of the picture
+    rect with the lettered grid, side by side."""
+    from PIL import Image, ImageDraw
+    H = 1920
+    y0 = int(round((1.0 - pic[3]) * H))
+    ph = max(2, int(round((pic[3] - pic[1]) * H)) // 2 * 2)
+    h = int(round(w * ph / 1080))
+    frames = []
+    for dt in (-0.1, 0.0, 0.1):
+        r = subprocess.run([config.FFMPEG, "-v", "error", "-ss", f"{max(0.0, t + dt):.3f}", "-i", video,
+                            "-frames:v", "1", "-vf", f"crop=1080:{ph}:0:{y0},scale={w}:{h}",
+                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
+        im = (Image.frombytes("RGB", (w, h), r.stdout) if len(r.stdout) == w * h * 3
+              else Image.new("RGB", (w, h)))
+        d = ImageDraw.Draw(im)
+        cw, ch = w / GRID[0], h / GRID[1]
+        for c in range(1, GRID[0]):
+            d.line([(c * cw, 0), (c * cw, h)], fill=(255, 255, 255), width=1)
+        for rr in range(1, GRID[1]):
+            d.line([(0, rr * ch), (w, rr * ch)], fill=(255, 255, 255), width=1)
+        for c in range(GRID[0]):
+            for rr in range(GRID[1]):
+                d.text((c * cw + 3, rr * ch + 2), f"{chr(65 + c)}{rr + 1}", fill=(255, 255, 0))
+        frames.append(im)
+    sheet = Image.new("RGB", (w * 3 + 16, h), (255, 255, 255))
+    for k, im in enumerate(frames):
+        sheet.paste(im, (k * (w + 8), 0))
+    sheet.save(path, quality=90)
+    return path
+
+
+def _cell_uv(cell):
+    """'B3' -> centre of that cell in picture uv (y up), or None."""
+    import re
+    m = re.fullmatch(r"\s*([A-Za-z])\s*(\d+)\s*", str(cell or ""))
+    if not m:
+        return None
+    c, r = ord(m.group(1).upper()) - 65, int(m.group(2)) - 1
+    if not (0 <= c < GRID[0] and 0 <= r < GRID[1]):
+        return None
+    return (c + 0.5) / GRID[0], 1.0 - (r + 0.5) / GRID[1]
+
+
+def verify_events(video, candidates, pic, workdir, project="", cache=None):
+    """Ask the subscription vision brain (Codex, $0) which candidates are
+    real impacts and where: pixel change alone cannot tell a hit from a
+    meteor trail, a damage number or a swirling background on a busy game
+    screen. Returns the confirmed events, each re-anchored at its cell.
+    Unchanged candidates when no brain is signed in (logged); [] when the
+    brain says none are impacts. `cache`: a JSON path keyed by the times."""
+    import json
+    import os
+    if not candidates:
+        return []
+    key = ",".join(f"{e['t']:.3f}" for e in candidates)
+    if cache and os.path.exists(cache):
+        try:
+            c = json.load(open(cache))
+            if c.get("key") == key:
+                return c["events"]
+        except (OSError, ValueError, KeyError):
+            pass
+    from . import direct
+    tool = direct.resolve_brain("auto")
+    if tool != "codex":
+        print("        impacts: no vision brain signed in; unverified candidates")
+        return candidates
+    sheets = [_sheet(video, e["t"], pic, os.path.join(workdir, f"impact_{i}.jpg"))
+              for i, e in enumerate(candidates)]
+    prompt = VERIFY_PROMPT.format(cols="A-" + chr(64 + GRID[0]), rows=GRID[1])
+    reply = direct._ask_cli("codex", prompt, project, "impact check", images=sheets)
+    if not isinstance(reply, dict) or not isinstance(reply.get("moments"), list):
+        print("        impacts: the vision check gave no answer; unverified candidates")
+        return candidates
+    out = []
+    for m in reply["moments"]:
+        try:
+            i = int(m.get("i"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= i < len(candidates)) or not m.get("impact"):
+            continue
+        uv = _cell_uv(m.get("cell"))
+        e = dict(candidates[i])
+        if uv:
+            e["x"], e["y"] = round(uv[0], 3), round(uv[1], 3)
+        e["what"] = str(m.get("what") or "")[:60]
+        out.append(e)
+    out.sort(key=lambda e: e["t"])
+    print(f"        impacts: {len(out)} of {len(candidates)} confirmed by the vision check: "
+          + "; ".join(f"{e['t']}s {e.get('what', '')}" for e in out))
+    if cache:
+        try:
+            json.dump({"key": key, "events": out}, open(cache, "w"), indent=1)
+        except OSError:
+            pass
     return out

@@ -336,7 +336,12 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
         if ctrl is not None and "events" not in ctrl:
             from . import control
             try:
-                ctrl["events"] = control.events(src, plan.get("_audio"), pic, dur)
+                cand = control.events(src, plan.get("_audio"), pic, dur,
+                                      limit=control.MAX_CANDIDATES)
+                cache = (os.path.join(plan["_qc"], f"impacts_{plan['id']}.json")
+                         if plan.get("_qc") else None)
+                ctrl["events"] = control.verify_events(src, cand, pic, workdir,
+                                                       plan.get("id", ""), cache)[:control.MAX_EVENTS]
             except Exception as e:   # noqa: BLE001 -- marks simply do not fire
                 print(f"        impact events failed ({e})")
                 ctrl["events"] = []
@@ -609,6 +614,8 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                 try:
                     p["_ctrl"] = control.track(p, voice, dur)
                     p["_audio"] = voice
+                    p["_qc"] = os.path.join(root, "qc")
+                    os.makedirs(p["_qc"], exist_ok=True)
                 except Exception as e:   # noqa: BLE001 -- effects run on the beat grid only
                     print(f"        control track failed ({e}); beats and pops only")
             with timing.stage(f"{p['id']} ambient fx", tpath):
@@ -627,6 +634,7 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
             p.pop("_beats", None)          # render-time only, never persisted
             p.pop("_ctrl", None)
             p.pop("_audio", None)
+            p.pop("_qc", None)
             # delivery plan: build only the mixes the requested targets need;
             # music is generated only when a music platform asked for it
             mixes = {}

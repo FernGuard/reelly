@@ -302,3 +302,24 @@ def test_impacts_need_sound_and_picture_together(tmp_path):
     ts = [e["t"] for e in ev]
     assert len(ev) == 2 and abs(ts[0] - 1.0) < 0.06 and abs(ts[1] - 2.0) < 0.06, ev
     assert all(e["x"] < 0.5 and e["y"] > 0.5 for e in ev)      # upper-left of the picture
+
+
+def test_vision_check_keeps_only_real_hits_and_moves_them(monkeypatch, tmp_path):
+    from reelly import control, direct
+    cands = [{"t": 1.0, "x": 0.9, "y": 0.9, "s": 1.0}, {"t": 2.0, "x": 0.5, "y": 0.5, "s": 0.6}]
+    monkeypatch.setattr(control, "_sheet", lambda v, t, pic, path, w=480: path)
+    monkeypatch.setattr(direct, "resolve_brain", lambda b: "codex")
+    calls = []
+
+    def ask(tool, prompt, project, label, images=None):
+        calls.append(images)
+        return {"moments": [{"i": 0, "impact": True, "cell": "B4", "what": "meteor lands"},
+                            {"i": 1, "impact": False, "cell": None, "what": "combo text"}]}
+    monkeypatch.setattr(direct, "_ask_cli", ask)
+    cache = str(tmp_path / "impacts.json")
+    ev = control.verify_events("v.mp4", cands, (0, 0.34, 1, 0.66), str(tmp_path), "p", cache)
+    assert [e["t"] for e in ev] == [1.0]
+    assert ev[0]["x"] == 0.188 and ev[0]["y"] == 0.125      # cell B4 (bottom left)
+    assert len(calls) == 1 and len(calls[0]) == 2           # one call, one image per candidate
+    again = control.verify_events("v.mp4", cands, (0, 0.34, 1, 0.66), str(tmp_path), "p", cache)
+    assert again == ev and len(calls) == 1                  # cached: no second call
