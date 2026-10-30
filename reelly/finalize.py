@@ -85,8 +85,19 @@ class _Seq(str):
         return obj
 
 
+def _linger(t_end, next_start, content_end):
+    """Seconds a dissolving line's petals may drift on past its slot: up to
+    gputext.PETAL_LINGER, never into the next text layer in that band and
+    never past the content. 0 unless the petal exit is on."""
+    from . import gputext
+    if gputext.exit_style() != "petals" or not gputext.enabled():
+        return 0.0
+    room = min(next_start, content_end) - t_end - 0.05
+    return round(max(0.0, min(gputext.PETAL_LINGER, room)), 3)
+
+
 def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None,
-                beats=None):
+                beats=None, linger=0.0):
     """(path, y_shift) for a hook-style line: a kinetic sequence when the
     kinetic layer is on, else the static Pillow PNG. A line on screen at t0=0
     is readable on frame 0 (no entrance). A kinetic failure falls back to the
@@ -97,7 +108,7 @@ def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None,
             pattern, _, _, pad = kinetic.hook_line(
                 text, os.path.join(workdir, f"kin_{name}"), dur, hot=hot,
                 enter=t0 > 0.0, hot_reason=hot_reason, label=name,
-                beat=kinetic.local_beat(beats, t0))
+                beat=kinetic.local_beat(beats, t0), linger=linger)
             return _Seq(pattern), -pad
         except Exception as e:  # noqa: BLE001 -- static fallback, never break the burn
             print(f"        kinetic '{name}' failed ({e}); static text instead")
@@ -160,19 +171,24 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     hook = plan.get("hook") or {}
     if hook.get("text"):
         show = float(hook.get("show_s", 3.6))
+        starts = sorted(float(o["t"]) for o in plan.get("overlay_lines") or [])
+        lg = _linger(show, next((x for x in starts if x >= show - 1e-6), dur), dur)
         hp, dy = _text_layer(hook["text"], workdir, "hook", show, hook.get("hot"),
                              t0=0.0, hot_reason=hook.get("hot_reason"),
-                             beats=plan.get("_beats"))
-        events.append((hp, hook_y + dy, 0.0, show))
+                             beats=plan.get("_beats"), linger=lg)
+        events.append((hp, hook_y + dy, 0.0, show + lg))
 
     # P-TEXT: timed lines beyond the hook; on captions:"none" cuts they carry
     # all of the writing.
     for oi, o in enumerate(plan.get("overlay_lines") or []):
         t0, show = float(o["t"]), float(o.get("show_s", 3.0))
+        later = sorted(float(x["t"]) for x in plan.get("overlay_lines") or []
+                       if float(x["t"]) > t0)
+        lg = _linger(t0 + show, later[0] if later else dur, dur)
         op, dy = _text_layer(o["text"], workdir, f"ov{oi}", show, o.get("hot"),
                              t0=t0, hot_reason=o.get("hot_reason"),
-                             beats=plan.get("_beats"))
-        events.append((op, hook_y + dy, t0, t0 + show))
+                             beats=plan.get("_beats"), linger=lg)
+        events.append((op, hook_y + dy, t0, t0 + show + lg))
 
     payoff = plan.get("payoff") or {}
     if payoff.get("jump") and payoff.get("local_t") is not None:

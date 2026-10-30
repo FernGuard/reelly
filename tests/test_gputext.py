@@ -86,3 +86,13 @@ def test_petal_exit(monkeypatch):
     html2, _, _, off2 = gputext.page("Curse cleared.", 72, 856, 200, 3.0, "headline", 1, lines,
                                      True, False, 1.0, "#FCFCFB", "#a87cf0")
     assert off2 == 0 and '"exit_style": "fade"' in html2
+
+
+def test_petals_linger_only_into_free_time(monkeypatch):
+    from reelly import finalize
+    monkeypatch.setenv("REELLY_TEXT_EXIT", "petals")
+    assert finalize._linger(7.2, 10.0, 16.9) == gputext.PETAL_LINGER   # room to drift
+    assert finalize._linger(7.2, 7.5, 16.9) == 0.25                    # next line soon
+    assert finalize._linger(16.8, 20.0, 16.9) == 0.05                  # content ends
+    monkeypatch.setenv("REELLY_TEXT_EXIT", "fade")
+    assert finalize._linger(7.2, 10.0, 16.9) == 0.0                    # no petals, no linger

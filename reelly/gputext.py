@@ -54,6 +54,7 @@ def motion():
 
 
 EXITS = ("fade", "petals")
+PETAL_LINGER = 0.6       # s the petals may drift on after the line's own slot
 PETAL_MARGIN = 70        # px of room above/around a line for petals to rise into
 DISSOLVE_S = 0.75        # the dissolve + petals window at the end of a leaving line
 
@@ -487,7 +488,7 @@ def _bez(css):
 
 
 def page(text, size, width, height, dur, role, hot_index, lines, enter, leave, pop_t,
-         fill_hex, hot_hex, aura=None):
+         fill_hex, hot_hex, aura=None, linger=0.0):
     """The GPU text page for one kinetic line (canvas width x height). aura:
     a text-effect preset name: the page grows by its margin on every side
     and the effect is composited in the same frame (no image round trip)."""
@@ -532,8 +533,10 @@ def page(text, size, width, height, dur, role, hot_index, lines, enter, leave, p
                                  "u_wd": (wd + [0.0, 0.0, 0.0, 0.0] * MAX_WORDS)[:MAX_WORDS * 4],
                                  "u_nw": float(len(words)), "u_size": float(size),
                                  "u_c1": c1, "u_c2": c2,
-                                 # every petal is gone before the layer ends
-                                 "u_life": max(0.3, dur - d0 - DISSOLVE_S * 0.75 * 0.5 - 0.03)}}
+                                 # petals drift on into the linger, every one gone
+                                 # before the layer (line + linger) ends
+                                 "u_life": max(0.3, dur + linger - d0
+                                               - DISSOLVE_S * 0.75 * 0.5 - 0.03)}}
         exit_t = dur + 1.0                             # the dissolve replaces the fade-out
     word_line = [li for li, ws in enumerate(lines) for _ in ws]
     order = sorted(range(len(word_line)), key=lambda i: (-word_line[i], i))
@@ -572,29 +575,29 @@ def _png_writer(out_dir, w, h):
 
 
 def render_aura(text, out_dir, dur, size, width, height, role, hot_index, lines, enter,
-                leave, pop_t, fps, fill_hex, hot_hex, aura):
+                leave, pop_t, fps, fill_hex, hot_hex, aura, linger=0.0):
     """Text + its shader effect in one GPU page -> out_dir/f%05d.tga at
     (width + 2*off) x (height + 2*off). Returns (pattern, W, H, off)."""
     from . import shaderfx
     os.makedirs(out_dir, exist_ok=True)
     html, _, _, off = page(text, size, width, height, dur, role, hot_index, lines, enter,
-                           leave, pop_t, fill_hex, hot_hex, aura=aura)
+                           leave, pop_t, fill_hex, hot_hex, aura=aura, linger=linger)
     W, H = width + 2 * off, height + 2 * off
-    return shaderfx.render_frames(html, out_dir, W, H, dur, fps), W, H, off
+    return shaderfx.render_frames(html, out_dir, W, H, dur + linger, fps), W, H, off
 
 
 def render(text, out_dir, dur, size, width, height, role, hot_index, lines, enter, leave,
-           pop_t, fps, fill_hex, hot_hex):
+           pop_t, fps, fill_hex, hot_hex, linger=0.0):
     """Frames k%05d.png (n = dur * fps) of the kinetic line, drawn by the GPU.
     Returns the hold window (settle, hold_end) that was rendered once."""
     from . import shaderfx
     os.makedirs(out_dir, exist_ok=True)
     html, settle, exit_t, off = page(text, size, width, height, dur, role, hot_index, lines,
-                                     enter, leave, pop_t, fill_hex, hot_hex)
+                                     enter, leave, pop_t, fill_hex, hot_hex, linger=linger)
     hold_end = exit_t if leave else dur + 1.0
     still = (settle, hold_end) if hold_end > settle else None
     W, H = width + 2 * off, height + 2 * off
-    shaderfx.render_frames(html, out_dir, W, H, dur, fps,
+    shaderfx.render_frames(html, out_dir, W, H, dur + linger, fps,
                            writer=_png_writer(out_dir, W, H), pattern="k%05d.png",
                            still=still)
     return off

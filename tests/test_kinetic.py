@@ -207,7 +207,7 @@ def test_text_layer_skips_the_entrance_only_at_t0(monkeypatch, tmp_path):
     seen = []
     monkeypatch.setattr(kinetic, "hook_line",
                         lambda text, out, dur, hot=None, enter=True, hot_reason=None,
-                        label=None, beat=None: (seen.append(enter), (out + "/k%05d.png", 1, 1, 28))[1])
+                        label=None, beat=None, linger=0.0: (seen.append(enter), (out + "/k%05d.png", 1, 1, 28))[1])
     finalize._text_layer("Open it.", str(tmp_path), "hook", 3.0, t0=0.0)
     finalize._text_layer("Later.", str(tmp_path), "ov0", 3.0, t0=4.4)
     assert seen == [False, True]

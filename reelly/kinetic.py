@@ -281,7 +281,7 @@ async def _render(page, frames, width, height, out_dir, still, profile):
 
 def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
                 fps=None, enter=True, leave=True, kind="line", hot_reason=None,
-                label=None, beat=None):
+                label=None, beat=None, linger=0.0):
     """Render one kinetic line to out_dir/k%05d.png covering local 0..dur.
     beat=(first_beat, period) in local time times the hot word's pop to the
     music (pop_time).
@@ -308,7 +308,7 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
                           lines=wrap_lines(text, size, width, role),
                           enter=enter, leave=leave, pop=pop))
     fps = fps or config.output_fps()
-    n = max(1, int(round(dur * fps)))
+    n = max(1, int(round((dur + linger) * fps)))
     frames = [(i, i / fps) for i in range(n)]
     hold_end = exit_t if leave else dur + 1.0
     # The browser profile lives OUTSIDE out_dir and is removed best-effort: a
@@ -325,7 +325,7 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
             pat, W, H, off = gputext.render_aura(
                 text, out_dir + "_aura", dur, size, cw, ch, role, hi,
                 wrap_lines(text, size, width, role), enter, leave, pop, fps,
-                captions.ink("#FCFCFB"), brandkit.accent(), tfx)
+                captions.ink("#FCFCFB"), brandkit.accent(), tfx, linger=linger)
             print(f"        kinetic {label or kind}: GPU text + '{tfx}' in one pass, "
                   f"{n} frames in {_time.time() - t0:.1f}s")
             return pat, W, H, PAD + off
@@ -338,7 +338,8 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
             from . import brandkit
             margin = gputext.render(text, out_dir, dur, size, cw, ch, role, hi,
                                     wrap_lines(text, size, width, role), enter, leave, pop,
-                                    fps, captions.ink("#FCFCFB"), brandkit.accent())
+                                    fps, captions.ink("#FCFCFB"), brandkit.accent(),
+                                    linger=linger)
             gpu = True
             print(f"        kinetic {label or kind}: GPU text, {n} frames in "
                   f"{_time.time() - t0:.1f}s")
@@ -389,7 +390,7 @@ def _aura(out_dir, n, cw, ch, fps, pop, enter, label):
 
 
 def hook_line(text, out_dir, dur, hot=None, enter=True, hot_reason=None,
-              label=None, beat=None):
+              label=None, beat=None, linger=0.0):
     """The hook / timed line, kinetic: same box, size fitting and font role as
     captions.hook_png, so layout and the collision gate measure the same text.
     enter=False for a line on screen at t = 0 (readable on frame 0)."""
@@ -397,7 +398,7 @@ def hook_line(text, out_dir, dur, hot=None, enter=True, hot_reason=None,
     return render_line(text, out_dir, dur, size=captions.hook_size(text),
                        width=captions.HOOK_WIDTH, role=captions.HOOK_ROLE,
                        hot=hot, enter=enter, hot_reason=hot_reason, label=label,
-                       beat=beat)
+                       beat=beat, linger=linger)
 
 
 def cta_line(text, out_dir, dur, hot=None, hot_reason=None, y=902, beat=None):
