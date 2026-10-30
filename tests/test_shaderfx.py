@@ -274,7 +274,31 @@ def test_sparse_layers_render_only_around_events(tmp_path, monkeypatch):
             shaderfx._write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), bytes(w * h * 4), w, h)
     monkeypatch.setattr(shaderfx, "_shoot_all", fake)
     pat, fps = shaderfx.render_ambient("impact-ambient", str(tmp_path), 2.0, (0, 0.3, 1, 0.7),
-                                       (0.7, 0.8), ctrl={"beats": [0, 0], "pops": [],
-                                                         "onsets": [1.0], "energy": [], "fps": 60})
-    assert fps == 60 and 6 <= len(shot) <= 10                 # ~0.12 s around the hit
+                                       (0.7, 0.8), ctrl={"beats": [0, 0], "pops": [], "onsets": [],
+                                                         "energy": [], "fps": 60,
+                                                         "events": [{"t": 1.0, "x": 0.4, "y": 0.8,
+                                                                     "s": 1.0}]})
+    assert fps == 60 and 14 <= len(shot) <= 19                # ~0.26 s around the impact
     assert len([f for f in os.listdir(tmp_path) if f.startswith("f0") and f.endswith(".tga")]) == 120
+
+
+def test_impacts_need_sound_and_picture_together(tmp_path):
+    """A click with no picture change (a UI blip) is not an impact; a click
+    with a flash is, located where the flash is."""
+    import subprocess
+    from reelly import control
+    v = str(tmp_path / "v.mp4")
+    # 1080x1920, picture rect rows 656..1264; a flash in its upper-left quarter at 1.0 s and 2.0 s
+    lum = "if(between(Y,656,960)*between(X,0,540)*(between(T,1.0,1.06)+between(T,2.0,2.06)),235,40)"
+    subprocess.run([config.FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=black:s=1080x1920:r=60:d=3", "-vf",
+                    f"geq=lum='{lum}':cb=128:cr=128", "-pix_fmt", "yuv420p", v], check=True)
+    a = str(tmp_path / "a.wav")
+    click = "+".join(f"if(between(t,{c},{c}+0.02),0.9*sin(2*PI*1200*t),0)" for c in (0.5, 1.0, 2.0))
+    subprocess.run([config.FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i",
+                    f"aevalsrc='0.01*sin(2*PI*200*t)+{click}':d=3", a], check=True)
+    pic = (0.0, 1 - 1264 / 1920, 1.0, 1 - 656 / 1920)
+    ev = control.events(v, a, pic, 3.0)
+    ts = [e["t"] for e in ev]
+    assert len(ev) == 2 and abs(ts[0] - 1.0) < 0.06 and abs(ts[1] - 2.0) < 0.06, ev
+    assert all(e["x"] < 0.5 and e["y"] > 0.5 for e in ev)      # upper-left of the picture

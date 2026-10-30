@@ -51,7 +51,9 @@ HOST_UNIFORMS = {
     "all": ["uniform vec2 u_res;", "uniform float u_t;", "uniform float u_t0;",
             # the control track (reelly/control.py; effects/lib/control.glsl)
             "uniform vec2 u_beat;", "uniform float u_onsets[16];",
-            "uniform sampler2D u_ctrl;", "uniform float u_ctrl_n;"],
+            "uniform sampler2D u_ctrl;", "uniform float u_ctrl_n;",
+            # real impacts: (t, x, y, strength), x/y in picture uv (control.events)
+            "uniform vec4 u_events[8];"],
     "backdrop": ["uniform sampler2D u_bg;", "uniform sampler2D u_from;"],
     "overlay": [],
     "text": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;",
@@ -224,6 +226,7 @@ window.onerror = function(m){{ window.__reellyError = String(m); }};
 var gl = document.getElementById('c').getContext('webgl',
   {{preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false,
     alpha: true}});
+if (!gl) {{ window.__reellyError = 'NO_WEBGL_CONTEXT'; throw new Error('no WebGL context'); }}
 window.__reellyReady = false;
 function sh(type, src){{ var s = gl.createShader(type); gl.shaderSource(s, src);
   gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
@@ -242,6 +245,7 @@ var U = {uniforms};
 Object.keys(U).forEach(function(k){{
   var v = U[k], l = u(k);
   if (!Array.isArray(v)) gl.uniform1f(l, v);
+  else if (k === 'u_events') gl.uniform4fv(l, new Float32Array(v));
   else if (v.length > 4) gl.uniform1fv(l, new Float32Array(v));
   else gl['uniform' + v.length + 'f'].apply(gl, [l].concat(v));
 }});
@@ -428,6 +432,44 @@ _GRAB = """(async function(ms){
 })(%f)"""
 
 
+# The same frame, sent as raw bytes over a local WebSocket instead of
+# base64 through the DevTools socket (measured 7-37 fps that way: the GPU
+# itself draws + reads back in ~1.6 ms).
+_GRAB_WS = """(async function(ms){
+  var d = window.__reellyDraw(ms); if (d && d.then) { await d; }
+  var c = document.querySelector('canvas'); var gl = c.getContext('webgl');
+  var px = new Uint8Array(c.width * c.height * 4);
+  gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  window.__reellyWs.send(px.buffer);
+  return 1;
+})(%f)"""
+
+
+async def _open_pipe(b):
+    """A local binary WebSocket the page sends frames into: (queue, server),
+    or (None, None) when it cannot open (the base64 path is used)."""
+    try:
+        import websockets
+        q = asyncio.Queue()
+
+        async def handler(ws):
+            async for msg in ws:
+                await q.put(msg)
+        server = await websockets.serve(handler, "127.0.0.1", 0, max_size=None)
+        port = list(server.sockets)[0].getsockname()[1]
+        ok = await b._eval(f"""new Promise(function(res){{
+          var ws = new WebSocket('ws://127.0.0.1:{port}'); ws.binaryType = 'arraybuffer';
+          window.__reellyWs = ws; ws.onopen = function(){{ res(1); }};
+          ws.onerror = function(){{ res(0); }}; setTimeout(function(){{ res(0); }}, 5000); }})""", True)
+        if not ok:
+            server.close()
+            return None, None
+        return q, server
+    except Exception as e:   # noqa: BLE001 -- the slower path still works
+        print(f"[fx   ] binary frame pipe unavailable ({e}); base64 frames")
+        return None, None
+
+
 def _write_tga(path, rgba_bottom_up, w, h):
     """Uncompressed 32-bit TGA with a bottom-left origin: exactly the row
     order readPixels returns, so no flip; ffmpeg reads it with alpha."""
@@ -476,12 +518,20 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
             await asyncio.sleep(0.05)
         else:
             raise RuntimeError("shader page never became ready (no WebGL?)")
-        for n, t in frames:
-            data = await b._eval(_GRAB % (t * 1000.0), True)
-            raw = base64.b64decode(data or "")
-            if len(raw) != w * h * 4:
-                raise RuntimeError(f"shaderfx: frame {n} read back {len(raw)} bytes")
-            _write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), raw, w, h)
+        q, server = await _open_pipe(b)
+        try:
+            for n, t in frames:
+                if q is not None:
+                    await b._eval(_GRAB_WS % (t * 1000.0), True)
+                    raw = await asyncio.wait_for(q.get(), 30)
+                else:
+                    raw = base64.b64decode(await b._eval(_GRAB % (t * 1000.0), True) or "")
+                if len(raw) != w * h * 4:
+                    raise RuntimeError(f"shaderfx: frame {n} read back {len(raw)} bytes")
+                _write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), raw, w, h)
+        finally:
+            if server is not None:
+                server.close()
 
 
 def aura_html(fx, frames, tw, th, fps, accent_hex=None, ink_hex=None, pop_t=None,
@@ -519,6 +569,17 @@ def _blank_tga(path, w, h):
     return path
 
 
+import threading
+# One GPU browser at a time: cuts finalize in parallel, and several headless
+# Chromes starting their GPU processes together lost WebGL contexts on the
+# worker. Each layer is short on the GPU, so taking turns costs little.
+_GPU_LOCK = threading.Lock()
+
+
+def _no_context(e):
+    return "NO_WEBGL_CONTEXT" in str(e) or "no WebGL context" in str(e)
+
+
 def _render_page(html_text, out_dir, w, h, dur, fps, windows=None):
     """Render a page's frames to out_dir/f%05d.tga. windows: [(t0, t1)]
     when the layer is SPARSE (only those instants can show anything): the
@@ -545,15 +606,25 @@ def _render_page(html_text, out_dir, w, h, dur, fps, windows=None):
     t0 = time.time()
     try:
         if todo:
-            try:
-                asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
-            except RuntimeError as e:
-                if "shader page error" in str(e):
-                    raise                              # a broken effect: no retry
-                print(f"[fx   ] {e}; retrying once in a fresh browser")
-                shutil.rmtree(profile, ignore_errors=True)
-                profile = tempfile.mkdtemp(prefix="reelly-chrome-")
-                asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
+            with _GPU_LOCK:
+                try:
+                    asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
+                except RuntimeError as e:
+                    if "shader page error" in str(e) and not _no_context(e):
+                        raise                              # a broken effect: no retry
+                    for attempt in (1, 2):             # the GPU process can lose a start race
+                        print(f"[fx   ] {e}; retry {attempt} in a fresh browser")
+                        shutil.rmtree(profile, ignore_errors=True)
+                        profile = tempfile.mkdtemp(prefix="reelly-chrome-")
+                        time.sleep(1.0 * attempt)
+                        try:
+                            asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
+                            break
+                        except RuntimeError as e2:
+                            if attempt == 2 or ("shader page error" in str(e2)
+                                                and not _no_context(e2)):
+                                raise
+                            e = e2
     finally:
         shutil.rmtree(profile, ignore_errors=True)
     dt = time.time() - t0
@@ -588,9 +659,11 @@ def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level
     w, h = _size(ro.get("scale", AMBIENT_SCALE))
     fps = int(ro.get("fps", AMBIENT_FPS))
     windows = None
+    hold = uniforms(fx, brand_params(fx)).get("u_hold", 0.2)
     if ro.get("sparse") == "onsets":
-        hold = uniforms(fx, brand_params(fx)).get("u_hold", 0.2)
         windows = [(o, o + hold) for o in (ctrl or {}).get("onsets", [])]
+    elif ro.get("sparse") == "events":
+        windows = [(e["t"], e["t"] + hold) for e in (ctrl or {}).get("events", [])]
     pat = _render_page(ambient_html(fx, w, h, accent_hex, pic, clear, pops, end=dur, level=level,
                                     ctrl=ctrl),
                        out_dir, w, h, dur, fps, windows=windows)

@@ -332,6 +332,14 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
         pic = (0.0, 1 - bottom / H, 1.0, 1 - top / H)          # uv, y up
         clear = (1 - top / H, 1 - max(0, text_top) / H)
         pops = _pop_times(plan)
+        ctrl = plan.get("_ctrl")
+        if ctrl is not None and "events" not in ctrl:
+            from . import control
+            try:
+                ctrl["events"] = control.events(src, plan.get("_audio"), pic, dur)
+            except Exception as e:   # noqa: BLE001 -- marks simply do not fire
+                print(f"        impact events failed ({e})")
+                ctrl["events"] = []
         inputs, chain, last = [], [], "0:v"
         for i, name in enumerate(layers, start=1):
             try:
@@ -355,7 +363,8 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
                         dst], check=True)
         c = plan.get("_ctrl") or {}
         print(f"        ambient '{fx}': outside the picture; control: {len(pops)} pop(s), "
-              f"{len(c.get('onsets', []))} onset(s), energy {'on' if c.get('energy') else 'off'}")
+              f"{len(c.get('onsets', []))} onset(s), energy {'on' if c.get('energy') else 'off'}, "
+              f"impacts at {[e['t'] for e in c.get('events', [])]}")
         return dst
     except Exception as e:   # noqa: BLE001 -- the cut ships without the layer
         print(f"        ambient '{fx}' failed ({e}); no ambient layer")
@@ -599,6 +608,7 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                 from . import control
                 try:
                     p["_ctrl"] = control.track(p, voice, dur)
+                    p["_audio"] = voice
                 except Exception as e:   # noqa: BLE001 -- effects run on the beat grid only
                     print(f"        control track failed ({e}); beats and pops only")
             with timing.stage(f"{p['id']} ambient fx", tpath):
@@ -616,6 +626,7 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     vid = outro_mod.append(vid, raw, p, product, td)
             p.pop("_beats", None)          # render-time only, never persisted
             p.pop("_ctrl", None)
+            p.pop("_audio", None)
             # delivery plan: build only the mixes the requested targets need;
             # music is generated only when a music platform asked for it
             mixes = {}
