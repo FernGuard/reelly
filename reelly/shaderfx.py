@@ -263,7 +263,61 @@ function upload(img){{
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
   return tex;
 }}
-window.__reellyDraw = draw;
+var BL = {bloom};
+if (BL) {{
+  // bloom: the effect renders into a texture; its bright part is blurred
+  // (separable Gaussian) and added back, then written to the canvas
+  var VSQ = 'attribute vec2 a; void main(){{ gl_Position = vec4(a, 0.0, 1.0); }}';
+  function prog2(fs){{ var p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, VSQ));
+    gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; }}
+  var BLUR = 'precision highp float; uniform sampler2D s; uniform vec2 r; uniform vec2 dir; uniform float sg; uniform float thr; uniform float ext;\\n' +
+    'vec3 pick(vec2 uv){{ vec4 c = texture2D(s, uv); vec3 pm = c.rgb * (ext > 0.5 ? c.a : 1.0);\\n' +
+    '  return ext > 0.5 ? max(pm - vec3(thr), vec3(0.0)) : c.rgb; }}\\n' +
+    'void main(){{ vec2 uv = gl_FragCoord.xy / r; vec3 acc = vec3(0.0); float ws = 0.0;\\n' +
+    '  for (int i = -24; i <= 24; i++){{ float x = float(i) * sg / 8.0; float w = exp(-0.5 * x * x / (sg * sg));\\n' +
+    '    acc += pick(uv + dir * x / r) * w; ws += w; }}\\n' +
+    '  gl_FragColor = vec4(acc / ws, 1.0); }}';
+  var COMP = 'precision highp float; uniform sampler2D a; uniform sampler2D g; uniform vec2 r; uniform float k;\\n' +
+    'void main(){{ vec2 uv = gl_FragCoord.xy / r; vec4 c = texture2D(a, uv); vec3 gl3 = texture2D(g, uv).rgb * k;\\n' +
+    '  vec3 pm = c.rgb * c.a + gl3; float al = clamp(max(c.a, max(gl3.r, max(gl3.g, gl3.b))), 0.0, 1.0);\\n' +
+    '  gl_FragColor = vec4(al > 0.0 ? min(pm / al, vec3(1.0)) : vec3(0.0), al); }}';
+  function tgt(){{ var t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, {w}, {h}, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    var f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); return [t, f]; }}
+  BL.blur = prog2(BLUR); BL.comp = prog2(COMP); BL.A = tgt(); BL.B = tgt(); BL.C = tgt();
+  gl.activeTexture(gl.TEXTURE0);
+}}
+function quad(p){{ var l = gl.getAttribLocation(p, 'a'); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, 2, gl.FLOAT, false, 0, 0); }}
+function bloomed(ms){{
+  gl.useProgram(prog); quad(prog);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, BL.A[1]); gl.viewport(0, 0, {w}, {h});
+  draw(ms);
+  var bu = function(n){{ return gl.getUniformLocation(BL.blur, n); }};
+  gl.useProgram(BL.blur); quad(BL.blur);
+  gl.uniform2f(bu('r'), {w}, {h}); gl.uniform1f(bu('sg'), BL.sigma); gl.uniform1f(bu('thr'), BL.threshold);
+  gl.uniform1i(bu('s'), 5); gl.activeTexture(gl.TEXTURE5);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, BL.B[1]); gl.bindTexture(gl.TEXTURE_2D, BL.A[0]);
+  gl.uniform2f(bu('dir'), 1, 0); gl.uniform1f(bu('ext'), 1); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, BL.C[1]); gl.bindTexture(gl.TEXTURE_2D, BL.B[0]);
+  gl.uniform2f(bu('dir'), 0, 1); gl.uniform1f(bu('ext'), 0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  var cu = function(n){{ return gl.getUniformLocation(BL.comp, n); }};
+  gl.useProgram(BL.comp); quad(BL.comp);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.uniform2f(cu('r'), {w}, {h}); gl.uniform1f(cu('k'), BL.strength);
+  gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, BL.A[0]); gl.uniform1i(cu('a'), 5);
+  gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, BL.C[0]); gl.uniform1i(cu('g'), 6);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindTexture(gl.TEXTURE_2D, null); gl.activeTexture(gl.TEXTURE0);
+  gl.useProgram(prog); quad(prog); gl.finish();
+}}
+window.__reellyDraw = BL ? bloomed : draw;
 var FR = {frames}, FPS = {fps}, cur = null, blur = null;
 if (FR) {{
   // input frames (the kinetic text): load frame n for the instant, then draw
@@ -362,7 +416,7 @@ def _rgb01(hex_):
 
 
 def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=9,
-          ctrl=None, t_offset=0.0, from_png=None):
+          ctrl=None, t_offset=0.0, from_png=None, bloom=None):
     import io
     import json
     def data_uri(png):
@@ -378,11 +432,19 @@ def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=
     ctrl_png = control.energy_png(ctrl.get("energy")) if ctrl and t_offset == 0 else None
     return _PAGE.format(w=w, h=h, frag=json.dumps(frag), bg=bg,
                         ctrl=json.dumps(ctrl_png) if ctrl_png else "null", frm=frm,
+                        bloom=json.dumps(_bloom(bloom, w)) if bloom and not frames else "null",
                         frames=json.dumps(frames) if frames else "null", fps=int(fps),
                         blur_px=int(blur_px),
                         uniforms=json.dumps({k: (list(v) if isinstance(v, (list, tuple))
                                                  else round(float(v), 4))
                                              for k, v in uniforms.items()}))
+
+
+def _bloom(b, w):
+    """Preset bloom settings, sigma scaled to the layer's render size (the
+    preset states it for a 1080-wide frame)."""
+    return {"threshold": float(b.get("threshold", 0.5)), "strength": float(b.get("strength", 1.0)),
+            "sigma": max(1.0, float(b.get("sigma", 12.0)) * w / 1080.0)}
 
 
 def _render_opts(preset):
@@ -401,7 +463,8 @@ def page_html(fx, backdrop_png, w, h, accent_hex=None, pulse_t=None, band=0.53, 
                        "u_has_from": 1.0 if from_png else 0.0})
     return _page(fragment(load_preset(fx)["effect"]), w, h,
                  {"u_res": (w, h), "u_t0": t0, **U}, backdrop_png, ctrl=ctrl,
-                 t_offset=t0 if ctrl_t0 is None else ctrl_t0, from_png=from_png)
+                 t_offset=t0 if ctrl_t0 is None else ctrl_t0, from_png=from_png,
+                 bloom=_render_opts(fx).get("bloom"))
 
 
 def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops=(),
@@ -414,7 +477,8 @@ def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops
     U = uniforms(fx, brand_params(fx), overrides=over,
                  host={"u_pic": pic, "u_clear": clear, "u_pops": list(pops)[:8], "u_end": end})
     return _page(fragment(load_preset(fx)["effect"]), w, h,
-                 {"u_res": (w, h), "u_t0": 0.0, **U}, ctrl=ctrl)
+                 {"u_res": (w, h), "u_t0": 0.0, **U}, ctrl=ctrl,
+                 bloom=_render_opts(fx).get("bloom"))
 
 
 # One frame, straight off the GPU: seek/draw (awaiting a frame-loading

@@ -114,7 +114,7 @@ def test_page_draws_by_seek_not_by_clock(tmp_path):
     bg = tmp_path / "bg.png"
     Image.new("RGB", (1080, 1920), (20, 10, 30)).save(bg)
     html = shaderfx.page_html("smoke-endcard", str(bg), 540, 960, "#a87cf0", pulse_t=1.25)
-    assert "window.__reellyDraw = draw;" in html
+    assert "window.__reellyDraw = BL ? bloomed : draw;" in html
     assert "requestAnimationFrame" not in html and "performance.now" not in html
     assert "data:image/jpeg;base64," in html          # no file-origin texture taint
     assert '"u_pulse": 1.25' in html
@@ -324,3 +324,45 @@ def test_vision_check_keeps_only_real_hits_and_moves_them(monkeypatch, tmp_path)
     assert len(calls) == 1 and len(calls[0]) == 2           # one call, one image per candidate
     again = control.verify_events("v.mp4", cands, (0, 0.34, 1, 0.66), str(tmp_path), "p", cache)
     assert again == ev and len(calls) == 1                  # cached: no second call
+
+
+def test_bloom_is_a_preset_setting(monkeypatch):
+    monkeypatch.delenv("REELLY_FX_LITE", raising=False)
+    html = shaderfx.ambient_html("embers-ambient", 540, 960)
+    assert '"threshold": 0.12' in html and "window.__reellyDraw = BL ? bloomed : draw;" in html
+    assert '"sigma": 6.0' in html                         # 12 px at 1080 wide, scaled to 540
+    assert "var BL = null" in shaderfx.ambient_html("smoke-ambient", 270, 480)
+    monkeypatch.setenv("REELLY_FX_LITE", "1")
+    assert "var BL = null" in shaderfx.ambient_html("embers-ambient", 270, 480)   # lite: off
+
+
+def test_every_generated_page_script_parses(tmp_path):
+    """A page whose script does not parse never becomes ready and silently
+    falls back to a lesser render (a Python '\\n' inside a JS string did
+    this twice). Every page kind goes through Node's syntax check."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    from PIL import Image
+    from reelly import gputext, kinetic
+    bg = tmp_path / "bg.png"
+    Image.new("RGB", (64, 64)).save(bg)
+    t = "Death threats delivered to your door."
+    lines = kinetic.wrap_lines(t, 58, 800, "headline")
+    pages = {
+        "endcard": shaderfx.page_html("smoke-endcard", str(bg), 540, 960, from_png=str(bg)),
+        "embers": shaderfx.ambient_html("embers-ambient", 540, 960),
+        "impact": shaderfx.ambient_html("impact-ambient", 1080, 1920),
+        "aura": shaderfx.aura_html("smoke-aura", ["file:///k0.png"], 900, 220, 60),
+        "text": gputext.page(t, 58, 856, 227, 3.6, "headline", 2, lines, True, True, 1.0,
+                             "#FCFCFB", "#a87cf0")[0],
+        "text+aura": gputext.page(t, 58, 856, 227, 3.6, "headline", 2, lines, False, True,
+                                  0.5, "#FCFCFB", "#a87cf0", aura="smoke-aura")[0],
+    }
+    for name, html in pages.items():
+        js = tmp_path / f"{name}.js"
+        js.write_text(html[html.index("<script>") + 8:html.rindex("</script>")])
+        r = subprocess.run([node, "--check", str(js)], capture_output=True, text=True)
+        assert r.returncode == 0, f"{name}: {r.stderr[:300]}"

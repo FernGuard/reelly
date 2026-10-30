@@ -5,11 +5,17 @@
   "description": "Brand-neutral outro preset: smoke endcard.",
   "params": {},
   "render": {
-    "scale": 0.5
+    "scale": 0.5,
+    "bloom": {
+      "threshold": 0.45,
+      "strength": 1.2,
+      "sigma": 24
+    }
   },
   "lite": {
     "render": {
-      "scale": 0.25
+      "scale": 0.25,
+      "bloom": null
     }
   }
 }

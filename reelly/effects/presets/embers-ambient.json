@@ -9,12 +9,18 @@
   },
   "render": {
     "scale": 0.5,
-    "fps": 30
+    "fps": 30,
+    "bloom": {
+      "threshold": 0.12,
+      "strength": 6.0,
+      "sigma": 12
+    }
   },
   "lite": {
     "render": {
       "scale": 0.25,
-      "fps": 30
+      "fps": 30,
+      "bloom": null
     }
   }
 }
