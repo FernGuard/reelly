@@ -14,110 +14,191 @@ composites its effect over it, and card._SEEK calls window.__reellyDraw(ms)
 so frame n is exactly time n/fps (seeking, never wall clock). Frames render
 at half resolution (the effects are soft) and are scaled up in the encode.
 
-brand.json "outro_fx": "smoke" turns it on for a brand; REELLY_OUTRO_FX
-(smoke | off) overrides per run.
+PLATFORM (one contract for every effect, every brand, every content type)
+- Effect files, reelly/effects/<name>.glsl: an ISF-style JSON header in a
+  leading /*{...}*/ comment declares the effect's kind (backdrop | overlay |
+  text) and its typed INPUTS (DEFAULT, MIN, MAX, SLOT = a brand colour, HOST
+  = filled per frame by Reelly). The host writes the uniform block and
+  expands #include "lib/..." so effects never declare or copy plumbing.
+- Presets, reelly/effects/presets/<name>.json (brand-neutral, versioned):
+  which effect, where it plays (outro | ambient | text), parameter values,
+  render options (scale, fps, ...) and a "lite" variant.
+- Brand kits choose presets: brand.json "fx": {"outro": "smoke-endcard",
+  "ambient": {"preset": "smoke-ambient", "params": {"u_level": 0.3}},
+  "text": "smoke-aura"}. Legacy keys (outro_fx / ambient_fx / text_fx:
+  "smoke") still work. REELLY_<PLACEMENT>_FX=<preset>|off overrides a run.
+- Resolution order per input: effect DEFAULT < brand SLOT colour < preset
+  params < brand params < host values; every value is type-checked and
+  clamped to MIN/MAX, and an unknown parameter name is refused.
 """
 import asyncio
 import base64
+import json
 import os
+import re
 import shutil
 import tempfile
 
 from . import config
 
+EFFECTS_DIR = os.path.join(os.path.dirname(__file__), "effects")
+PLACEMENTS = ("outro", "ambient", "text")
+KINDS = ("backdrop", "overlay", "text")
+TYPES = {"float": "float", "color": "vec3", "vec2": "vec2", "vec3": "vec3",
+         "vec4": "vec4", "float[8]": "float"}
+# Uniforms the host always provides, per effect kind (never in INPUTS).
+HOST_UNIFORMS = {
+    "all": ["uniform vec2 u_res;", "uniform float u_t;", "uniform float u_t0;"],
+    "backdrop": ["uniform sampler2D u_bg;"],
+    "overlay": [],
+    "text": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;",
+             "uniform vec2 u_tsize;", "uniform float u_off;"],
+}
+# Legacy brand values ("smoke") -> the preset each placement used to mean.
+LEGACY = {("outro", "smoke"): "smoke-endcard", ("ambient", "smoke"): "smoke-ambient",
+          ("text", "smoke"): "smoke-aura"}
+
+
+class EffectError(ValueError):
+    """A malformed effect, preset or brand fx entry (refused before render)."""
+
+
+def load_effect(name):
+    """(header, glsl body with includes expanded) for reelly/effects/<name>.glsl."""
+    if not re.fullmatch(r"[a-z0-9_]+", name or ""):
+        raise EffectError(f"bad effect name {name!r}")
+    path = os.path.join(EFFECTS_DIR, name + ".glsl")
+    if not os.path.exists(path):
+        raise EffectError(f"no effect {name!r}")
+    src = open(path, encoding="utf-8").read()
+    m = re.match(r"\s*/\*(\{.*?\})\*/", src, re.S)
+    if not m:
+        raise EffectError(f"{name}: missing the /*{{...}}*/ JSON header")
+    header = json.loads(m.group(1))
+    kind = (header.get("REELLY") or {}).get("kind")
+    if kind not in KINDS:
+        raise EffectError(f"{name}: REELLY.kind must be one of {KINDS}")
+    for inp in header.get("INPUTS", []):
+        if inp.get("TYPE") not in TYPES or not re.fullmatch(r"u_[a-z0-9_]+", inp.get("NAME", "")):
+            raise EffectError(f"{name}: bad input {inp}")
+    body = src[m.end():]
+
+    def inc(mm):
+        p = os.path.normpath(os.path.join(EFFECTS_DIR, mm.group(1)))
+        if not p.startswith(os.path.join(EFFECTS_DIR, "lib")):
+            raise EffectError(f"{name}: includes only from effects/lib")
+        return open(p, encoding="utf-8").read()
+    body = re.sub(r'#include "([^"]+)"', inc, body)
+    return header, body
+
+
+def fragment(name):
+    """The complete fragment shader: precision, host + declared uniforms, body."""
+    header, body = load_effect(name)
+    kind = header["REELLY"]["kind"]
+    decl = HOST_UNIFORMS["all"] + HOST_UNIFORMS[kind]
+    for inp in header.get("INPUTS", []):
+        t = inp["TYPE"]
+        decl.append(f"uniform {TYPES[t]} {inp['NAME']}" + ("[8];" if t == "float[8]" else ";"))
+    return "precision highp float;\n" + "\n".join(decl) + "\n" + body
+
+
+def load_preset(name):
+    if not re.fullmatch(r"[a-z0-9-]+", name or ""):
+        raise EffectError(f"bad preset name {name!r}")
+    path = os.path.join(EFFECTS_DIR, "presets", name + ".json")
+    if not os.path.exists(path):
+        raise EffectError(f"no preset {name!r}")
+    p = json.load(open(path, encoding="utf-8"))
+    if p.get("version") != 1 or p.get("placement") not in PLACEMENTS:
+        raise EffectError(f"{name}: needs version 1 and a placement in {PLACEMENTS}")
+    load_effect(p.get("effect", ""))
+    return p
+
+
+def presets():
+    d = os.path.join(EFFECTS_DIR, "presets")
+    return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".json"))
+
+
+def _slot(slot):
+    from . import brandkit
+    if slot == "accent":
+        return brandkit.accent()
+    if slot == "ink":
+        return brandkit.ink()
+    if slot == "surface":
+        return brandkit.surface()
+    return None
+
+
+def _coerce(inp, v):
+    t = inp["TYPE"]
+    if t == "color":
+        if isinstance(v, str):
+            v = _rgb01(v)
+        v = [float(x) for x in v]
+        if len(v) != 3:
+            raise EffectError(f"{inp['NAME']}: a colour needs 3 values")
+        return v
+    if t == "float":
+        x = float(v)
+        lo, hi = inp.get("MIN"), inp.get("MAX")
+        if lo is not None:
+            x = max(float(lo), x)
+        if hi is not None:
+            x = min(float(hi), x)
+        return x
+    n = {"vec2": 2, "vec3": 3, "vec4": 4, "float[8]": 8}[t]
+    v = [float(x) for x in v]
+    if t == "float[8]":
+        v = (v + [-1.0] * 8)[:8]
+    if len(v) != n:
+        raise EffectError(f"{inp['NAME']}: needs {n} values")
+    return v
+
+
+def uniforms(preset, brand_params=None, host=None, overrides=None):
+    """Resolved input values for a preset: DEFAULT < SLOT < preset params <
+    brand params < overrides (explicit caller values) < host values."""
+    p = load_preset(preset) if isinstance(preset, str) else preset
+    header, _ = load_effect(p["effect"])
+    inputs = {i["NAME"]: i for i in header.get("INPUTS", [])}
+    out = {}
+    for name, inp in inputs.items():
+        v = inp.get("DEFAULT")
+        if inp.get("SLOT"):
+            sv = _slot(inp["SLOT"])
+            v = sv if sv is not None else v
+        out[name] = v
+    for layer in (p.get("params") or {}, brand_params or {}, overrides or {}):
+        for k, v in layer.items():
+            if k not in inputs:
+                raise EffectError(f"{p['effect']}: unknown parameter {k!r}")
+            if inputs[k].get("HOST") and layer is not overrides:
+                raise EffectError(f"{p['effect']}: {k!r} is set by Reelly per frame")
+            out[k] = v
+    for k, v in (host or {}).items():
+        if k in inputs:
+            out[k] = v
+    return {k: _coerce(inputs[k], v) for k, v in out.items()}
+
+
+def _brand_choice(placement):
+    """(preset name, brand params) the brand kit picks for a placement."""
+    try:
+        from . import brandkit
+        b = brandkit.brand()
+    except Exception:   # noqa: BLE001 -- no kit, no effect
+        return None, {}
+    entry = (b.get("fx") or {}).get(placement) if isinstance(b.get("fx"), dict) else None
+    if entry is None:
+        entry = b.get(f"{placement}_fx")
+    if isinstance(entry, dict):
+        return entry.get("preset"), entry.get("params") or {}
+    return entry, {}
+
 SCALE = 0.5                  # render at half size; the encode scales back up
-FX_NAMES = ("smoke",)
-
-_NOISE = r"""
-float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p){
-  vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-float fbm(vec2 p){
-  float v = 0.0, a = 0.5;
-  for (int i = 0; i < 5; i++){ v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; }
-  return v;
-}
-// The smoke field at uv and absolute time T (one field for the whole video:
-// the cut's ambient layer and the end card sample the same smoke).
-float smoke(vec2 uv, float T){
-  vec2 p = vec2(uv.x * u_res.x / u_res.y, uv.y) * 3.2;
-  float t = T * 0.32;
-  vec2 q = vec2(fbm(p + vec2(0.0, -t)), fbm(p + vec2(5.2, 1.3 - t)));
-  vec2 r = vec2(fbm(p + 3.6 * q + vec2(1.7, 9.2) - vec2(0.0, 1.4 * t)),
-                fbm(p + 3.6 * q + vec2(8.3, 2.8)));
-  return fbm(p + 3.6 * r);
-}
-"""
-
-# Cursed smoke end card: the field rising from the bottom, thinner across the
-# ask's band so the type stays clean, one smoke-torn ring of light when the
-# ask's action word pops (u_pulse, beat-timed), additive over the dimmed
-# final frame. u_t0 continues the cut's ambient smoke without a jump.
-_SMOKE = r"""
-precision highp float;
-uniform vec2 u_res; uniform float u_t; uniform float u_t0; uniform float u_pulse;
-uniform float u_band; uniform vec3 u_accent; uniform sampler2D u_bg;
-""" + _NOISE + r"""
-void main(){
-  vec2 uv = gl_FragCoord.xy / u_res;                 // y up
-  float f = smoke(uv, u_t + u_t0);
-  float rise = smoothstep(1.1, 0.05, uv.y);          // denser low, gone at the top
-  float band = 1.0 - 0.6 * exp(-pow((uv.y - u_band) / 0.075, 2.0));
-  float d = pow(f, 2.4) * rise * band;
-  float ring = 0.0;
-  float dt = u_t - u_pulse;
-  if (u_pulse >= 0.0 && dt > 0.0 && dt < 1.3){
-    vec2 rel = (uv - vec2(0.5, u_band)) * vec2(u_res.x / u_res.y, 1.0);
-    // the ring is torn by the same smoke: a shockwave, not a UI circle
-    float dist = length(rel) + 0.06 * (f - 0.5) + 0.03 * (fbm(rel * 9.0 + u_t) - 0.5);
-    ring = exp(-pow((dist - dt * 0.5) / 0.05, 2.0)) * (1.0 - dt / 1.3) * (0.55 + 0.9 * f);
-    d += 0.25 * exp(-dt * 3.0) * rise;                // the smoke swells with it
-  }
-  // continuing the cut's smoke (u_t0 > 0) the field is already there:
-  // it only needs to spread over the picture, not appear from nothing
-  float fade = smoothstep(u_t0 > 0.0 ? -0.35 : 0.0, 0.45, u_t);
-  vec3 bg = texture2D(u_bg, vec2(uv.x, 1.0 - uv.y)).rgb;
-  vec3 col = bg + u_accent * (1.2 * d + 0.7 * ring) * fade;
-  gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
-}
-"""
-
-# Ambient smoke for the whole cut: only OUTSIDE the game picture (u_pic,
-# the picture rect in uv, y up) and outside the text band above it (u_clear),
-# denser low, a light veil at the top, a swell on each beat-timed pop
-# (u_pops), building over the last 2 s into the end card (u_end). Straight
-# alpha over transparent: the footage is never tinted.
-_AMBIENT = r"""
-precision highp float;
-uniform vec2 u_res; uniform float u_t; uniform float u_t0; uniform vec4 u_pic;
-uniform vec2 u_clear; uniform float u_pops[8]; uniform float u_end;
-uniform float u_level; uniform vec3 u_accent;
-""" + _NOISE + r"""
-void main(){
-  vec2 uv = gl_FragCoord.xy / u_res;
-  float f = smoke(uv, u_t + u_t0);
-  float below = 1.0 - smoothstep(0.0, u_pic.y, uv.y);      // 1 at the frame bottom
-  float above = smoothstep(u_pic.w, 1.0, uv.y);             // 1 at the frame top
-  float edge = 0.012;
-  float outside = 1.0 - smoothstep(u_pic.y - edge, u_pic.y, uv.y)
-                      * (1.0 - smoothstep(u_pic.w, u_pic.w + edge, uv.y));
-  float c = (u_clear.x + u_clear.y) * 0.5, hw = (u_clear.y - u_clear.x) * 0.5 + 0.02;
-  float clear = 1.0 - exp(-pow((uv.y - c) / hw, 6.0));
-  float swell = 0.0;
-  for (int i = 0; i < 8; i++){
-    float dt = u_t - u_pops[i];
-    if (u_pops[i] >= 0.0 && dt > 0.0 && dt < 1.2) swell += exp(-dt * 3.5);
-  }
-  float ramp = smoothstep(u_end - 2.0, u_end, u_t);
-  float amount = u_level * (1.0 + 0.6 * swell) + 0.55 * ramp;
-  float d = pow(f, 2.2) * (1.5 * pow(below, 0.7) + 0.55 * pow(above, 1.3));
-  float a = clamp(d * amount * outside * clear * 1.6, 0.0, 0.85);
-  gl_FragColor = vec4(u_accent, a);
-}
-"""
 
 _PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent}}
@@ -145,7 +226,7 @@ var U = {uniforms};
 Object.keys(U).forEach(function(k){{
   var v = U[k], l = u(k);
   if (!Array.isArray(v)) gl.uniform1f(l, v);
-  else if (k === 'u_pops') gl.uniform1fv(l, new Float32Array(v));
+  else if (v.length > 4) gl.uniform1fv(l, new Float32Array(v));
   else gl['uniform' + v.length + 'f'].apply(gl, [l].concat(v));
 }});
 function draw(ms){{
@@ -206,73 +287,6 @@ else {{
 }}
 </script></body></html>"""
 
-# Text aura: reads each rendered kinetic text frame (u_txt) and builds
-# effects FROM the letters' own shape, so the type stays the pixel-exact
-# kinetic render (readable on frame 0, the footprint the layout gates
-# measured) and only the space around it moves:
-#   - dark smoky wisps rise off the letters (samples of the text alpha below
-#     each pixel, warped by the smoke field), strongest while the line
-#     arrives (u_enter), then lingering; their dark body also lifts the
-#     type off busy footage
-#   - on the beat-timed pop (u_pop) the hot word, found by its accent
-#     colour, throws an accent flare
-# The canvas is the text frame plus u_off px on every side.
-_AURA = r"""
-precision highp float;
-uniform vec2 u_res; uniform vec2 u_tsize; uniform float u_off; uniform float u_t;
-uniform float u_pop; uniform float u_enter; uniform vec3 u_accent; uniform vec3 u_ink;
-uniform float u_t0; uniform sampler2D u_txt; uniform sampler2D u_blur;
-""" + _NOISE + r"""
-vec2 tq(vec2 px, out float inside){                  // canvas px (y up) -> text uv
-  vec2 q = px - vec2(u_off);
-  inside = step(0.0, q.x) * step(0.0, q.y) * step(q.x, u_tsize.x) * step(q.y, u_tsize.y);
-  return vec2(q.x / u_tsize.x, 1.0 - q.y / u_tsize.y);
-}
-vec4 txt(vec2 px){ float i; vec2 q = tq(px, i); return texture2D(u_txt, q) * i; }
-// the same frame, Gaussian-blurred by the browser: smoke and flare come from
-// this soft cloud, never from offset copies of the sharp glyphs
-vec4 blr(vec2 px){ float i; vec2 q = tq(px, i); return texture2D(u_blur, q) * i; }
-float hot(vec4 c){ return c.a * (1.0 - smoothstep(0.12, 0.40, distance(c.rgb, u_accent))); }
-void main(){
-  vec2 px = gl_FragCoord.xy;
-  vec2 uv = px / u_res;
-  float T = u_t + u_t0;
-  vec4 me = txt(px);
-  // rising wisps: text alpha sampled BELOW this pixel, sideways warped
-  float wisp = 0.0, ember = 0.0, wsum = 0.0, esum = 0.0;
-  for (int i = 1; i <= 10; i++){
-    float k = float(i);
-    vec2 at = px + vec2(0.0, -k * 3.2);
-    float w = fbm(vec2(at.x * 0.018, at.y * 0.012 - T * 0.9));
-    at.x += (w - 0.5) * k * 5.0;
-    vec4 c = blr(at);
-    float fall = exp(-k * 0.22);
-    wisp += c.a * fall; wsum += fall;
-    // embers: only the far samples, so they rise ABOVE the word and never
-    // smear across its strokes (a near-sample flare read as a melted double)
-    if (i >= 5) { ember += hot(c) * fall; esum += fall; }
-  }
-  wisp /= wsum; ember /= max(esum, 1e-4);
-  // soft halos: a tight one (the dark body that lifts the type) and a wide
-  // one around the hot word (the flare)
-  vec4 b = blr(px);
-  float halo = b.a;
-  float hhot = hot(b);
-  float n = fbm(uv * vec2(6.0, 3.0) + vec2(0.0, -T * 0.6));
-  float arrive = u_enter * exp(-max(u_t, 0.0) * 2.2);
-  float body = clamp((0.55 * wisp * (0.45 + n) + 0.6 * halo) * (0.75 + 1.3 * arrive), 0.0, 0.78);
-  float dt = u_t - u_pop;
-  float burst = (u_pop >= 0.0 && dt > 0.0) ? exp(-dt * 3.2) : 0.0;
-  float glow = clamp((hhot * 3.2 + ember * 1.6 * n) * burst, 0.0, 0.9);
-  // the wisps carry a little accent so the smoke reads on dark footage too
-  vec3 aura = mix(u_ink, u_accent, clamp(glow * 1.4 + 0.55 * wisp * n, 0.0, 1.0));
-  float aa = max(body, glow);
-  float outA = me.a + aa * (1.0 - me.a);
-  vec3 rgb = (me.rgb * me.a + aura * aa * (1.0 - me.a)) / max(outA, 1e-4);
-  gl_FragColor = vec4(rgb, outA);
-}
-"""
-
 TEXT_OFF = 44                # px of aura room around a kinetic text frame
 
 
@@ -282,17 +296,32 @@ AMBIENT_FPS = 30             # slow smoke; the encode repeats frames for 60
 
 
 def active(kind="outro"):
-    """The effect for this run: kind "outro" (REELLY_OUTRO_FX, brand.json
-    "outro_fx"), "ambient" (REELLY_AMBIENT_FX, "ambient_fx") or "text"
-    (REELLY_TEXT_FX, "text_fx"); None = off."""
+    """The preset name playing at `kind` (outro | ambient | text) for this
+    run, or None (off): REELLY_<KIND>_FX, then the brand kit. Legacy "smoke"
+    maps to the preset it always meant; an unknown preset is refused (off)."""
     v = os.environ.get(f"REELLY_{kind.upper()}_FX", "").strip().lower()
     if not v:
-        try:
-            from . import brandkit
-            v = str(brandkit.brand().get(f"{kind}_fx") or "").strip().lower()
-        except Exception:   # noqa: BLE001 -- no kit, no effect
-            v = ""
-    return v if v in FX_NAMES else None
+        v, _ = _brand_choice(kind)
+        v = str(v or "").strip().lower()
+    if not v or v in ("off", "none", "0"):
+        return None
+    v = LEGACY.get((kind, v), v)
+    try:
+        p = load_preset(v)
+    except EffectError as e:
+        print(f"[fx   ] {kind}: {e}; effect off")
+        return None
+    if p["placement"] != kind:
+        print(f"[fx   ] preset {v!r} plays at {p['placement']}, not {kind}; effect off")
+        return None
+    return v
+
+
+def brand_params(preset):
+    """The brand kit's parameter overrides for a preset (fx.<placement>.params)."""
+    p = load_preset(preset)
+    name, params = _brand_choice(p["placement"])
+    return params if LEGACY.get((p["placement"], str(name)), name) == preset else {}
 
 
 def _rgb01(hex_):
@@ -321,23 +350,78 @@ def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=
                                              for k, v in uniforms.items()}))
 
 
-def page_html(fx, backdrop_png, w, h, accent_hex, pulse_t=None, band=0.53, t0=0.0):
-    """The end-card page: backdrop as a data-URI texture (no file-origin
-    taint), the fragment shader, the __reellyDraw hook."""
-    frag = {"smoke": _SMOKE}[fx]
-    return _page(frag, w, h, {"u_res": (w, h), "u_accent": _rgb01(accent_hex),
-                              "u_pulse": -1.0 if pulse_t is None else pulse_t,
-                              "u_band": band, "u_t0": t0}, backdrop_png)
+def _render_opts(preset):
+    p = load_preset(preset)
+    lite = os.environ.get("REELLY_FX_LITE", "").strip().lower() in ("1", "on", "yes")
+    return {**(p.get("render") or {}), **(((p.get("lite") or {}).get("render") or {}) if lite else {})}
 
 
-def ambient_html(fx, w, h, accent_hex, pic, clear, pops=(), end=0.0, level=0.45):
-    """The cut-long layer: transparent page, smoke outside `pic` (x0, y0,
-    x1, y1 in uv, y up) and outside the `clear` band (y0, y1)."""
-    frag = {"smoke": _AMBIENT}[fx]
-    pops = [float(p) for p in list(pops)[:8]] + [-1.0] * (8 - min(8, len(pops)))
-    return _page(frag, w, h, {"u_res": (w, h), "u_accent": _rgb01(accent_hex),
-                              "u_pic": pic, "u_clear": clear, "u_pops": pops,
-                              "u_end": end, "u_level": level, "u_t0": 0.0})
+def page_html(fx, backdrop_png, w, h, accent_hex=None, pulse_t=None, band=0.53, t0=0.0):
+    """The end-card page (kind backdrop): backdrop as a data-URI texture (no
+    file-origin taint), the effect, the __reellyDraw hook."""
+    over = {"u_accent": accent_hex} if accent_hex else {}
+    U = uniforms(fx, brand_params(fx), overrides=over,
+                 host={"u_pulse": -1.0 if pulse_t is None else pulse_t, "u_band": band})
+    return _page(fragment(load_preset(fx)["effect"]), w, h,
+                 {"u_res": (w, h), "u_t0": t0, **U}, backdrop_png)
+
+
+def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops=(),
+                 end=0.0, level=None):
+    """The cut-long overlay page: transparent, the effect keeps out of `pic`
+    (x0, y0, x1, y1 in uv, y up) and the `clear` band (y0, y1)."""
+    over = {"u_accent": accent_hex} if accent_hex else {}
+    if level is not None:
+        over["u_level"] = level
+    U = uniforms(fx, brand_params(fx), overrides=over,
+                 host={"u_pic": pic, "u_clear": clear, "u_pops": list(pops)[:8], "u_end": end})
+    return _page(fragment(load_preset(fx)["effect"]), w, h,
+                 {"u_res": (w, h), "u_t0": 0.0, **U})
+
+
+# One frame, straight off the GPU: seek/draw (awaiting a frame-loading
+# page), read the canvas back, hand it out as one base64 blob. No screenshot,
+# no compositor, no PNG encode: the probe on the PC measured the full-page
+# PNG screenshot at ~0.24 s/frame, the GPU draw + readback at ~1.6 ms.
+_GRAB = """(async function(ms){
+  var d = window.__reellyDraw(ms); if (d && d.then) { await d; }
+  var c = document.querySelector('canvas'); var gl = c.getContext('webgl');
+  var px = new Uint8Array(c.width * c.height * 4);
+  gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  return await new Promise(function(res){ var f = new FileReader();
+    f.onload = function(){ res(f.result.slice(f.result.indexOf(',') + 1)); };
+    f.readAsDataURL(new Blob([px])); });
+})(%f)"""
+
+
+def _write_tga(path, rgba_bottom_up, w, h):
+    """Uncompressed 32-bit TGA with a bottom-left origin: exactly the row
+    order readPixels returns, so no flip; ffmpeg reads it with alpha."""
+    import numpy as np
+    a = np.frombuffer(rgba_bottom_up, np.uint8).reshape(h, w, 4)[..., [2, 1, 0, 3]]
+    head = bytes([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                  w & 255, w >> 8, h & 255, h >> 8, 32, 8])
+    with open(path, "wb") as f:
+        f.write(head)
+        f.write(a.tobytes())
+
+
+_RENDERER = [None]
+
+
+async def _log_renderer(b):
+    """Log the WebGL renderer once per process; with REELLY_GPU=gpu a silent
+    fallback to a software renderer is an error, not a slow surprise."""
+    if _RENDERER[0] is not None:
+        return
+    r = await b._eval("""(function(){ var g = document.createElement('canvas').getContext('webgl');
+      if (!g) return 'no WebGL'; var d = g.getExtension('WEBGL_debug_renderer_info');
+      return d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER); })()""")
+    _RENDERER[0] = r or "unknown"
+    print(f"[gpu  ] {_RENDERER[0]}")
+    if os.environ.get("REELLY_GPU", "").strip().lower() == "gpu" and \
+            ("swiftshader" in _RENDERER[0].lower() or "no webgl" in _RENDERER[0].lower()):
+        raise RuntimeError(f"REELLY_GPU=gpu but Chrome rendered with {_RENDERER[0]}")
 
 
 async def _shoot_all(page, frames, w, h, out_dir, profile):
@@ -348,6 +432,7 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
         await b("Emulation.setDefaultBackgroundColorOverride",
                 {"color": {"r": 0, "g": 0, "b": 0, "a": 0}})
         await b.load("file://" + page)
+        await _log_renderer(b)
         for _ in range(100):
             if await b._eval("window.__reellyReady === true"):
                 break
@@ -355,32 +440,41 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
         else:
             raise RuntimeError("shader page never became ready (no WebGL?)")
         for n, t in frames:
-            await b.shoot(t, os.path.join(out_dir, f"f{n:05d}.png"))
+            data = await b._eval(_GRAB % (t * 1000.0), True)
+            raw = base64.b64decode(data or "")
+            if len(raw) != w * h * 4:
+                raise RuntimeError(f"shaderfx: frame {n} read back {len(raw)} bytes")
+            _write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), raw, w, h)
 
 
-def aura_html(fx, frames, tw, th, fps, accent_hex, ink_hex="#0b0710", pop_t=None,
-              enter=True, off=TEXT_OFF, t0=0.0):
-    """The text aura page over a kinetic frame sequence (file URIs)."""
-    frag = {"smoke": _AURA}[fx]
+def aura_html(fx, frames, tw, th, fps, accent_hex=None, ink_hex=None, pop_t=None,
+              enter=True, off=None, t0=0.0):
+    """The text page (kind text) over a kinetic frame sequence (file URIs)."""
+    ro = _render_opts(fx)
+    off = int(ro.get("text_off", TEXT_OFF) if off is None else off)
+    over = {k: v for k, v in (("u_accent", accent_hex), ("u_ink", ink_hex)) if v}
+    U = uniforms(fx, brand_params(fx), overrides=over,
+                 host={"u_pop": -1.0 if pop_t is None else pop_t, "u_enter": 1.0 if enter else 0.0})
     w, h = tw + 2 * off, th + 2 * off
-    return _page(frag, w, h, {"u_res": (w, h), "u_tsize": (tw, th), "u_off": off,
-                              "u_accent": _rgb01(accent_hex), "u_ink": _rgb01(ink_hex),
-                              "u_pop": -1.0 if pop_t is None else pop_t,
-                              "u_enter": 1.0 if enter else 0.0, "u_t0": t0},
-                 frames=frames, fps=fps, blur_px=12)
+    return _page(fragment(load_preset(fx)["effect"]), w, h,
+                 {"u_res": (w, h), "u_tsize": (tw, th), "u_off": off, "u_t0": t0, **U},
+                 frames=frames, fps=fps, blur_px=ro.get("blur_px", 12))
 
 
 def render_aura(fx, in_dir, n, tw, th, fps, out_dir, pop_t=None, enter=True,
                 accent_hex=None, t0=0.0):
-    """Aura frames for a kinetic line: in_dir/k%05d.png (n frames, tw x th)
-    -> out_dir/f%05d.png at (tw + 2*TEXT_OFF) x (th + 2*TEXT_OFF)."""
+    """Text-effect frames for a kinetic line: in_dir/k%05d.png (n frames,
+    tw x th) -> out_dir/f%05d.png at (tw + 2*off) x (th + 2*off)."""
     from pathlib import Path
-    from . import brandkit
     frames = [Path(os.path.join(in_dir, f"k{i:05d}.png")).resolve().as_uri() for i in range(n)]
-    w, h = tw + 2 * TEXT_OFF, th + 2 * TEXT_OFF
-    return _render_page(aura_html(fx, frames, tw, th, fps, accent_hex or brandkit.accent(),
-                                  pop_t=pop_t, enter=enter, t0=t0),
-                        out_dir, w, h, n / fps, fps)
+    off = text_off(fx)
+    return _render_page(aura_html(fx, frames, tw, th, fps, accent_hex, pop_t=pop_t,
+                                  enter=enter, off=off, t0=t0),
+                        out_dir, tw + 2 * off, th + 2 * off, n / fps, fps)
+
+
+def text_off(fx):
+    return int(_render_opts(fx).get("text_off", TEXT_OFF))
 
 
 def _render_page(html_text, out_dir, w, h, dur, fps):
@@ -390,15 +484,19 @@ def _render_page(html_text, out_dir, w, h, dur, fps):
         f.write(html_text)
     n = max(1, int(round(dur * fps)))
     profile = tempfile.mkdtemp(prefix="reelly-chrome-")
+    import time
+    t0 = time.time()
     try:
         asyncio.run(_shoot_all(page, [(i, i / fps) for i in range(n)], w, h,
                                out_dir, profile))
     finally:
         shutil.rmtree(profile, ignore_errors=True)
-    made = len([x for x in os.listdir(out_dir) if x.startswith("f") and x.endswith(".png")])
+    dt = time.time() - t0
+    print(f"[fx   ] {n} frames {w}x{h} in {dt:.1f}s ({n / max(dt, 1e-6):.0f} fps)")
+    made = len([x for x in os.listdir(out_dir) if x.startswith("f") and x.endswith(".tga")])
     if made < n:
         raise RuntimeError(f"shaderfx: only {made}/{n} frames rendered")
-    return os.path.join(out_dir, "f%05d.png")
+    return os.path.join(out_dir, "f%05d.tga")
 
 
 def _size(scale):
@@ -407,21 +505,20 @@ def _size(scale):
 
 def render(fx, backdrop_png, out_dir, dur, accent_hex=None, pulse_t=None,
            band=0.53, fps=None, t0=0.0):
-    """The end card: `fx` over the backdrop to out_dir/f%05d.png (half
-    size). pulse_t: local time of the ask's pop (the ring of light); band:
-    the ask's height from the bottom; t0: where the cut's ambient smoke
-    left off, so the field continues."""
-    from . import brandkit
-    w, h = _size(SCALE)
-    return _render_page(page_html(fx, backdrop_png, w, h, accent_hex or brandkit.accent(),
-                                  pulse_t, band, t0),
+    """The end card: preset `fx` over the backdrop to out_dir/f%05d.png.
+    pulse_t: local time of the ask's pop; band: the ask's height from the
+    bottom; t0: where the cut's ambient field left off."""
+    w, h = _size(_render_opts(fx).get("scale", SCALE))
+    return _render_page(page_html(fx, backdrop_png, w, h, accent_hex, pulse_t, band, t0),
                         out_dir, w, h, dur, fps or config.output_fps())
 
 
-def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level=0.45):
-    """The cut-long layer (quarter size, AMBIENT_FPS, straight alpha)."""
-    from . import brandkit
-    w, h = _size(AMBIENT_SCALE)
-    return _render_page(ambient_html(fx, w, h, accent_hex or brandkit.accent(), pic, clear,
-                                     pops, end=dur, level=level),
-                        out_dir, w, h, dur, AMBIENT_FPS)
+def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level=None):
+    """The cut-long overlay (straight alpha) at the preset's scale and fps.
+    Returns (pattern, fps)."""
+    ro = _render_opts(fx)
+    w, h = _size(ro.get("scale", AMBIENT_SCALE))
+    fps = int(ro.get("fps", AMBIENT_FPS))
+    pat = _render_page(ambient_html(fx, w, h, accent_hex, pic, clear, pops, end=dur, level=level),
+                       out_dir, w, h, dur, fps)
+    return pat, fps

@@ -343,7 +343,7 @@ def _aura(out_dir, n, cw, ch, fps, pop, enter, label):
     try:
         pat = shaderfx.render_aura(fx, out_dir, n, cw, ch, fps, out_dir + "_aura",
                                    pop_t=pop, enter=enter)
-        off = shaderfx.TEXT_OFF
+        off = shaderfx.text_off(fx)
         print(f"        kinetic {label}: '{fx}' aura"
               + (f", flare with the pop at {pop:.2f}s" if pop is not None else ""))
         return pat, cw + 2 * off, ch + 2 * off, PAD + off

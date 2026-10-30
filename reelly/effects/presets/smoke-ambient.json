@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "effect": "smoke_ambient",
+  "placement": "ambient",
+  "description": "Brand-neutral ambient preset: smoke ambient.",
+  "params": {
+    "u_level": 0.45
+  },
+  "render": {
+    "scale": 0.25,
+    "fps": 30
+  },
+  "lite": {
+    "render": {
+      "scale": 0.25,
+      "fps": 30
+    }
+  }
+}

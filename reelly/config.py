@@ -352,6 +352,23 @@ def final_encode_args():
     return list(_FINAL_ENCODE_ARGS)
 
 
+def webgl_flags():
+    """Chrome flags for WebGL effect pages. REELLY_GPU = auto | gpu | software.
+
+    Measured on the Windows worker (2026-10-30, running as SYSTEM): D3D11
+    reaches real hardware, but Chrome takes the Intel iGPU unless asked for
+    the high-performance one; with it, the RTX 5090 drew + read back a full
+    1080x1920 smoke frame at 635 fps (SwiftShader 23.5, Intel 165). auto =
+    that GPU on Windows, the deterministic software GPU elsewhere."""
+    mode = os.environ.get("REELLY_GPU", "auto").strip().lower()
+    software = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
+    gpu = ["--use-angle=d3d11", "--use-gl=angle", "--ignore-gpu-blocklist",
+           "--force_high_performance_gpu"]
+    if mode == "software" or (mode == "auto" and os.name != "nt"):
+        return software
+    return gpu
+
+
 def _videotoolbox_works():
     """One cheap probe per process: encode 0.2s of testsrc to null."""
     import subprocess

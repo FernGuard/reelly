@@ -324,10 +324,10 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
         pic = (0.0, 1 - bottom / H, 1.0, 1 - top / H)          # uv, y up
         clear = (1 - top / H, 1 - max(0, text_top) / H)
         pops = _pop_times(plan)
-        seq = shaderfx.render_ambient(fx, os.path.join(workdir, "fx_ambient"), dur,
-                                      pic, clear, pops)
+        seq, fx_fps = shaderfx.render_ambient(fx, os.path.join(workdir, "fx_ambient"), dur,
+                                              pic, clear, pops)
         subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src,
-                        "-framerate", str(shaderfx.AMBIENT_FPS), "-i", seq,
+                        "-framerate", str(fx_fps), "-i", seq,
                         "-filter_complex",
                         "[1:v]scale=1080:1920:flags=bicubic,format=rgba[fx];"
                         "[0:v][fx]overlay=0:0:eof_action=pass:shortest=0,format=yuv420p[v]",

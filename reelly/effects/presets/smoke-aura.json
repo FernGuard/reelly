@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "effect": "smoke_aura",
+  "placement": "text",
+  "description": "Brand-neutral text preset: smoke aura.",
+  "params": {},
+  "render": {
+    "blur_px": 12,
+    "text_off": 44
+  },
+  "lite": {
+    "render": {
+      "blur_px": 12,
+      "text_off": 44,
+      "scale": 0.25
+    }
+  }
+}

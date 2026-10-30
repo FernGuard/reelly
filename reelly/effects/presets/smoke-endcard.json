@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "effect": "smoke_endcard",
+  "placement": "outro",
+  "description": "Brand-neutral outro preset: smoke endcard.",
+  "params": {},
+  "render": {
+    "scale": 0.5
+  },
+  "lite": {
+    "render": {
+      "scale": 0.25
+    }
+  }
+}

@@ -1,42 +1,128 @@
-"""Shader end card: opt-in per brand, deterministic page, wired into the outro."""
+"""Shader effects platform: effect files, presets, brand choice, GPU tier, and
+the three layers built on it (end card, ambient, text)."""
+import json
+import os
+
 import pytest
 
-from reelly import card, outro, shaderfx
+from reelly import card, config, outro, shaderfx
 
 
-def test_off_unless_the_brand_or_the_run_asks(monkeypatch):
+def _brand(monkeypatch, data):
     from reelly import brandkit
-    monkeypatch.delenv("REELLY_OUTRO_FX", raising=False)
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {})
-    assert shaderfx.active() is None
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"outro_fx": "smoke"})
-    assert shaderfx.active() == "smoke"
-    monkeypatch.setenv("REELLY_OUTRO_FX", "off")
-    assert shaderfx.active() is None                  # the run overrides the kit
-    monkeypatch.setenv("REELLY_OUTRO_FX", "lasers")
-    assert shaderfx.active() is None                  # unknown effects are refused
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: data)
 
+
+# ------------------------------------------------------------- the contract
+
+def test_every_effect_and_preset_validates():
+    for name in shaderfx.presets():
+        p = shaderfx.load_preset(name)
+        header, body = shaderfx.load_effect(p["effect"])
+        assert header["LICENSE"] in ("MIT", "CC0", "BSD-3-Clause", "Apache-2.0")
+        assert "#include" not in body                       # includes expanded
+        frag = shaderfx.fragment(p["effect"])
+        assert frag.startswith("precision highp float;") and "void main()" in frag
+        for inp in header["INPUTS"]:                          # host declares them all
+            assert f" {inp['NAME']}" in frag
+
+
+def test_settings_resolve_in_order(monkeypatch):
+    monkeypatch.delenv("REELLY_AMBIENT_FX", raising=False)
+    from reelly import brandkit
+    monkeypatch.setattr(brandkit, "accent", lambda: "#ff0000")      # brand slot
+    u = shaderfx.uniforms("smoke-ambient")
+    assert u["u_accent"] == [1.0, 0.0, 0.0] and u["u_level"] == 0.45   # slot, preset
+    u = shaderfx.uniforms("smoke-ambient", brand_params={"u_level": 0.2})
+    assert u["u_level"] == 0.2                                         # brand beats preset
+    u = shaderfx.uniforms("smoke-ambient", brand_params={"u_level": 0.2},
+                          overrides={"u_level": 0.3, "u_accent": "#00ff00"})
+    assert u["u_level"] == 0.3 and u["u_accent"] == [0.0, 1.0, 0.0]   # caller beats brand
+    u = shaderfx.uniforms("smoke-ambient", host={"u_pops": [1.0, 2.0]})
+    assert u["u_pops"] == [1.0, 2.0] + [-1.0] * 6                      # padded array
+    assert shaderfx.uniforms("smoke-ambient", brand_params={"u_level": 9})["u_level"] == 1.5
+
+
+def test_bad_settings_are_refused_before_render():
+    with pytest.raises(shaderfx.EffectError):
+        shaderfx.uniforms("smoke-ambient", brand_params={"u_glitter": 1})
+    with pytest.raises(shaderfx.EffectError):                 # per-frame values are Reelly's
+        shaderfx.uniforms("smoke-ambient", brand_params={"u_end": 3})
+    with pytest.raises(shaderfx.EffectError):
+        shaderfx.load_preset("../../etc")
+    with pytest.raises(shaderfx.EffectError):
+        shaderfx.load_effect("nope")
+
+
+def test_includes_only_from_the_effect_library(tmp_path, monkeypatch):
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "evil.glsl").write_text('/*{"REELLY": {"kind": "overlay"}, "INPUTS": []}*/\n'
+                                        '#include "../secret.txt"\nvoid main(){}')
+    monkeypatch.setattr(shaderfx, "EFFECTS_DIR", str(tmp_path))
+    with pytest.raises(shaderfx.EffectError):
+        shaderfx.load_effect("evil")
+
+
+def test_brand_picks_presets_and_params(monkeypatch):
+    for k in ("OUTRO", "AMBIENT", "TEXT"):
+        monkeypatch.delenv(f"REELLY_{k}_FX", raising=False)
+    _brand(monkeypatch, {"fx": {"ambient": {"preset": "smoke-ambient", "params": {"u_level": 0.2}},
+                                "outro": "smoke-endcard"}})
+    assert shaderfx.active("ambient") == "smoke-ambient"
+    assert shaderfx.brand_params("smoke-ambient") == {"u_level": 0.2}
+    assert shaderfx.active("outro") == "smoke-endcard"
+    assert shaderfx.active("text") is None
+
+
+def test_legacy_keys_and_overrides(monkeypatch):
+    for k in ("OUTRO", "AMBIENT", "TEXT"):
+        monkeypatch.delenv(f"REELLY_{k}_FX", raising=False)
+    _brand(monkeypatch, {"outro_fx": "smoke", "ambient_fx": "smoke", "text_fx": "smoke"})
+    assert shaderfx.active("outro") == "smoke-endcard"
+    assert shaderfx.active("ambient") == "smoke-ambient"
+    assert shaderfx.active("text") == "smoke-aura"
+    monkeypatch.setenv("REELLY_OUTRO_FX", "off")
+    assert shaderfx.active("outro") is None                   # the run overrides the kit
+    monkeypatch.setenv("REELLY_OUTRO_FX", "lasers")
+    assert shaderfx.active("outro") is None                   # unknown preset: off
+    monkeypatch.setenv("REELLY_OUTRO_FX", "smoke-ambient")
+    assert shaderfx.active("outro") is None                   # wrong placement: off
+
+
+def test_lite_variant(monkeypatch):
+    monkeypatch.setenv("REELLY_FX_LITE", "1")
+    assert shaderfx._render_opts("smoke-endcard")["scale"] == 0.25
+    monkeypatch.delenv("REELLY_FX_LITE")
+    assert shaderfx._render_opts("smoke-endcard")["scale"] == 0.5
+
+
+def test_gpu_tier(monkeypatch):
+    monkeypatch.setenv("REELLY_GPU", "software")
+    assert "--use-angle=swiftshader" in config.webgl_flags()
+    monkeypatch.setenv("REELLY_GPU", "gpu")
+    flags = config.webgl_flags()
+    assert "--use-angle=d3d11" in flags and "--force_high_performance_gpu" in flags
+    assert "--disable-gpu" in card._Browser("p").gpu_flags   # DOM text keeps no GPU
+    assert card._Browser("p", webgl=True).gpu_flags == flags
+
+
+# ------------------------------------------------------------- the layers
 
 def test_page_draws_by_seek_not_by_clock(tmp_path):
     from PIL import Image
     bg = tmp_path / "bg.png"
     Image.new("RGB", (1080, 1920), (20, 10, 30)).save(bg)
-    html = shaderfx.page_html("smoke", str(bg), 540, 960, "#a87cf0", pulse_t=1.25)
-    assert "window.__reellyDraw = function(ms)" in html
+    html = shaderfx.page_html("smoke-endcard", str(bg), 540, 960, "#a87cf0", pulse_t=1.25)
+    assert "window.__reellyDraw = draw;" in html
     assert "requestAnimationFrame" not in html and "performance.now" not in html
     assert "data:image/jpeg;base64," in html          # no file-origin texture taint
-    assert "\"u_pulse\": 1.25" in html
+    assert '"u_pulse": 1.25' in html
 
 
-def test_seek_calls_the_draw_hook_and_counts_it():
-    assert "window.__reellyDraw(ms)" in card._SEEK
+def test_seek_calls_the_draw_hook_and_waits_for_it():
+    assert "var drawn = window.__reellyDraw ? window.__reellyDraw(ms) : 1;" in card._SEEK
+    assert "Promise.all([drawn].concat(" in card._SEEK
     assert "window.__reellyDraw ? 1 : 0" in card._SEEK
-
-
-def test_only_webgl_pages_get_the_software_gpu(tmp_path):
-    assert "--disable-gpu" in card._Browser(str(tmp_path)).gpu_flags
-    flags = card._Browser(str(tmp_path), webgl=True).gpu_flags
-    assert "--use-angle=swiftshader" in flags and "--disable-gpu" not in flags
 
 
 def test_outro_uses_the_shader_sequence_as_backdrop(monkeypatch):
@@ -51,7 +137,7 @@ def test_outro_uses_the_shader_sequence_as_backdrop(monkeypatch):
 
 
 def test_shader_failure_falls_back_to_the_still(monkeypatch, tmp_path):
-    monkeypatch.setattr(shaderfx, "active", lambda: "smoke")
+    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": "smoke-endcard")
     def boom(*a, **k):
         raise RuntimeError("no WebGL")
     monkeypatch.setattr(shaderfx, "render", boom)
@@ -59,41 +145,32 @@ def test_shader_failure_falls_back_to_the_still(monkeypatch, tmp_path):
     assert outro._shader_backdrop("b.png", plan, str(tmp_path), 2.8, 12.0) is None
 
 
-def test_ambient_is_its_own_switch(monkeypatch):
-    from reelly import brandkit
-    monkeypatch.delenv("REELLY_AMBIENT_FX", raising=False)
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"outro_fx": "smoke"})
-    assert shaderfx.active("ambient") is None
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"ambient_fx": "smoke"})
-    assert shaderfx.active("ambient") == "smoke"
-
-
-def test_ambient_page_keeps_the_picture_and_text_band_clear():
-    html = shaderfx.ambient_html("smoke", 270, 480, "#a87cf0", pic=(0, 0.34, 1, 0.66),
+def test_ambient_page_keeps_protected_regions_clear():
+    html = shaderfx.ambient_html("smoke-ambient", 270, 480, "#a87cf0", pic=(0, 0.34, 1, 0.66),
                                  clear=(0.66, 0.8), pops=[0.55, 4.3], end=15.0)
-    assert '"u_pic": [0, 0.34, 1, 0.66]' in html and '"u_clear": [0.66, 0.8]' in html
-    assert '"u_pops": [0.55, 4.3, -1.0' in html          # padded to the 8 slots
+    assert '"u_pic": [0.0, 0.34, 1.0, 0.66]' in html and '"u_clear": [0.66, 0.8]' in html
+    assert '"u_pops": [0.55, 4.3, -1.0' in html
     assert "background:transparent" in html
 
 
 def test_pop_times_follow_the_beat_grid():
-    from reelly import finalize, kinetic
+    from reelly import finalize
     plan = {"_beats": (3.6, 0.48),
             "hook": {"text": "Death threats delivered to your door.", "show_s": 3.6,
                      "hot": "delivered"},
             "overlay_lines": [{"t": 8.0, "show_s": 3.0, "text": "Still alive."}]}
     pops = finalize._pop_times(plan)
     assert len(pops) == 2
-    for p in pops:                                        # each on a beat
-        assert ((p - 3.6) / 0.48) % 1 == pytest.approx(0, abs=1e-6) or \
-               ((p - 3.6) / 0.48) % 1 == pytest.approx(1, abs=1e-6)
+    for p in pops:
+        f = ((p - 3.6) / 0.48) % 1
+        assert f == pytest.approx(0, abs=1e-6) or f == pytest.approx(1, abs=1e-6)
 
 
 def test_ambient_pass_is_skipped_or_falls_back(monkeypatch, tmp_path):
     from reelly import finalize, kinetic
     monkeypatch.setattr(shaderfx, "active", lambda kind="outro": None)
     assert finalize._ambient_pass("raw.mp4", "a.mp4", {}, 10.0, str(tmp_path), None) == "raw.mp4"
-    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": "smoke")
+    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": "smoke-ambient")
     monkeypatch.setattr(kinetic, "enabled", lambda: True)
     def boom(*a, **k):
         raise RuntimeError("no WebGL")
@@ -102,38 +179,39 @@ def test_ambient_pass_is_skipped_or_falls_back(monkeypatch, tmp_path):
                                   str(tmp_path), None) == "raw.mp4"
 
 
-def test_text_aura_is_its_own_switch(monkeypatch):
-    from reelly import brandkit
-    monkeypatch.delenv("REELLY_TEXT_FX", raising=False)
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"outro_fx": "smoke"})
-    assert shaderfx.active("text") is None
-    monkeypatch.setenv("REELLY_TEXT_FX", "smoke")
-    assert shaderfx.active("text") == "smoke"
-
-
-def test_aura_page_reads_the_kinetic_frames_and_a_blurred_copy():
-    html = shaderfx.aura_html("smoke", ["file:///w/k00000.png", "file:///w/k00001.png"],
+def test_aura_page_reads_the_text_frames_and_a_blurred_copy():
+    html = shaderfx.aura_html("smoke-aura", ["file:///w/k00000.png", "file:///w/k00001.png"],
                               900, 220, 60, "#a87cf0", pop_t=1.1)
     assert '"file:///w/k00001.png"' in html and "FPS = 60" in html
-    assert "x.filter = 'blur(" in html                 # soft cloud, not glyph copies
+    assert "x.filter = 'blur(12px)'" in html          # soft cloud, not glyph copies
     assert '"u_tsize": [900, 220]' in html and '"u_pop": 1.1' in html
-    assert "background:transparent" in html
 
 
-def test_seek_waits_for_an_async_draw():
-    assert "var drawn = window.__reellyDraw ? window.__reellyDraw(ms) : 1;" in card._SEEK
-    assert "Promise.all([drawn].concat(" in card._SEEK
-
-
-def test_kinetic_line_falls_back_to_plain_frames(monkeypatch, tmp_path):
+def test_text_layer_falls_back_to_plain_frames(monkeypatch, tmp_path):
     from reelly import kinetic
-    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": "smoke")
+    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": "smoke-aura")
     def boom(*a, **k):
         raise RuntimeError("no WebGL")
     monkeypatch.setattr(shaderfx, "render_aura", boom)
     assert kinetic._aura(str(tmp_path), 10, 900, 220, 60, 0.5, True, "hook") is None
     monkeypatch.setattr(shaderfx, "render_aura", lambda *a, **k: "/a/f%05d.png")
     pat, w, h, pad = kinetic._aura(str(tmp_path), 10, 900, 220, 60, 0.5, True, "hook")
-    off = shaderfx.TEXT_OFF
+    off = shaderfx.text_off("smoke-aura")
     assert (pat, w, h, pad) == ("/a/f%05d.png", 900 + 2 * off, 220 + 2 * off,
                                 kinetic.PAD + off)
+
+
+def test_frames_are_written_as_bottom_up_tga(tmp_path):
+    """readPixels rows come bottom-up: a TGA with a bottom-left origin keeps
+    them as they are, and ffmpeg decodes the alpha."""
+    import subprocess
+    w, h = 4, 2
+    bottom = bytes([255, 0, 0, 255]) * w            # first row read = bottom row: red
+    top = bytes([0, 0, 255, 128]) * w               # top row: half-transparent blue
+    p = tmp_path / "f00000.tga"
+    shaderfx._write_tga(str(p), bottom + top, w, h)
+    r = subprocess.run([config.FFMPEG, "-v", "error", "-i", str(p), "-f", "rawvideo",
+                        "-pix_fmt", "rgba", "-"], capture_output=True, check=True)
+    px = r.stdout
+    assert px[:4] == bytes([0, 0, 255, 128])       # decoded top-left = top row
+    assert px[-4:] == bytes([255, 0, 0, 255])      # decoded bottom-right = bottom row

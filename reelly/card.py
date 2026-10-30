@@ -536,8 +536,7 @@ class _Browser:
         # WebGL pages (shaderfx) get the software GPU: deterministic on every
         # machine, no driver or display needed (the PC worker runs headless,
         # as SYSTEM). Everything else keeps the GPU off entirely.
-        self.gpu_flags = (["--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                           "--ignore-gpu-blocklist"] if webgl else ["--disable-gpu"])
+        self.gpu_flags = config.webgl_flags() if webgl else ["--disable-gpu"]
         self.proc = None
         self.ws = None
         self.sid = None
