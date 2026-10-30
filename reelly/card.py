@@ -527,12 +527,67 @@ def _free_port():
     return port
 
 
+# The GPU browser is SHARED for the whole run: one Chrome with the GPU,
+# started once, a fresh tab per layer. Launching a GPU Chrome per layer
+# back to back sometimes caught the GPU still releasing the last one (no
+# WebGL context / page never ready on the worker) and cost ~1-2 s each.
+_SHARED = {}
+
+
+def _shared_gpu_chrome(flags):
+    """(port) of the run's shared GPU Chrome, launched on first use."""
+    import atexit
+    import subprocess
+    import tempfile
+    proc = _SHARED.get("proc")
+    if proc is not None and proc.poll() is None:
+        return _SHARED["port"]
+    port = _free_port()
+    profile = tempfile.mkdtemp(prefix="reelly-gpu-chrome-")
+    proc = subprocess.Popen(
+        [CHROME, "--headless=new", *flags, "--hide-scrollbars", "--no-first-run",
+         "--no-default-browser-check", "--disable-extensions", "--use-mock-keychain",
+         "--password-store=basic", "--disable-breakpad", "--disable-crash-reporter",
+         "--disable-features=DialMediaRouteProvider,MediaRouter",
+         "--allow-file-access-from-files", "--force-device-scale-factor=1",
+         # every layer opens in a new tab: background tabs must not be
+         # throttled (their image loads stalled, pages never became ready)
+         "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+         "--disable-backgrounding-occluded-windows",
+         f"--remote-debugging-port={port}", f"--user-data-dir={profile}", "about:blank"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _SHARED.update(proc=proc, port=port, profile=profile)
+
+    def _stop():
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(5)
+            except Exception:   # noqa: BLE001
+                proc.kill()
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+    atexit.register(_stop)
+    return port
+
+
+def reset_shared():
+    """Drop the shared GPU Chrome (a retry after a failure starts a new one)."""
+    proc = _SHARED.pop("proc", None)
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+
+
 class _Browser:
-    """One headless Chrome, held open, driven over the DevTools protocol."""
+    """One headless Chrome, held open, driven over the DevTools protocol.
+    webgl=True: a tab in the run's shared GPU Chrome (closed on exit, the
+    browser stays up for the next layer)."""
 
     def __init__(self, profile_dir, webgl=False):
         self.port = _free_port()
         self.profile = profile_dir
+        self.shared = bool(webgl)
+        self.tid = None
         # WebGL pages (shaderfx) get the software GPU: deterministic on every
         # machine, no driver or display needed (the PC worker runs headless,
         # as SYSTEM). Everything else keeps the GPU off entirely.
@@ -544,22 +599,25 @@ class _Browser:
 
     async def __aenter__(self):
         import websockets
-        self.proc = await asyncio.create_subprocess_exec(
-            CHROME, "--headless=new", *self.gpu_flags, "--hide-scrollbars",
-            "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-            # Never touch the OS keychain: a fresh profile on macOS asks for
-            # "Chrome Safe Storage", and from ssh/launchd/CI that raises a
-            # keychain dialog on the user's screen once per launch.
-            "--use-mock-keychain", "--password-store=basic",
-            # no crash reporter: its handler outlives Chrome and, on Windows,
-            # keeps profile files locked so the work folder cannot be removed
-            "--disable-breakpad", "--disable-crash-reporter",
-            "--disable-features=DialMediaRouteProvider,MediaRouter",
-            "--allow-file-access-from-files", "--autoplay-policy=no-user-gesture-required",
-            "--force-device-scale-factor=1", f"--window-size={W},{H}",
-            f"--remote-debugging-port={self.port}",
-            f"--user-data-dir={self.profile}", "about:blank",
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        if self.shared:
+            self.port = _shared_gpu_chrome(self.gpu_flags)
+        else:
+            self.proc = await asyncio.create_subprocess_exec(
+                CHROME, "--headless=new", *self.gpu_flags, "--hide-scrollbars",
+                "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+                # Never touch the OS keychain: a fresh profile on macOS asks for
+                # "Chrome Safe Storage", and from ssh/launchd/CI that raises a
+                # keychain dialog on the user's screen once per launch.
+                "--use-mock-keychain", "--password-store=basic",
+                # no crash reporter: its handler outlives Chrome and, on Windows,
+                # keeps profile files locked so the work folder cannot be removed
+                "--disable-breakpad", "--disable-crash-reporter",
+                "--disable-features=DialMediaRouteProvider,MediaRouter",
+                "--allow-file-access-from-files", "--autoplay-policy=no-user-gesture-required",
+                "--force-device-scale-factor=1", f"--window-size={W},{H}",
+                f"--remote-debugging-port={self.port}",
+                f"--user-data-dir={self.profile}", "about:blank",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
 
         url = None
         for _ in range(150):  # Chrome writes the endpoint when it is ready
@@ -581,8 +639,15 @@ class _Browser:
         except TypeError:       # websockets < 15 has no proxy support at all
             self.ws = await websockets.connect(url, max_size=None)
         tid = (await self("Target.createTarget", {"url": "about:blank"}))["targetId"]
+        self.tid = tid
         self.sid = (await self("Target.attachToTarget",
                                {"targetId": tid, "flatten": True}))["sessionId"]
+        if self.shared:
+            try:                      # the layer's tab is the active one
+                await self("Page.bringToFront")
+                await self("Emulation.setFocusEmulationEnabled", {"enabled": True})
+            except Exception:
+                pass
         await self("Emulation.setDeviceMetricsOverride",
                    {"width": W, "height": H, "deviceScaleFactor": 1, "mobile": False})
         await self("Page.enable")
@@ -590,6 +655,12 @@ class _Browser:
         return self
 
     async def __aexit__(self, *_):
+        if self.shared and self.tid:
+            try:                      # close our tab; the shared browser stays up
+                self.sid = None
+                await self("Target.closeTarget", {"targetId": self.tid})
+            except Exception:
+                pass
         try:
             await self.ws.close()
         except Exception:

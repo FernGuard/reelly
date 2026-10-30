@@ -103,6 +103,7 @@ def test_gpu_tier(monkeypatch):
     flags = config.webgl_flags()
     assert "--use-angle=d3d11" in flags and "--force_high_performance_gpu" in flags
     assert "--disable-gpu" in card._Browser("p").gpu_flags   # DOM text keeps no GPU
+    assert card._Browser("p", webgl=True).shared and not card._Browser("p").shared
     assert card._Browser("p", webgl=True).gpu_flags == flags
 
 
@@ -268,7 +269,7 @@ def test_endcard_opens_with_the_ink_transition(tmp_path):
 def test_sparse_layers_render_only_around_events(tmp_path, monkeypatch):
     shot = []
 
-    async def fake(page, frames, w, h, out_dir, profile):
+    async def fake(page, frames, w, h, out_dir, profile, writer=None):
         for n, t in frames:
             shot.append(n)
             shaderfx._write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), bytes(w * h * 4), w, h)

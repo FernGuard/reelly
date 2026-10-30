@@ -1,62 +1,73 @@
 /*{
-  "ISFVSN": "2",
-  "CREDIT": "Patolli / Reelly",
-  "LICENSE": "MIT",
-  "VSN": "1.0",
-  "DESCRIPTION": "Dark smoky wisps off a rendered text layer and an accent flare on the hot word's pop; the type itself is untouched.",
-  "REELLY": {
-    "kind": "text"
+ "ISFVSN": "2",
+ "CREDIT": "Patolli / Reelly",
+ "LICENSE": "MIT",
+ "VSN": "1.1",
+ "DESCRIPTION": "Dark smoky wisps off a rendered text layer and an accent flare on the hot word's pop; the type itself is untouched.",
+ "REELLY": {
+  "kind": "text"
+ },
+ "INPUTS": [
+  {
+   "NAME": "u_accent",
+   "TYPE": "color",
+   "DEFAULT": [
+    0.659,
+    0.486,
+    0.941
+   ],
+   "SLOT": "accent"
   },
-  "INPUTS": [
-    {
-      "NAME": "u_accent",
-      "TYPE": "color",
-      "DEFAULT": [
-        0.659,
-        0.486,
-        0.941
-      ],
-      "SLOT": "accent"
-    },
-    {
-      "NAME": "u_ink",
-      "TYPE": "color",
-      "DEFAULT": [
-        0.043,
-        0.027,
-        0.063
-      ],
-      "SLOT": "ink_dark"
-    },
-    {
-      "NAME": "u_pop",
-      "TYPE": "float",
-      "DEFAULT": -1.0,
-      "MIN": -1.0,
-      "MAX": 60.0,
-      "HOST": true
-    },
-    {
-      "NAME": "u_enter",
-      "TYPE": "float",
-      "DEFAULT": 1.0,
-      "MIN": 0.0,
-      "MAX": 1.0,
-      "HOST": true
-    }
-  ]
+  {
+   "NAME": "u_ink",
+   "TYPE": "color",
+   "DEFAULT": [
+    0.043,
+    0.027,
+    0.063
+   ],
+   "SLOT": "ink_dark"
+  },
+  {
+   "NAME": "u_pop",
+   "TYPE": "float",
+   "DEFAULT": -1.0,
+   "MIN": -1.0,
+   "MAX": 60.0,
+   "HOST": true
+  },
+  {
+   "NAME": "u_enter",
+   "TYPE": "float",
+   "DEFAULT": 1.0,
+   "MIN": 0.0,
+   "MAX": 1.0,
+   "HOST": true
+  },
+  {
+   "NAME": "u_fbo",
+   "TYPE": "float",
+   "DEFAULT": 0.0,
+   "MIN": 0.0,
+   "MAX": 1.0,
+   "HOST": true
+  }
+ ]
 }*/
 #include "lib/noise.glsl"
 
 vec2 tq(vec2 px, out float inside){                  // canvas px (y up) -> text uv
   vec2 q = px - vec2(u_off);
   inside = step(0.0, q.x) * step(0.0, q.y) * step(q.x, u_tsize.x) * step(q.y, u_tsize.y);
-  return vec2(q.x / u_tsize.x, 1.0 - q.y / u_tsize.y);
+  // image files are top-down; GPU-rendered textures (u_fbo) are bottom-up
+  return vec2(q.x / u_tsize.x, u_fbo > 0.5 ? q.y / u_tsize.y : 1.0 - q.y / u_tsize.y);
 }
-vec4 txt(vec2 px){ float i; vec2 q = tq(px, i); return texture2D(u_txt, q) * i; }
+// GPU-rendered textures are premultiplied; image files are straight alpha
+vec4 unpm(vec4 c){ if (u_fbo > 0.5 && c.a > 0.0) c.rgb /= c.a; return c; }
+vec4 txt(vec2 px){ float i; vec2 q = tq(px, i); return unpm(texture2D(u_txt, q)) * i; }
 // the same frame, Gaussian-blurred by the browser: smoke and flare come from
 // this soft cloud, never from offset copies of the sharp glyphs
-vec4 blr(vec2 px){ float i; vec2 q = tq(px, i); return texture2D(u_blur, q) * i; }
+vec4 blr(vec2 px){ float i; vec2 q = tq(px, i); return unpm(texture2D(u_blur, q)) * i; }
 float hot(vec4 c){ return c.a * (1.0 - smoothstep(0.12, 0.40, distance(c.rgb, u_accent))); }
 void main(){
   vec2 px = gl_FragCoord.xy;

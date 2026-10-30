@@ -500,7 +500,7 @@ async def _log_renderer(b):
         raise RuntimeError(f"REELLY_GPU=gpu but Chrome rendered with {_RENDERER[0]}")
 
 
-async def _shoot_all(page, frames, w, h, out_dir, profile):
+async def _shoot_all(page, frames, w, h, out_dir, profile, writer=None):
     from . import card
     async with card._Browser(profile, webgl=True) as b:
         await b("Emulation.setDeviceMetricsOverride",
@@ -528,7 +528,10 @@ async def _shoot_all(page, frames, w, h, out_dir, profile):
                     raw = base64.b64decode(await b._eval(_GRAB % (t * 1000.0), True) or "")
                 if len(raw) != w * h * 4:
                     raise RuntimeError(f"shaderfx: frame {n} read back {len(raw)} bytes")
-                _write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), raw, w, h)
+                if writer:
+                    writer(n, raw)
+                else:
+                    _write_tga(os.path.join(out_dir, f"f{n:05d}.tga"), raw, w, h)
         finally:
             if server is not None:
                 server.close()
@@ -581,26 +584,52 @@ def _no_context(e):
 
 
 def _render_page(html_text, out_dir, w, h, dur, fps, windows=None):
-    """Render a page's frames to out_dir/f%05d.tga. windows: [(t0, t1)]
-    when the layer is SPARSE (only those instants can show anything): the
-    other frames hard-link one transparent frame instead of a render."""
+    """Render a page's frames to out_dir/f%05d.tga (see render_frames)."""
+    return render_frames(html_text, out_dir, w, h, dur, fps, windows=windows)
+
+
+def _link(src, dst):
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copyfile(src, dst)
+
+
+def render_frames(html_text, out_dir, w, h, dur, fps, windows=None, writer=None,
+                  pattern="f%05d.tga", still=None):
+    """Render a page's frames (n = dur * fps) to out_dir/<pattern>.
+    windows: [(t0, t1)] when the layer is SPARSE (only those instants can
+    show anything): the other frames hard-link one transparent frame.
+    still: (t0, t1) during which the page does not change: rendered once,
+    the rest hard-linked. writer(n, raw_rgba_bottom_up) writes a frame
+    (default: TGA)."""
     os.makedirs(out_dir, exist_ok=True)
     page = os.path.join(out_dir, "fx.html")
     with open(page, "w") as f:
         f.write(html_text)
     n = max(1, int(round(dur * fps)))
     todo = [(i, i / fps) for i in range(n)]
+    links = {}                                   # frame -> the frame it copies
     if windows is not None:
         todo = [(i, t) for i, t in todo if any(a - 1.0 / fps <= t <= b for a, b in windows)]
         blank = _blank_tga(os.path.join(out_dir, "blank.tga"), w, h)
         done = {i for i, _ in todo}
         for i in range(n):
             if i not in done:
-                dst = os.path.join(out_dir, f"f{i:05d}.tga")
-                try:
-                    os.link(blank, dst)
-                except OSError:
-                    shutil.copyfile(blank, dst)
+                _link(blank, os.path.join(out_dir, pattern % i))
+    if still is not None:
+        first = None
+        keep = []
+        for i, t in todo:
+            if still[0] <= t < still[1]:
+                if first is None:
+                    first = i
+                    keep.append((i, t))
+                else:
+                    links[i] = first
+            else:
+                keep.append((i, t))
+        todo = keep
     profile = tempfile.mkdtemp(prefix="reelly-chrome-")
     import time
     t0 = time.time()
@@ -608,17 +637,19 @@ def _render_page(html_text, out_dir, w, h, dur, fps, windows=None):
         if todo:
             with _GPU_LOCK:
                 try:
-                    asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
+                    asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile, writer))
                 except RuntimeError as e:
                     if "shader page error" in str(e) and not _no_context(e):
                         raise                              # a broken effect: no retry
                     for attempt in (1, 2):             # the GPU process can lose a start race
                         print(f"[fx   ] {e}; retry {attempt} in a fresh browser")
+                        from . import card
+                        card.reset_shared()
                         shutil.rmtree(profile, ignore_errors=True)
                         profile = tempfile.mkdtemp(prefix="reelly-chrome-")
                         time.sleep(1.0 * attempt)
                         try:
-                            asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile))
+                            asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile, writer))
                             break
                         except RuntimeError as e2:
                             if attempt == 2 or ("shader page error" in str(e2)
@@ -630,10 +661,12 @@ def _render_page(html_text, out_dir, w, h, dur, fps, windows=None):
     dt = time.time() - t0
     print(f"[fx   ] {len(todo)} of {n} frames {w}x{h} in {dt:.1f}s"
           f" ({len(todo) / max(dt, 1e-6):.0f} fps)")
-    made = len([x for x in os.listdir(out_dir) if x.startswith("f") and x.endswith(".tga")])
+    for i, src in links.items():
+        _link(os.path.join(out_dir, pattern % src), os.path.join(out_dir, pattern % i))
+    made = sum(1 for i in range(n) if os.path.exists(os.path.join(out_dir, pattern % i)))
     if made < n:
         raise RuntimeError(f"shaderfx: only {made}/{n} frames rendered")
-    return os.path.join(out_dir, "f%05d.tga")
+    return os.path.join(out_dir, pattern)
 
 
 def _size(scale):

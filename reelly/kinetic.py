@@ -314,14 +314,48 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     # The browser profile lives OUTSIDE out_dir and is removed best-effort: a
     # lingering Chrome process can hold its files (Windows), and that must
     # never fail the caller's own work-folder cleanup.
-    import tempfile
-    profile = tempfile.mkdtemp(prefix="reelly-chrome-")
-    try:
-        asyncio.run(_render(page, frames, cw, ch, out_dir,
-                            (settle, hold_end) if hold_end > settle else None,
-                            profile))
-    finally:
-        shutil.rmtree(profile, ignore_errors=True)
+    gpu = False
+    from . import gputext, shaderfx
+    tfx = shaderfx.active("text") if kind == "line" else None
+    if gputext.enabled() and tfx:
+        import time as _time
+        t0 = _time.time()
+        try:
+            from . import brandkit
+            pat, W, H, off = gputext.render_aura(
+                text, out_dir + "_aura", dur, size, cw, ch, role, hi,
+                wrap_lines(text, size, width, role), enter, leave, pop, fps,
+                captions.ink("#FCFCFB"), brandkit.accent(), tfx)
+            print(f"        kinetic {label or kind}: GPU text + '{tfx}' in one pass, "
+                  f"{n} frames in {_time.time() - t0:.1f}s")
+            return pat, W, H, PAD + off
+        except Exception as e:   # noqa: BLE001 -- the two-step path below
+            print(f"        kinetic {label or kind}: fused GPU text failed ({e}); two-step")
+    if gputext.enabled():
+        import time as _time
+        t0 = _time.time()
+        try:
+            from . import brandkit
+            gputext.render(text, out_dir, dur, size, cw, ch, role, hi,
+                           wrap_lines(text, size, width, role), enter, leave, pop, fps,
+                           captions.ink("#FCFCFB"), brandkit.accent())
+            gpu = True
+            print(f"        kinetic {label or kind}: GPU text, {n} frames in "
+                  f"{_time.time() - t0:.1f}s")
+        except Exception as e:   # noqa: BLE001 -- the DOM renderer is the fallback
+            print(f"        kinetic {label or kind}: GPU text failed ({e}); browser text")
+            for f in os.listdir(out_dir):
+                if f.startswith("k") and f.endswith(".png"):
+                    os.remove(os.path.join(out_dir, f))
+    if not gpu:
+        import tempfile
+        profile = tempfile.mkdtemp(prefix="reelly-chrome-")
+        try:
+            asyncio.run(_render(page, frames, cw, ch, out_dir,
+                                (settle, hold_end) if hold_end > settle else None,
+                                profile))
+        finally:
+            shutil.rmtree(profile, ignore_errors=True)
     made = len([f for f in os.listdir(out_dir) if f.startswith("k") and f.endswith(".png")])
     if made < n:
         raise RuntimeError(f"kinetic: only {made}/{n} frames rendered for {text!r}")
