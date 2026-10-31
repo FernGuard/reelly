@@ -26,6 +26,9 @@ Homepage = "https://github.com/FernGuard/reelly"
 Issues = "https://github.com/FernGuard/reelly/issues"
 
 [project.optional-dependencies]
+# 2.5D parallax for stills (reelly parallax): Depth Anything V2 Small through
+# ONNX Runtime on the CPU; the model (Apache-2.0) is downloaded separately.
+depth = ["onnxruntime>=1.20"]
 # local speaker diarization (gap 8): on-device, no per-run cost.
 # One-time setup documented in README and docs/SETUP.md.
 # Upper bound is deliberate. pyannote.audio 4.x rewires the speaker-diarization-3.1

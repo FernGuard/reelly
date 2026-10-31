@@ -360,6 +360,11 @@ def test_every_generated_page_script_parses(tmp_path):
                              "#FCFCFB", "#a87cf0")[0],
         "text+aura": gputext.page(t, 58, 856, 227, 3.6, "headline", 2, lines, False, True,
                                   0.5, "#FCFCFB", "#a87cf0", aura="smoke-aura")[0],
+        "parallax": shaderfx._page(shaderfx.fragment("parallax_still"), 540, 960,
+                                   {"u_res": (540, 960), "u_t0": 0.0,
+                                    **shaderfx.uniforms("parallax-still",
+                                                        host={"u_dur": 6.0, "u_img": (1672, 941)})},
+                                   str(bg), depth_png=str(bg), full=True),
         "finish": shaderfx._page(shaderfx.fragment("folk_print"), 540, 960,
                                  {"u_res": (540, 960), "u_t0": 0.0,
                                   **shaderfx.uniforms("folk-print", host={"u_pic": (0, .34, 1, .66),
@@ -411,3 +416,32 @@ def test_content_profiles_filter_effects(monkeypatch):
     shaderfx.set_profile(None)
     with pytest.raises(shaderfx.EffectError):
         shaderfx.load_profile("opera")
+
+
+def test_parallax_page_takes_the_still_and_its_depth(tmp_path):
+    from PIL import Image
+    im, dp = tmp_path / "a.png", tmp_path / "d.png"
+    Image.new("RGB", (1672, 941), (90, 40, 120)).save(im)
+    Image.new("L", (1672, 941), 128).save(dp)
+    html = shaderfx._page(shaderfx.fragment("parallax_still"), 540, 960,
+                          {"u_res": (540, 960), **shaderfx.uniforms(
+                              "parallax-still", host={"u_dur": 6.0, "u_img": (1672, 941)})},
+                          str(im), depth_png=str(dp), full=True)
+    assert "texFrom(dep, 3, 'u_depth')" in html and '"u_fit": 1.0' in html
+    assert '"u_img": [1672.0, 941.0]' in html
+
+
+def test_depth_estimate_on_a_real_model(tmp_path):
+    from reelly import depth
+    if not depth.find_model():
+        pytest.skip("depth model not installed")
+    pytest.importorskip("onnxruntime")
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (640, 360), (30, 30, 40))
+    ImageDraw.Draw(im).ellipse((240, 120, 400, 300), fill=(220, 200, 180))
+    p = tmp_path / "s.png"
+    im.save(p)
+    out = depth.estimate(str(p), str(tmp_path / "d.png"))
+    d = Image.open(out)
+    assert d.size == (640, 360) and d.mode == "L"
+    assert d.getextrema()[1] > d.getextrema()[0]          # a real depth range

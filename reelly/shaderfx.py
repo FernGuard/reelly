@@ -55,7 +55,8 @@ HOST_UNIFORMS = {
             "uniform sampler2D u_ctrl;", "uniform float u_ctrl_n;",
             # real impacts: (t, x, y, strength), x/y in picture uv (control.events)
             "uniform vec4 u_events[8];"],
-    "backdrop": ["uniform sampler2D u_bg;", "uniform sampler2D u_from;"],
+    "backdrop": ["uniform sampler2D u_bg;", "uniform sampler2D u_from;",
+                 "uniform sampler2D u_depth;"],
     "overlay": [],
     "text": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;",
              "uniform vec2 u_tsize;", "uniform float u_off;"],
@@ -346,7 +347,7 @@ if (FR) {{
     }});
   }};
 }}
-var bg = {bg}, ctrl = {ctrl}, frm = {frm}, pending = 0;
+var bg = {bg}, ctrl = {ctrl}, frm = {frm}, dep = {dep}, pending = 0;
 function done(){{ if (--pending <= 0) {{ gl.activeTexture(gl.TEXTURE0);
   window.__reellyReady = true; window.__reellyDraw(0); }} }}
 function texFrom(src, unit, name){{
@@ -360,6 +361,7 @@ function texFrom(src, unit, name){{
 if (ctrl) texFrom(ctrl, 2, 'u_ctrl');
 if (bg) texFrom(bg, 0, 'u_bg');
 if (frm) texFrom(frm, 1, 'u_from');
+if (dep) texFrom(dep, 3, 'u_depth');
 if (!pending) {{ pending = 1; done(); }}
 </script></body></html>"""
 
@@ -488,22 +490,25 @@ def _rgb01(hex_):
 
 
 def _page(frag, w, h, uniforms, backdrop_png=None, frames=None, fps=60, blur_px=9,
-          ctrl=None, t_offset=0.0, from_png=None, bloom=None):
+          ctrl=None, t_offset=0.0, from_png=None, bloom=None, depth_png=None, full=False):
     import io
     import json
-    def data_uri(png):
+    def data_uri(png, keep=False):
         from PIL import Image
-        im = Image.open(png).convert("RGB").resize((w, h), Image.LANCZOS)
+        im = Image.open(png).convert("RGB")
+        if not keep:                      # a backdrop is pre-fitted to the page
+            im = im.resize((w, h), Image.LANCZOS)
         b = io.BytesIO()
         im.save(b, "JPEG", quality=94)
         return json.dumps("data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode())
-    bg = data_uri(backdrop_png) if backdrop_png else "null"
+    bg = data_uri(backdrop_png, keep=full) if backdrop_png else "null"
+    dep = data_uri(depth_png, keep=True) if depth_png else "null"
     frm = data_uri(from_png) if from_png else "null"
     from . import control
     uniforms = {**control.host_uniforms(ctrl, t_offset), **uniforms}
     ctrl_png = control.energy_png(ctrl.get("energy")) if ctrl and t_offset == 0 else None
     return _PAGE.format(w=w, h=h, frag=json.dumps(frag), bg=bg,
-                        ctrl=json.dumps(ctrl_png) if ctrl_png else "null", frm=frm,
+                        ctrl=json.dumps(ctrl_png) if ctrl_png else "null", frm=frm, dep=dep,
                         bloom=json.dumps(_bloom(bloom, w)) if bloom and not frames else "null",
                         frames=json.dumps(frames) if frames else "null", fps=int(fps),
                         blur_px=int(blur_px),
@@ -856,3 +861,16 @@ def render_finish(fx, frames_dir, n, fps, out_dir, pic, clear):
     html = _page(fragment(load_preset(fx)["effect"]), w, h,
                  {"u_res": (w, h), "u_t0": 0.0, **U}, frames=frames, fps=fps, blur_px=1)
     return render_frames(html, out_dir, w, h, n / fps, fps), fps
+
+
+def render_parallax(fx, image, depth_png, out_dir, dur, fps=None, params=None):
+    """A 2.5D camera move on a still (kind backdrop + depth) at 1080x1920
+    (the preset's scale). Returns the frame pattern."""
+    from PIL import Image
+    iw, ih = Image.open(image).size
+    w, h = _size(_render_opts(fx).get("scale", 1.0))
+    U = uniforms(fx, brand_params(fx), overrides=params or {},
+                 host={"u_dur": dur, "u_img": (iw, ih)})
+    html = _page(fragment(load_preset(fx)["effect"]), w, h, {"u_res": (w, h), "u_t0": 0.0, **U},
+                 image, depth_png=depth_png, full=True, bloom=_render_opts(fx).get("bloom"))
+    return render_frames(html, out_dir, w, h, dur, fps or config.output_fps())

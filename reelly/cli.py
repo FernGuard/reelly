@@ -17,6 +17,7 @@ Global flags, accepted anywhere on the command line:
 """
 import argparse
 import os
+import subprocess
 import sys
 
 from . import ledger
@@ -395,6 +396,17 @@ def main(argv=None):
     hk.add_argument("--cut", help="one cut id only")
     hk.add_argument("--brain", choices=BRAINS, default="auto", help=BRAIN_HELP)
 
+    px_ = sub.add_parser("parallax", help="a 2.5D camera move on a still (key art, a "
+                         "photo) from its estimated depth, as a vertical clip")
+    px_.add_argument("image")
+    px_.add_argument("--out", help="mp4 path (default <image>_parallax.mp4)")
+    px_.add_argument("--dur", type=float, default=6.0)
+    px_.add_argument("--move", choices=["push", "dolly"], default="push")
+    px_.add_argument("--center", help="focus point in image uv, y up: x,y (default 0.5,0.5)")
+    px_.add_argument("--depth", help="use this depth PNG (white = near) instead of estimating")
+    px_.add_argument("--fit", choices=["width", "cover"], default="width",
+                     help="width: the whole still across the frame (default, keeps the "
+                          "composition); cover: fill the frame, cropping the sides")
     sz_ = sub.add_parser("safezones", help="draw the TikTok/Reels/Shorts chrome "
                                            "over frames of a render (proof sheet)")
     sz_.add_argument("video")
@@ -403,6 +415,34 @@ def main(argv=None):
     sz_.add_argument("--out", help="PNG path (default <video>_safezones.png)")
 
     args = ap.parse_args(argv)
+    if args.cmd == "parallax":
+        import os
+        import shutil
+        import tempfile
+        from . import config, depth, shaderfx
+        out = args.out or os.path.splitext(args.image)[0] + "_parallax.mp4"
+        dpng = args.depth or os.path.splitext(out)[0] + "_depth.png"
+        if not args.depth:
+            depth.estimate(args.image, dpng)
+            print(f"[depth] {dpng} (Depth Anything V2 Small, Apache-2.0)")
+        params = {}
+        if args.move == "dolly":
+            params = {"u_push": 0.04, "u_depthk": 0.03, "u_dolly": 0.05}
+        if args.center:
+            cx, cy = (float(v) for v in args.center.split(","))
+            params["u_center"] = [cx, cy]
+        params["u_fit"] = 0.0 if args.fit == "cover" else 1.0
+        work = tempfile.mkdtemp(prefix="reelly-parallax-")
+        try:
+            pat = shaderfx.render_parallax("parallax-still", args.image, dpng,
+                                           os.path.join(work, "f"), args.dur, params=params)
+            subprocess.run([config.FFMPEG, "-y", "-v", "error", "-framerate",
+                            str(config.output_fps()), "-i", pat, "-pix_fmt", "yuv420p",
+                            *config.final_encode_args(), out], check=True)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        print(f"[parallax] {out} ({args.dur:.1f}s, {args.move})")
+        return
     if args.cmd == "safezones":
         from . import safezones
         times = [float(x) for x in args.at.split(",") if x.strip()]
