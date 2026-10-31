@@ -89,7 +89,7 @@ def tier():
     return re.sub(r"[^a-z0-9]+", "-", r.lower()).strip("-")[:60]
 
 
-_NEUTRAL = ("REELLY_HOME", "REELLY_BRAND", "REELLY_TEXT_MOTION", "REELLY_TEXT_EXIT",
+_NEUTRAL = ("REELLY_GPU", "REELLY_HOME", "REELLY_BRAND", "REELLY_TEXT_MOTION", "REELLY_TEXT_EXIT",
             "REELLY_PROFILE", "REELLY_FX_LITE", "REELLY_OUTRO_FX", "REELLY_AMBIENT_FX",
             "REELLY_TEXT_FX", "REELLY_FINISH_FX")
 
@@ -118,6 +118,8 @@ def run(update=False, only=None):
 
 def _run(update, only, tmp):
     from PIL import Image
+    from . import shaderfx
+    shaderfx._RENDERER[0] = None        # re-detect: earlier work may have cached another
     results = {}
     for name, (html, w, h, times, _pm) in cases(tmp).items():
         if only and name not in only:
