@@ -228,7 +228,7 @@ def get_key(name):
     spec = PROVIDERS.get(name)
     if spec is None:
         return None
-    if paid_blocked(name):
+    if paid_blocked(name) or local_only():
         return None
     for var in spec["env"]:
         val = os.environ.get(var, "").strip()
@@ -392,7 +392,7 @@ def webgl_flags():
     Hardware path per OS through ANGLE: Direct3D 11 on Windows, Metal on
     macOS, OpenGL on Linux. Measured on the Windows worker (2026-10-30,
     running as SYSTEM): Chrome takes the Intel iGPU unless asked for the
-    high-performance one; with it, the RTX 5090 drew + read back a full
+    high-performance one; with it, an RTX 5090 drew + read back a full
     1080x1920 smoke frame at 635 fps (SwiftShader 23.5, Intel 165). auto =
     the hardware GPU, falling back to the software GPU (SwiftShader, the
     same pixels on every machine) when it gives no WebGL context."""

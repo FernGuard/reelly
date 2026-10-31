@@ -1,0 +1,21 @@
+{
+ "schema": 1,
+ "name": "demo",
+ "accent": "#7c5cff",
+ "ink": "#f4f1ea",
+ "surface": "#0e0e12",
+ "fonts": {},
+ "copy": {
+  "audience": "people who like seeing how things are made",
+  "promise": "one surprising moment from the recording, shown fast",
+  "voice": "warm, plain, a little dry",
+  "cta": "Follow for more"
+ },
+ "video": {"fps": 60, "clip_len": [20, 30]},
+ "text": {"motion": "blocklock", "exit": "petals"},
+ "effects": {
+  "endcard": "smoke",
+  "ambient": ["smoke", "embers"],
+  "text": "smoke"
+ }
+}

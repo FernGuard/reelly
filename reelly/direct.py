@@ -60,7 +60,7 @@ RULES.update({
 
 PLAYBOOK_VERSION = "0.17.0"
 
-VISUAL_REFINE_PROMPT = """You are a short-form video editor cutting one vertical clip (TikTok/Reels/Shorts) from gameplay footage. This footage has NO usable narration: either it is music and ambience, or the automatic transcript failed its reliability check. You are cutting on PICTURE ALONE. There will be no subtitles, so every word you write will be burned on screen as text.
+VISUAL_REFINE_PROMPT = """You are a short-form video editor cutting one vertical clip (TikTok/Reels/Shorts) from {footage}. This footage has NO usable narration: either it is music and ambience, or the automatic transcript failed its reliability check. You are cutting on PICTURE ALONE. There will be no subtitles, so every word you write will be burned on screen as text.
 
 CANDIDATE MOMENT: {why}
 VISUAL SEQUENCES available near this moment (time | scores | what happens):
@@ -570,12 +570,12 @@ def brief_block():
         lines.append("- Never write: " + ", ".join(f'"{a}"' for a in avoid))
     approved = [str(x) for x in (c.get("approved_lines") or []) if str(x).strip()][-12:]
     if approved:
-        lines.append("- LINES THE OWNER APPROVED (the voice to match: rhythm, dryness, "
+        lines.append("- LINES THE BRAND APPROVED (the voice to match: rhythm, dryness, "
                      "specificity; never copy them verbatim):")
         lines += [f'    "{x}"' for x in approved]
     rejected = [str(x) for x in (c.get("rejected_lines") or []) if str(x).strip()][-12:]
     if rejected:
-        lines.append("- LINES THE OWNER REJECTED (never write like these):")
+        lines.append("- LINES THE BRAND REJECTED (never write like these):")
         lines += [f'    "{x}"' for x in rejected]
     lines.append("- Every claim must be visible in the footage; never invent mechanics, story or offers.")
     return "\n".join(lines)
@@ -648,9 +648,10 @@ def _refine_visual(cand, vr, peaks, scenes, duration, brain, project):
                    if cand["s"] - 30 <= t <= cand["e"] + 60)[:600] or "none"
     pk = ", ".join(f"{p['t']:.1f}s ({p['above_median']:+.1f}dB)" for p in peaks
                    if cand["s"] - 15 <= p["t"] <= cand["e"] + 60) or "none"
+    from . import sight
     return _ask_json(VISUAL_REFINE_PROMPT.format(
         why=cand["why"], visuals=visuals, scenes=sc, peaks=pk, duration=duration,
-        **_len_kw())
+        footage=sight.subject()["footage"], **_len_kw())
         + brief_block(), brain, project, f"visual refine {cand['why'][:40]}")
 
 

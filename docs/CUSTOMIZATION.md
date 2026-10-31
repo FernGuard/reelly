@@ -70,31 +70,7 @@ This creates local files under `~/.reelly/brandkit/`, including `copy_bank.yaml`
 
 ### Brands
 
-One kit can hold several brands, for example a studio and each of its games:
-
-```text
-~/.reelly/brandkit/brands/<brand>/
-  brand.json        {"name", "accent", "ink", "surface", "fonts": {"headline": "...", "caption": "..."}}
-  <font files>      .ttf / .otf named in brand.json
-```
-
-Register one with a single command (files are copied into your local kit;
-nothing goes into the repository):
-
-```sh
-reelly brand add mygame --headline Display-Bold.ttf --caption Text-Bold.ttf \
-    --accent "#3366ff" --ink "#f4f1ea" --surface "#101010"
-reelly brand list
-```
-
-Pick one per run with `--brand <brand>` (anywhere on the command line) or
-`REELLY_BRAND`, or set `"default_brand"` in `kit.json`. The hook and end card
-use the `headline` font, captions and labels use `caption` (a missing headline
-borrows caption). The accent drives karaoke highlights, chips and the outro
-tint; `ink` is the text colour. `"reframe": "full_width"` in brand.json shows the whole width of 16:9 footage (smaller, nothing cropped); a number up to 2.0 zooms in and crops the sides. Leave it out to let Reelly choose. Overlay and card pages load the brand's own
-font files locally instead of a font CDN. Pillow needs static fonts: cut
-variable fonts to fixed instances first (for example with fontTools'
-`varLib.instancer`).
+One kit can hold several brands, each with its own `brand.json`, fonts, music and look. Everything about them is in [BRAND_KIT.md](BRAND_KIT.md).
 
 ## Verdicts and analytics
 

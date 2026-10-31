@@ -39,10 +39,10 @@ FADE_IN_S = 0.25         # card fade-in at outro start
 
 # backdrop treatment: heavy blur + dim so the final frame reads as a card
 # background, not as a freeze of the action. The dim MULTIPLIES (keeps 55% of
-# each pixel) instead of subtracting: brightness=-0.28 took a dark game (Curses,
-# luma ~25) to pure black, every outro opened on a black run (judge
-# black_frames at the content/outro join) and the ending read as the black
-# card the owner had already rejected. Dimmed, the game's colours stay behind
+# each pixel) instead of subtracting: brightness=-0.28 took a dark game
+# (luma ~25) to pure black, every outro opened on a black run (judge
+# black_frames at the content/outro join) and the ending read as a black
+# card, a look already rejected in review. Dimmed, the game's colours stay behind
 # the ask.
 _BACKDROP_VF = ("scale=1080:1920:force_original_aspect_ratio=increase,"
                 "crop=1080:1920,boxblur=luma_radius=24:luma_power=2:"

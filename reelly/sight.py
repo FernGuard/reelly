@@ -43,15 +43,30 @@ THUMB_W = 480
 _LEDGER_LOCK = threading.Lock()
 DEFAULT_LOCAL_MODEL = "qwen3.6:35b-a3b"
 
-PROMPT = """This image is a contact sheet of {n} frames from a video game recording, read left to right, top to bottom.
+PROMPT = """This image is a contact sheet of {n} frames from {source}, read left to right, top to bottom.
 Frame i (0-based) is at t = {t0:.1f} + {step:g} * i seconds of the recording: {times}.
-Judge it for two goals: (a) a game trailer (striking, readable, satisfying moments) and (b) a vertical short for TikTok/Reels/Shorts (a moment that stops a scroll and pays off fast).
-Look at the game itself: characters, events, reveals, UI that tells a story. Ignore black frames.
+Judge it for two goals: (a) {reel} (striking, readable, satisfying moments) and (b) a vertical short for TikTok/Reels/Shorts (a moment that stops a scroll and pays off fast).
+{look} Ignore black frames.
 
 Return ONLY one JSON object:
 {{"frames": [{{"t": <seconds>, "what_happens": "<one short line>", "on_screen_text": "<text visible in the frame, or empty>", "opening_score": <1-10, how hard this frame would stop a scroll as the FIRST frame of a short>}}],
  "sequences": [{{"label": "<short name>", "start_t": <seconds>, "end_t": <seconds>, "trailer_score": <1-10>, "short_score": <1-10>, "what_happens": "<one line>", "why": "<one line>", "strong_hook": <true|false>}}]}}
 One entry in "frames" per frame. "sequences" are the cuttable stretches inside this sheet (they may continue past its last frame); return [] when nothing is worth cutting."""
+
+
+def subject():
+    """How the prompts name the footage: games are read as games (characters,
+    reveals, UI), everything else as people and what they do (the content
+    type: REELLY_CONTENT_TYPE or the brand's video.content_type)."""
+    from . import shaderfx
+    if shaderfx.content_type() == "gameplay":
+        return {"source": "a video game recording", "reel": "a game trailer",
+                "look": "Look at the game itself: characters, events, reveals, UI that tells a story.",
+                "footage": "gameplay footage"}
+    return {"source": "a video recording", "reel": "a trailer or highlight reel",
+            "look": "Look at what happens: people, actions, reveals, on-screen text that "
+                    "tells a story.",
+            "footage": "video footage"}
 
 
 def step_for(duration):
@@ -164,7 +179,7 @@ def _one_sheet(video, backend, i, n_sheets, t0, step, n, total, crop, project,
         return "ok", data.get("frames", []), data.get("sequences", [])
     times = [round(t0 + step * k, 1) for k in range(n)]
     prompt = PROMPT.format(n=n, t0=t0, step=step,
-                           times=", ".join(f"{t:g}" for t in times))
+                           times=", ".join(f"{t:g}" for t in times), **subject())
     with tempfile.TemporaryDirectory() as td:
         try:
             img = _sheet(video, t0, step, n, os.path.join(td, "sheet.jpg"), crop)

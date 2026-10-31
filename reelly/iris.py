@@ -12,7 +12,7 @@ IrisApp.exe -v <video> -j 1 -p 1, run from its own folder (it reads
 appsettings.json there and writes Results/<video name>/result.json). The
 video is hard-linked under a unique name so parallel checks never share a
 results folder, and the folder is removed after reading. IRIS states it
-does not certify compliance: this is a detector, the owner signs off.
+does not certify compliance: this is a detector, a person signs off.
 
 REELLY_IRIS = path to IrisApp (else <REELLY_HOME>/tools/iris/, else PATH).
 """

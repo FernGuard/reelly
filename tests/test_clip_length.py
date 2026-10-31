@@ -42,7 +42,7 @@ def test_bad_windows_fall_back(monkeypatch, bad):
 def test_the_prompts_carry_the_window(brand):
     kw = direct._len_kw()
     vis = direct.VISUAL_REFINE_PROMPT.format(why="w", visuals="v", scenes="s",
-                                             peaks="p", duration=60.0, **kw)
+                                             peaks="p", duration=60.0, footage="f", **kw)
     assert "Total duration 12 to 28 seconds" in vis and "ONE BEAT" in vis
     assert "F9 one_beat" in vis and "20 to 28" not in vis
     sp = direct.REFINE_PROMPT.format(why="w", visuals="v", peaks="p", sents="s",

@@ -143,7 +143,7 @@ def _picture_motion(video, pic, dur, fps=FPS, w=96, h=54):
     its own median over the previous 0.5 s. A region that is always moving
     (a swirling background, an idle character) stops counting; a sudden
     burst where nothing was happening (an explosion, a hit flash) stands
-    out. Raw change put Curses impacts on the ever-moving vortex."""
+    out. Raw change put impacts on an ever-moving background vortex."""
     import numpy as np
     H = 1920
     y0 = int(round((1.0 - pic[3]) * H))

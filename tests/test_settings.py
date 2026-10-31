@@ -98,3 +98,34 @@ def test_models_are_pinned_and_verified():
         assert re.fullmatch(r"[0-9a-f]{64}", m["sha256"]) and m["url"].startswith("https://")
         assert "/main/" not in m["url"]                       # a pinned revision
         assert m["env"] in settings.NAMES
+
+
+def test_prompts_name_the_footage_by_content_type(monkeypatch):
+    from reelly import sight
+    monkeypatch.setenv("REELLY_CONTENT_TYPE", "gameplay")
+    assert "video game" in sight.subject()["source"]
+    monkeypatch.setenv("REELLY_CONTENT_TYPE", "podcast")
+    s = sight.subject()
+    assert "game" not in s["source"] + s["reel"] + s["look"] + s["footage"]
+
+
+def test_the_example_brand_kit_is_valid():
+    data = json.load(open(os.path.join(ROOT, "examples", "brandkit", "demo", "brand.json"),
+                          encoding="utf-8"))
+    assert brandkit.check(data) == ([], [])
+
+
+def test_local_only_stops_every_outbound_path(monkeypatch, tmp_path):
+    from reelly import control, direct, face, models, sight
+    monkeypatch.setenv("REELLY_LOCAL_ONLY", "1")
+    monkeypatch.setenv("HUGGINGFACE_TOKEN", "hf_x")
+    monkeypatch.delenv("REELLY_VISION_URL", raising=False)
+    assert direct.resolve_brain("auto") is None and not direct.cli_ready("codex")
+    assert direct._ask_cli("codex", "hi", "p", "label") is None
+    assert config.get_key("huggingface") is None and config.paid_blocked("fal-ai")
+    assert sight.resolve_backend() is None
+    monkeypatch.setattr(face, "MESH_MODEL", str(tmp_path / "none.task"))
+    assert face._ensure_model() is False
+    assert control.verify_events("v.mp4", [{"t": 1.0}], (0, 0, 1, 1), str(tmp_path), "c") == []
+    with pytest.raises(SystemExit):
+        models.fetch("depth")

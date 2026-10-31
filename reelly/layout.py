@@ -31,7 +31,7 @@ It is:
 
 FRAME_W, FRAME_H = 1080, 1920
 
-# ONE layout that holds on TikTok, Reels AND Shorts (owner decision
+# ONE layout that holds on TikTok, Reels AND Shorts (a product decision
 # 2026-10-28): the platform chrome is modelled as REGIONS, the union of all
 # three, and no text of ours may enter any of them. Practitioner safe-zone
 # guides, not official specs (none exist for organic posts); check a real

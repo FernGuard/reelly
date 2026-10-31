@@ -11,34 +11,59 @@ The following normally stay on the machine running Reelly:
 - cached analysis artifacts, transcripts, captions, plans, renders, and reports;
 - Apple-Silicon transcription with mlx-whisper;
 - local pyannote diarization after model download;
-- local MediaPipe face/subject analysis;
+- local MediaPipe face analysis and person masks;
+- GPU effects, kinetic type and depth estimation (Depth Anything V2 Small, on the CPU);
+- the photosensitivity checks (Reelly's own and EA IRIS);
 - DaVinci Resolve handoff files.
 
 Project workspaces default to `~/reelly-projects` and may contain personal data, voices, faces, transcripts, source URLs, and derived content. Protect, retain, and delete those directories according to your own policy. They are excluded from this repository by `.gitignore`, but Git cannot protect files stored elsewhere.
 
-## Cloud providers
+## What leaves the machine, by command
 
-A cloud-assisted command sends only to the provider selected for that feature. Depending on the command, transmitted material can include prompts, transcript text, frame images, video excerpts, source images, OCR text, analysis summaries, or generation references.
+With no flags, Reelly makes **no paid calls**, and uses a subscription CLI you
+have signed in to yourself for its thinking and seeing. Each row is what a
+command can send and to whom.
+
+| Command | What it can send | To |
+|---|---|---|
+| `analyze` (vision pass) | contact sheets of frames from the recording | the Codex CLI (OpenAI, through your ChatGPT account), or your own `REELLY_VISION_URL` endpoint |
+| `direct`, `cut` (planning) | transcript excerpts, scene and audio summaries, your brand's copy brief | the Codex CLI (or the Claude CLI with `--brain claude`) |
+| `hooks`, `cut` (hook writing) | a contact sheet of opening frames, the brief, candidate lines | the Codex CLI |
+| `cut`, `finalize` (impact check) | three-frame strips around each candidate impact | the Codex CLI |
+| anything with `--allow-paid` | the material the chosen feature needs (frames, video excerpts, prompts) | the paid provider you configured (table below) |
+| `models fetch` | a download request | Hugging Face, Google (model files) |
+
+The Codex and Claude CLIs run under your own accounts and their terms; Reelly
+starts them, passes the prompt and any images, and reads the reply. Nothing is
+sent anywhere else.
+
+**`--local-only`** (or `REELLY_LOCAL_ONLY=1`) turns all of it off: no CLI, no
+provider, no vision check, no model download. A local vision endpoint you run
+yourself (`REELLY_VISION_URL`) is still used. Each step then takes its local
+path or is skipped, and `REVIEW.md` lists what fell back. `REELLY_SIGHT=off`
+turns off only the vision pass and the impact check.
+
+### Paid providers (only with `--allow-paid`)
 
 | Provider | Typical Reelly use |
 |---|---|
 | Google Gemini | video/frame understanding, visual review, placement, quality checks, sizzle surveys |
-| OpenAI | language-based edit planning and copy refinement |
+| OpenAI API | language-based edit planning and copy refinement (`--brain gpt`) |
 | FAL | music, sound effects, image, and motion generation |
-| Anthropic | optional PRISM analysis |
+| Anthropic API | optional PRISM analysis |
 | Hugging Face | model downloads and gated-model authentication |
 
 Provider processing, retention, training, region, and deletion behavior is controlled by your provider account and its terms. Reelly cannot change those policies. Do not enable a provider for material you are not authorized to upload.
 
 Reelly does not silently substitute a different cloud engine when the selected engine lacks a key.
 
-## Other network access
+## Local processes
 
-- PRISM can use `yt-dlp` to download a URL you provide. The destination site receives the usual network request information.
-- Some graphics paths may fetch remote fonts or model assets on first use.
-- Model libraries may contact their registries to download weights.
-
-Use an offline environment and pre-provisioned assets when those requests are not acceptable.
+Rendering starts a headless Chrome and talks to it on `127.0.0.1` (a DevTools
+port and a frame socket that only accepts the render page holding a random
+token). Nothing listens on other interfaces. On a shared machine, other local
+users' processes could reach the DevTools port while a render runs; render on
+a machine you control.
 
 ## Credentials
 

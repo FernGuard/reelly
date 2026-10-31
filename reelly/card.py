@@ -530,7 +530,7 @@ def _free_port():
 # The GPU browser is SHARED for the whole run: one Chrome with the GPU,
 # started once, a fresh tab per layer. Launching a GPU Chrome per layer
 # back to back sometimes caught the GPU still releasing the last one (no
-# WebGL context / page never ready on the worker) and cost ~1-2 s each.
+# WebGL context / page never ready on a Windows render machine) and cost ~1-2 s each.
 _SHARED = {}
 
 

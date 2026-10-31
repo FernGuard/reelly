@@ -87,7 +87,7 @@ def masks(video, out_dir, fps=30, width=540):
         from . import models
         raise FileNotFoundError(models.missing_message("segmenter"))
     # (OpenCV's contrib guidedFilter crashed natively next to MediaPipe in
-    # one process on the worker: the filter is a few box filters, done here)
+    # one process: the filter is a few box filters, done here)
     os.makedirs(out_dir, exist_ok=True)
     from . import media
     v = next(s for s in media.probe(video)["streams"] if s.get("codec_type") == "video")

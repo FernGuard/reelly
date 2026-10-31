@@ -540,6 +540,7 @@ def add_brand(name, fonts=None, accent=None, ink=None, surface=None,
                 spec = json.load(f) or {}
         except (OSError, ValueError):
             spec = {}
+    spec = {"schema": SCHEMA, **{k: v for k, v in spec.items() if k != "schema"}}
     spec["name"] = name
     spec.setdefault("fonts", {})
     os.makedirs(d, exist_ok=True)

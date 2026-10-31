@@ -625,7 +625,7 @@ def sfx_events(plan):
 def track_bpm(path, key=None):
     """The tempo a track STATES: brand.json music "bpm" {key or file: n},
     else "<n>_bpm" / "<n>bpm" in the file name (Board_125_bpm.wav). None when
-    unstated. Stated beats detection: on the Curses soundtrack the detector
+    unstated. Stated beats detection: on a game soundtrack the detector
     read 123 for a 125 bpm track (0.16 s adrift after 10 s) and 70 for 140."""
     import re
     from . import brandkit
@@ -784,7 +784,7 @@ def level_mix(src, target=-14.0, peak_db=-4.5, tolerance=0.4):
 
     loudnorm stops short of target when a loud bed sits under hard transients
     (linear mode will not cross its peak ceiling): -15.9 LUFS measured on a
-    Curses soundtrack mix. A limiter at -2 dB did not fix it: the AAC encode
+    game soundtrack mix. A limiter at -2 dB did not fix it: the AAC encode
     then overshot by +1.7 dB, the true-peak guard limited the file again and
     the shipped mp4 fell back to -15.8. Measured on three soundtrack mixes, a
     fast limiter (2 ms attack) at -4.5 dB leaves room for the AAC overshoot,

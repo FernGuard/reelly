@@ -1,182 +1,143 @@
 # Reelly
 
-Reelly is a local-first video editing engine. Give it a recording and it can analyze, transcribe, plan cuts, render captioned MP4s, and create a DaVinci Resolve handoff.
+**Long recordings in. Finished vertical clips out.**
 
-**Reelly never publishes content. You review and publish every output.**
+Reelly watches a stream, a playtest, a podcast or a talk, finds the moments
+worth sharing and hands back 9:16 clips ready to post: hooked, captioned, set
+to music, on brand, loudness-matched and checked for flashing. There is no
+timeline to scrub and no keyframe to set. It runs on your machine and makes no
+paid calls unless you ask it to.
 
-**Reelly contains no API credentials. You must provide your own keys for cloud features.** When a command needs a missing key, it stops and tells you the exact environment variable and provider signup URL. Key values are never printed by `reelly setup`.
+**Reelly never publishes.** You review every file and post it yourself.
+
+## What it does
+
+**It edits like an editor.** Reelly picks moments that open strong and end on
+a payoff, writes a hook for the very first frame, and cuts on the picture alone
+when a recording has no narration.
+
+**Type that moves to the music.** Kinetic type is drawn on the GPU, and the hot
+word of every line pops on the beat of your soundtrack. Words can rise into
+place or drop in and lock like falling blocks, then leave in a scatter of
+petals.
+
+**Effects that know what happened.** Each cut gets a control track (its beats,
+its sharpest sounds, its loudness and its real impacts) and every effect reads
+it: smoke and embers that breathe with the audio, comic impact and focus lines
+that land where a hit actually happens, and an end card that inks in from the
+last frame.
+
+**Safe before you see it.** Every file passes a WCAG 2.3.1 flash check (plus
+EA IRIS where installed), text contrast, platform safe zones and a -14 LUFS
+loudness target. `REVIEW.md` lists anything that fell back, so a lesser render
+never ships quietly.
+
+## How it works
+
+```sh
+reelly analyze recording.mp4      # transcript, scenes, audio, what happens on screen
+reelly cut recording              # plans, renders, judges
+```
+
+Each project gets `deliverables/final/` with two files per cut (`cut_01.mp4`
+with music, `cut_01_trending.mp4` without, for in-app sounds), a posting block
+per cut, and one `REVIEW.md` to watch and decide from.
 
 ## Quick start
 
-### 1. Install system requirements
-
-You need:
-
-- Python 3.11 or newer
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip — `curl -LsSf https://astral.sh/uv/install.sh | sh` (Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` or `pip install uv`)
-- ffmpeg and ffprobe on `PATH`
+You need Python 3.11+, [uv](https://docs.astral.sh/uv/), ffmpeg and Google
+Chrome (kinetic type and every effect render in it).
 
 ```sh
-# macOS
-brew install ffmpeg
-
-# Debian/Ubuntu
-sudo apt install ffmpeg
-
-# Windows
-winget install Gyan.FFmpeg
-```
-
-### 2. Install Reelly
-
-```sh
+brew install ffmpeg               # Debian/Ubuntu: sudo apt install ffmpeg
+                                  # Windows: winget install Gyan.FFmpeg
 git clone https://github.com/FernGuard/reelly.git
 cd reelly
 uv sync
-uv run reelly setup
+uv run reelly setup               # checks everything; prints no secrets
 ```
 
-Without uv:
+A fresh install renders with Reelly's neutral defaults. To see the full look,
+start from the example brand:
 
 ```sh
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-python -m pip install -e .
-reelly setup
+mkdir -p ~/.reelly/brandkit/brands
+cp -r examples/brandkit/demo ~/.reelly/brandkit/brands/
+uv run reelly analyze recording.mp4
+uv run reelly cut recording --brand demo
 ```
 
-`reelly setup` is a diagnostic check, not an installer or credential wizard. A fresh install can run local checks before any API key is configured.
+The full guide is [docs/SETUP.md](docs/SETUP.md).
 
-### 3. Provide the keys for the features you want
+## Make it yours
 
-Reelly does not create provider accounts or keys for you. Create keys directly with each provider, then export them in your shell:
+A brand kit holds your type, colours, voice, soundtrack and look, outside the
+repository. One `brand.json` decides it all:
 
-| Provider | Environment variable | Used for | Create your key |
-|---|---|---|---|
-| Gemini | `GEMINI_API_KEY` | visual review, occupancy, QC, sizzle survey | https://aistudio.google.com/apikey |
-| OpenAI | `OPENAI_API_KEY` | default editor brain | https://platform.openai.com/api-keys |
-| FAL | `FAL_KEY` | music, sound effects, motion generation | https://fal.ai/dashboard/keys |
-| Anthropic | `ANTHROPIC_API_KEY` | optional PRISM analysis | https://console.anthropic.com/settings/keys |
-| Hugging Face | `HUGGINGFACE_TOKEN` | optional gated diarization models | https://huggingface.co/settings/tokens |
-
-```sh
-export GEMINI_API_KEY="your-key"
-export OPENAI_API_KEY="your-key"
-export FAL_KEY="your-key"
-uv run reelly setup
-```
-
-Do not put real values in `.env.example`, repository files, commits, issues, or logs.
-Reelly does **not** load a `.env` file. Export the variables, or write `~/.reelly/config.json`.
-
-Instead of environment variables, you may use `~/.reelly/config.json`. Reelly creates it with owner-only permissions when written by its configuration helper. If you create it manually:
-
-```sh
-mkdir -p ~/.reelly
-cat > ~/.reelly/config.json <<'EOF'
+```json
 {
-  "gemini_api_key": "your-key",
-  "openai_api_key": "your-key",
-  "fal_key": "your-key",
-  "anthropic_api_key": "your-key",
-  "huggingface_token": "your-key",
-  "projects": "~/reelly-projects"
+  "schema": 1,
+  "name": "mybrand",
+  "accent": "#7c5cff",
+  "fonts": {"headline": "Display-Bold.ttf", "caption": "Text-Bold.ttf"},
+  "video": {"fps": 60, "clip_len": [25, 30]},
+  "text": {"motion": "blocklock", "exit": "petals"},
+  "effects": {"endcard": "smoke", "ambient": ["smoke", "embers", "impact"], "text": "smoke"}
 }
-EOF
-chmod 700 ~/.reelly
-chmod 600 ~/.reelly/config.json
 ```
 
-On Windows PowerShell, create `%USERPROFILE%\.reelly\config.json` with the same JSON, then restrict it to your user (`icacls %USERPROFILE%\.reelly\config.json /inheritance:r /grant:r %USERNAME%:R`). Reelly still writes mode `0600` when it creates the file itself.
+`reelly brand check mybrand` validates every key and effect name before a
+render starts. See [docs/BRAND_KIT.md](docs/BRAND_KIT.md) for every option and
+[docs/EFFECTS.md](docs/EFFECTS.md) to write your own effects.
 
-Environment variables take precedence over the config file.
+## Zero paid calls by default
 
-### 4. Run your first local analysis
+Reelly never calls a provider that bills per call unless a run says so with
+`--allow-paid`. The editor brain and the vision pass use a subscription CLI
+you are already signed in to: the [Codex CLI](https://github.com/openai/codex)
+runs on your ChatGPT plan's quota, with no per-call bill. With nothing signed
+in, Reelly plans with heuristics.
 
-```sh
-uv run reelly analyze path/to/clip.mp4 --skip-visual
-```
+`--local-only` (or `REELLY_LOCAL_ONLY=1`) goes further: nothing leaves the
+machine at all. What each command sends, and where, is in
+[DATA_AND_PRIVACY.md](DATA_AND_PRIVACY.md).
 
-The project is created under `~/reelly-projects`. Set `REELLY_PROJECTS` to change that location. On Windows, source files are copied into the project if the filesystem cannot create a symlink.
+## Platforms
 
-For cloud-assisted analysis and editing after configuring keys:
+| | macOS (Apple Silicon) | Windows | Linux |
+|---|---|---|---|
+| Effects and kinetic type on the GPU | Metal | Direct3D 11 | OpenGL |
+| Without a usable GPU | software renderer | software renderer | software renderer |
+| Transcription | mlx-whisper | not yet | not yet |
+| EA IRIS flash analysis | not tested | yes (prebuilt app) | not tested |
 
-```sh
-uv run reelly analyze path/to/clip.mp4
-uv run reelly cut <project-name>
-```
-
-Useful commands:
-
-```text
-reelly setup               check binaries and key availability without printing values
-reelly analyze <video>     analyze a recording
-reelly cut <project>       plan, render, and run quality checks
-reelly budget              show recorded AI spend
-reelly --help              list every command
-```
-
-## Zero-paid by default
-
-Reelly never calls a provider that bills per call (Gemini, OpenAI, FAL,
-Anthropic) unless the run says so with `--allow-paid` (or
-`REELLY_ALLOW_PAID=1`). Keys you have set stay idle until then. The editor
-brain defaults to `--brain auto`: a signed-in subscription CLI (`codex`, then
-`claude`), else heuristic planning. Uncached SFX and music beds are skipped,
-not generated.
-
-## What works without each key
-
-- No Gemini key: `analyze --skip-visual` runs local stages; visual review and vision QC are unavailable.
-- No OpenAI key: the default `--brain auto` uses a subscription CLI or heuristics; `--brain gpt` needs the key and `--allow-paid`.
-- No FAL key: cached/generated assets already on disk remain usable; new media generation is unavailable.
-- No Anthropic key: only Anthropic-backed PRISM analysis is unavailable.
-- No Hugging Face token: core editing still works; gated speaker diarization is unavailable.
-
-A selected cloud engine never silently switches to a different paid provider.
+Measured on an Apple M4: the smoke end card renders at 35 fps through Metal
+against 9 fps on the software renderer, and a 15-second cut with every effect
+renders in about a minute once its footage is cut. On an RTX 5090 a full
+1080x1920 effect frame draws and reads back at 635 fps.
 
 ## Optional features
 
 ```sh
-uv sync --extra diarize    # speaker diarization
-uv sync --extra asr-fast   # faster English ASR on Apple Silicon only
-uv sync --extra prism      # URL ingestion and OCR helpers for PRISM
+uv run reelly models fetch depth        # depth for `reelly parallax` (also: uv sync --extra depth)
+uv run reelly models fetch segmenter    # person masks for text behind the subject
+uv sync --extra diarize                 # who speaks when
+uv sync --extra asr-fast                # faster English transcription on Apple Silicon
 ```
 
-Diarization requires accepting the terms for:
+`reelly parallax key-art.png` turns a still into a slow 2.5D camera move.
 
-- `pyannote/speaker-diarization-3.1`
-- `pyannote/segmentation-3.0`
-- `pyannote/speaker-diarization-community-1`
+## Documentation
 
-See [docs/SETUP.md](docs/SETUP.md) for the complete setup guide.
-
-## Platform support
-
-| Platform | Status |
+| | |
 |---|---|
-| macOS on Apple Silicon | Most complete local path, including mlx-whisper |
-| macOS Intel, Linux, Windows | ffmpeg, configuration, and most commands work; mlx-whisper is unavailable |
-
-Chrome or Chromium is required only for browser-rendered cards. Reelly resolves tools from `PATH`; `FFMPEG`, `FFPROBE`, and `CHROME_PATH` can override discovery.
-
-## Private customization
-
-The repository ships only neutral example accounts and products. Keep organization names, domains, campaign IDs, logos, vocabulary, verdicts, and analytics outside Git:
-
-- `~/.reelly/accounts.json`
-- `~/.reelly/products.json`
-- `~/.reelly/config.json`
-- `~/.reelly/brandkit/`
-- your project directory under `REELLY_PROJECTS`
-
-See [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md).
-
-## Data and privacy
-
-Most media processing is local, but cloud-assisted commands send data to the selected provider. Reelly has no telemetry and never auto-publishes. Read [DATA_AND_PRIVACY.md](DATA_AND_PRIVACY.md) before processing confidential or personal media.
-
-You are responsible for source-media rights, participant consent, provider terms, platform disclosure, and generated-media labeling.
+| [docs/SETUP.md](docs/SETUP.md) | install, keys, models, uninstall |
+| [docs/BRAND_KIT.md](docs/BRAND_KIT.md) | every `brand.json` option |
+| [docs/EFFECTS.md](docs/EFFECTS.md) | the effects platform, writing an effect, golden frames |
+| [docs/SETTINGS.md](docs/SETTINGS.md) | every environment setting (`reelly config` shows yours) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the stages fit together |
+| [CHANGELOG.md](CHANGELOG.md) | what changed, and upgrading |
+| [DATA_AND_PRIVACY.md](DATA_AND_PRIVACY.md) | what stays local, what does not |
 
 ## Development
 
@@ -184,16 +145,15 @@ You are responsible for source-media rights, participant consent, provider terms
 uv run --with pytest python -m pytest tests/ -q
 ```
 
-Tests use synthetic fixtures and should not need production keys.
+Tests use synthetic fixtures and need no keys. Effects are covered by golden
+frames per renderer; see [docs/EFFECTS.md](docs/EFFECTS.md).
 
-## Contributing and security
+[CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) ·
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
-- [CONTRIBUTING.md](CONTRIBUTING.md)
-- [SECURITY.md](SECURITY.md)
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-
-Never submit client data, real metrics, transcripts, personal identifiers, source URLs, or credentials.
+You are responsible for the rights to your source media, participant consent,
+provider terms and platform disclosure labels.
 
 ## License
 
-[MIT](LICENSE). You may use, copy, modify, and distribute Reelly under the license terms.
+[MIT](LICENSE) © 2026 Fernando Guardiola

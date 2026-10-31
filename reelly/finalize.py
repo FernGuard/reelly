@@ -576,7 +576,7 @@ def _apply_tail_trim(root, sfx, plan, trim_s):
 
 def run(project, cut_id=None, tag=None, product="video", targets_for=None,
         review=False, force=False, account=None, variants=None, on_cut=None):
-    """on_cut(plan, made_paths), when given, fires on the WORKER thread the
+    """on_cut(plan, made_paths), when given, fires on the worker thread the
     moment a cut's deliverables exist -- the seam `cut` uses to start that
     cut's graphics layer while the remaining cuts are still rendering. It must
     be cheap (hand the work to another pool); an exception in it fails the

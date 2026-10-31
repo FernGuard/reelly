@@ -195,8 +195,8 @@ def test_brief_carries_approved_and_rejected_lines(tmp_path, monkeypatch):
     monkeypatch.setenv("REELLY_BRANDKIT", str(tmp_path / "kit"))
     monkeypatch.setenv("REELLY_BRAND", "g")
     b = direct.brief_block()
-    assert "LINES THE OWNER APPROVED" in b and '"Flattering, really."' in b
-    assert "LINES THE OWNER REJECTED" in b and '"Green crosses the grid"' in b
+    assert "LINES THE BRAND APPROVED" in b and '"Flattering, really."' in b
+    assert "LINES THE BRAND REJECTED" in b and '"Green crosses the grid"' in b
 
 
 def test_record_verdict_dedupes_and_keeps_the_newest(tmp_path, monkeypatch):

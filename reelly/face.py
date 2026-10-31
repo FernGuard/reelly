@@ -48,6 +48,8 @@ def _ensure_model():
     """
     if os.path.exists(MESH_MODEL):
         return True
+    if config.local_only():             # no downloads; BlazeFace if it is there
+        return False
     try:
         os.makedirs(os.path.dirname(MESH_MODEL), exist_ok=True)
         tmp = MESH_MODEL + ".tmp"

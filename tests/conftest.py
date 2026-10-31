@@ -10,9 +10,9 @@ import tempfile
 _TEST_HOME = tempfile.mkdtemp(prefix="reelly-test-home-")
 os.environ["REELLY_HOME"] = os.path.join(_TEST_HOME, ".reelly")
 # no setting from the machine leaks in: every REELLY_* behaviour the
-# developer or the worker has set (fps, effects, GPU tier, profile,
+# developer or a render machine has set (fps, effects, GPU tier, profile,
 # motion...) is dropped; tests that need one set it themselves. Only the
-# "where is this tool" paths (and the worker's golden-frame demand) stay.
+# "where is this tool" paths (and a render machine's golden-frame demand) stay.
 _WHERE = ("REELLY_CHROME", "REELLY_IRIS", "REELLY_DEPTH_MODEL", "REELLY_SEGMENTER",
           "REELLY_GOLDEN")
 for _var in [v for v in os.environ if v.startswith("REELLY_") and v not in _WHERE]:

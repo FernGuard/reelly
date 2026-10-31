@@ -545,7 +545,7 @@ def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops
 
 # One frame, straight off the GPU: seek/draw (awaiting a frame-loading
 # page), read the canvas back, hand it out as one base64 blob. No screenshot,
-# no compositor, no PNG encode: the probe on the PC measured the full-page
+# no compositor, no PNG encode: a probe on Windows measured the full-page
 # PNG screenshot at ~0.24 s/frame, the GPU draw + readback at ~1.6 ms.
 _GRAB = """(async function(ms){
   var d = window.__reellyDraw(ms); if (d && d.then) { await d; }
