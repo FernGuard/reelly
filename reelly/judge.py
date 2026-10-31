@@ -145,6 +145,11 @@ def check_file(path, expect_vertical=True, plan_dur=None):
             R.append(flashqc.gate(path))
         except Exception as e:   # noqa: BLE001 -- a broken probe must not pass silently
             R.append(("flashes", "WARN", f"flash check could not run ({e})"))
+        from . import iris
+        try:
+            R.append(iris.gate(path))
+        except Exception as e:   # noqa: BLE001
+            R.append(("iris", "WARN", f"IRIS could not run ({e})"))
     return {"file": path, "results": R}
 
 
