@@ -360,9 +360,29 @@ def test_every_generated_page_script_parses(tmp_path):
                              "#FCFCFB", "#a87cf0")[0],
         "text+aura": gputext.page(t, 58, 856, 227, 3.6, "headline", 2, lines, False, True,
                                   0.5, "#FCFCFB", "#a87cf0", aura="smoke-aura")[0],
+        "finish": shaderfx._page(shaderfx.fragment("folk_print"), 540, 960,
+                                 {"u_res": (540, 960), "u_t0": 0.0,
+                                  **shaderfx.uniforms("folk-print", host={"u_pic": (0, .34, 1, .66),
+                                                                          "u_clear": (.66, .8)})},
+                                 frames=["file:///s0.jpg"], fps=60, blur_px=1),
     }
     for name, html in pages.items():
         js = tmp_path / f"{name}.js"
         js.write_text(html[html.index("<script>") + 8:html.rindex("</script>")])
         r = subprocess.run([node, "--check", str(js)], capture_output=True, text=True)
         assert r.returncode == 0, f"{name}: {r.stderr[:300]}"
+
+
+def test_finish_is_its_own_placement(monkeypatch, tmp_path):
+    from reelly import finalize, kinetic
+    monkeypatch.delenv("REELLY_FINISH_FX", raising=False)
+    _brand(monkeypatch, {"fx": {"finish": "folk-print"}})
+    assert shaderfx.active("finish") == "folk-print"
+    assert shaderfx.active("ambient") is None
+    u = shaderfx.uniforms("folk-print")
+    assert {"u_dark", "u_mid", "u_light", "u_mix"} <= set(u)
+    # off or failing: the cut goes on without it
+    monkeypatch.setattr(kinetic, "enabled", lambda: True)
+    monkeypatch.setattr(shaderfx, "render_finish", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    monkeypatch.setattr(finalize.subprocess, "run", lambda *a, **k: None)
+    assert finalize._finish_pass("raw.mp4", "f.mp4", {"reframe": 1.0}, 10.0, str(tmp_path), None) == "raw.mp4"

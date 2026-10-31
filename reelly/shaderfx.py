@@ -42,8 +42,8 @@ import tempfile
 from . import config
 
 EFFECTS_DIR = os.path.join(os.path.dirname(__file__), "effects")
-PLACEMENTS = ("outro", "ambient", "text")
-KINDS = ("backdrop", "overlay", "text")
+PLACEMENTS = ("outro", "ambient", "text", "finish")
+KINDS = ("backdrop", "overlay", "text", "filter")
 TYPES = {"float": "float", "color": "vec3", "vec2": "vec2", "vec3": "vec3",
          "vec4": "vec4", "float[8]": "float"}
 # Uniforms the host always provides, per effect kind (never in INPUTS).
@@ -58,6 +58,8 @@ HOST_UNIFORMS = {
     "overlay": [],
     "text": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;",
              "uniform vec2 u_tsize;", "uniform float u_off;"],
+    # a filter reads the cut's own frames (u_txt, one per output frame)
+    "filter": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;"],
 }
 # Legacy brand values ("smoke") -> the preset each placement used to mean.
 LEGACY = {("outro", "smoke"): "smoke-endcard", ("ambient", "smoke"): "smoke-ambient",
@@ -768,3 +770,19 @@ def render_ambient(fx, out_dir, dur, pic, clear, pops=(), accent_hex=None, level
                                     ctrl=ctrl),
                        out_dir, w, h, dur, fps, windows=windows)
     return pat, fps
+
+
+def render_finish(fx, frames_dir, n, fps, out_dir, pic, clear):
+    """The finish layer for a cut: reads its frames (frames_dir/s%05d.jpg,
+    n of them at fps, already at the preset's render size), writes
+    out_dir/f%05d.tga (straight alpha, opaque only around the picture).
+    Returns (pattern, fps)."""
+    from pathlib import Path
+    from PIL import Image
+    first = Image.open(os.path.join(frames_dir, "s00000.jpg"))
+    w, h = first.size
+    frames = [Path(os.path.join(frames_dir, f"s{i:05d}.jpg")).resolve().as_uri() for i in range(n)]
+    U = uniforms(fx, brand_params(fx), host={"u_pic": pic, "u_clear": clear})
+    html = _page(fragment(load_preset(fx)["effect"]), w, h,
+                 {"u_res": (w, h), "u_t0": 0.0, **U}, frames=frames, fps=fps, blur_px=1)
+    return render_frames(html, out_dir, w, h, n / fps, fps), fps

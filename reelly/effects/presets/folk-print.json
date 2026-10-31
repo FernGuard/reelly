@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "effect": "folk_print",
+  "placement": "finish",
+  "description": "Brand-neutral finish preset: a 3-colour print (surface, accent, ink) with ordered dither, halftone dots and paper grain on the space around the picture.",
+  "params": {
+    "u_mix": 0.7,
+    "u_dot": 11.0
+  },
+  "render": {
+    "scale": 0.5,
+    "fps": 30
+  },
+  "lite": {
+    "render": {
+      "scale": 0.5,
+      "fps": 30
+    }
+  }
+}

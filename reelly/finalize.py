@@ -328,6 +328,54 @@ def _pop_times(plan):
     return sorted(out)
 
 
+def _protected(plan, layout_template):
+    """(pic, clear) in uv (y up): the picture rect and the caption band above
+    it, which brand-space layers never cover."""
+    from . import layout as _layout
+    H = _layout.FRAME_H
+    top = _layout.picture_top(plan.get("reframe", 1.0))
+    bottom = H - top
+    L = _layout.plan_text(plan, layout_template)
+    text_top = min(L.get("hook", {}).get("y", top), L.get("game_name", {}).get("y", top)) - 24
+    return (0.0, 1 - bottom / H, 1.0, 1 - top / H), (1 - top / H, 1 - max(0, text_top) / H)
+
+
+def _finish_pass(src, dst, plan, dur, workdir, layout_template):
+    """The brand's finish (shaderfx "finish", e.g. folk-print) over the space
+    around the picture, AFTER the ambient layers, so the fill, smoke and
+    sparks print as one surface; never the picture. Reads the cut's own
+    frames. Returns dst, or src when off / failed."""
+    from . import kinetic, shaderfx
+    fx = shaderfx.active("finish")
+    if not fx or not kinetic.enabled():
+        return src
+    try:
+        pic, clear = _protected(plan, layout_template)
+        ro = shaderfx._render_opts(fx)
+        fps = int(ro.get("fps", 60))
+        w, h = shaderfx._size(ro.get("scale", 0.5))
+        fdir = os.path.join(workdir, "finish_src")
+        os.makedirs(fdir, exist_ok=True)
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src, "-vf",
+                        f"fps={fps},scale={w}:{h}", "-q:v", "3", "-start_number", "0",
+                        os.path.join(fdir, "s%05d.jpg")], check=True)
+        n = len([f for f in os.listdir(fdir) if f.endswith(".jpg")])
+        seq, ffps = shaderfx.render_finish(fx, fdir, n, fps, os.path.join(workdir, "fx_finish"),
+                                           pic, clear)
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src,
+                        "-framerate", str(ffps), "-i", seq, "-filter_complex",
+                        "[1:v]scale=1080:1920:flags=bicubic,format=rgba[f];"
+                        "[0:v][f]overlay=0:0:eof_action=pass:shortest=0,format=yuv420p[v]",
+                        "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
+                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
+                        dst], check=True)
+        print(f"        finish '{fx}': around the picture, {n} frames")
+        return dst
+    except Exception as e:   # noqa: BLE001 -- the cut ships without the finish
+        print(f"        finish '{fx}' failed ({e}); no finish")
+        return src
+
+
 def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
     """The brand's cut-long shader layers (shaderfx ambient, stacked bottom
     first) over the pre-caption cut, only outside the picture and the text
@@ -636,6 +684,10 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     print(f"        control track failed ({e}); beats and pops only")
             with timing.stage(f"{p['id']} ambient fx", tpath):
                 lit = _ambient_pass(raw, os.path.join(td, "ambient.mp4"), p, dur, td, layout)
+            with timing.stage(f"{p['id']} finish fx", tpath):
+                # AFTER the ambient layers: smoke, sparks and the fill print as
+                # one surface (before them the print hid under the smoke)
+                lit = _finish_pass(lit, os.path.join(td, "finish.mp4"), p, dur, td, layout)
             with timing.stage(f"{p['id']} caption burn", tpath):
                 vid = _burn_final(lit, os.path.join(td, "burn.mp4"), p, words_tl,
                                   dur, td, layout, product)
