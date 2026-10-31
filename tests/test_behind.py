@@ -57,3 +57,14 @@ def test_masks_from_the_real_segmenter(tmp_path):
                     "color=c=gray:s=1080x1920:r=30:d=1", "-pix_fmt", "yuv420p", v], check=True)
     pat, fps, n = behind.masks(v, str(tmp_path / "m"))
     assert n == 30 and Image.open(pat % 0).mode == "L"
+
+
+def test_guided_filter_snaps_a_soft_mask_to_the_image_edge():
+    """A blurry mask over a sharp boundary comes out sharp at that boundary."""
+    rgb = np.zeros((64, 64, 3), np.uint8)
+    rgb[:, 32:] = 220                                   # a hard edge at x = 32
+    soft = np.tile(np.clip((np.arange(64) - 20) / 24.0, 0, 1), (64, 1)).astype(np.float32)
+    out = behind.guided_filter(rgb, soft, r=4, eps=1e-4)
+    row = out[32]
+    assert row[28] < soft[32][28] and row[36] > soft[32][36]   # pushed apart at the edge
+    assert row[36] - row[28] > (soft[32][36] - soft[32][28]) * 1.5

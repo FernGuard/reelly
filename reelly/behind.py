@@ -57,40 +57,80 @@ def enabled(plan=None):
     return "faces" in (prof.get("protect") or [])
 
 
+GUIDE_R, GUIDE_EPS = 8, 1e-4     # chosen on a 3x hair-edge comparison of 4 settings
+
+
+def guided_filter(rgb, p, r=GUIDE_R, eps=GUIDE_EPS):
+    """Edge-aware refinement of a soft mask `p` (float, 0..1) guided by the
+    frame's luminance (He, Sun & Tang, Guided Image Filtering): the output
+    follows the guide's edges where the mask changes, and stays smooth
+    elsewhere. Box filters only (scipy), O(1) in the radius."""
+    import numpy as np
+    from scipy.ndimage import uniform_filter
+    I = (rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114).astype(np.float32) / 255.0
+    k = 2 * r + 1
+    mI, mp_ = uniform_filter(I, k), uniform_filter(p, k)
+    cI, cIp = uniform_filter(I * I, k), uniform_filter(I * p, k)
+    a = (cIp - mI * mp_) / (cI - mI * mI + eps)
+    b = mp_ - a * mI
+    return np.clip(uniform_filter(a, k) * I + uniform_filter(b, k), 0.0, 1.0)
+
+
 def masks(video, out_dir, fps=30, width=540):
-    """Person masks for `video` as out_dir/m%05d.png (white = person).
-    Returns (pattern, fps, n)."""
+    """Person masks for `video` as out_dir/m%05d.png at the video's FULL
+    size (white = person). Returns (pattern, fps, n).
+
+    The segmenter sees a half-size frame (its own input is 256 px), so its
+    edge is blocky once scaled up: the soft confidence is upsampled and
+    refined with a GUIDED FILTER against the full-size frame (guided_filter),
+    which snaps the matte to the real edges (hair, shoulders, the face
+    outline); then smoothed over time and given a gentle curve, not a hard
+    threshold.
+    Frames stream one at a time (long cuts do not fill memory)."""
     import numpy as np
     import mediapipe as mp
     from mediapipe.tasks.python import BaseOptions, vision
     from PIL import Image
-    from scipy.ndimage import gaussian_filter
     model = find_model()
     if not model:
         raise FileNotFoundError("selfie_segmenter.tflite not installed")
+    # (OpenCV's contrib guidedFilter crashed natively next to MediaPipe in
+    # one process on the worker: the filter is a few box filters, done here)
     os.makedirs(out_dir, exist_ok=True)
     from . import media
     v = next(s for s in media.probe(video)["streams"] if s.get("codec_type") == "video")
-    h = int(round(width * int(v["height"]) / int(v["width"]) / 2)) * 2
-    r = subprocess.run([config.FFMPEG, "-v", "error", "-i", video, "-vf",
-                        f"fps={fps},scale={width}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                       capture_output=True, check=True)
-    n = len(r.stdout) // (width * h * 3)
-    frames = np.frombuffer(r.stdout[: n * width * h * 3], np.uint8).reshape(n, h, width, 3)
+    W, H = int(v["width"]), int(v["height"])
+    h = int(round(width * H / W / 2)) * 2
+    proc = subprocess.Popen([config.FFMPEG, "-v", "error", "-i", video, "-vf", f"fps={fps}",
+                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
     opts = vision.ImageSegmenterOptions(base_options=BaseOptions(model_asset_path=model),
                                         running_mode=vision.RunningMode.VIDEO,
                                         output_confidence_masks=True)
-    ema = None
-    with vision.ImageSegmenter.create_from_options(opts) as seg:
-        for i in range(n):
-            img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(frames[i]))
-            res = seg.segment_for_video(img, int(i * 1000 / fps))
-            conf = np.squeeze(res.confidence_masks[-1].numpy_view()).astype(np.float32)
-            ema = conf if ema is None else EMA * conf + (1 - EMA) * ema
-            m = np.clip((ema - 0.35) / 0.3, 0.0, 1.0)            # firm core, soft edge
-            m = gaussian_filter(m, 1.2)
-            Image.fromarray((m * 255 + 0.5).astype(np.uint8), "L").save(
-                os.path.join(out_dir, f"m{i:05d}.png"), compress_level=1)
+    ema, n, size = None, 0, W * H * 3
+    try:
+        with vision.ImageSegmenter.create_from_options(opts) as seg:
+            while True:
+                buf = proc.stdout.read(size)
+                if len(buf) < size:
+                    break
+                full = np.frombuffer(buf, np.uint8).reshape(H, W, 3)
+                small = np.asarray(Image.fromarray(full).resize((width, h), Image.BILINEAR))
+                res = seg.segment_for_video(mp.Image(image_format=mp.ImageFormat.SRGB,
+                                                     data=np.ascontiguousarray(small)),
+                                            int(n * 1000 / fps))
+                conf = np.squeeze(res.confidence_masks[-1].numpy_view()).astype(np.float32)
+                up = np.asarray(Image.fromarray(conf, "F").resize((W, H), Image.BILINEAR),
+                                dtype=np.float32)
+                up = guided_filter(full, up, GUIDE_R, GUIDE_EPS)
+                ema = up if ema is None else EMA * up + (1 - EMA) * ema
+                m = np.clip((ema - 0.2) / 0.6, 0.0, 1.0)
+                m = m * m * (3.0 - 2.0 * m)                      # gentle S-curve, no hard edge
+                Image.fromarray((m * 255 + 0.5).astype(np.uint8), "L").save(
+                    os.path.join(out_dir, f"m{n:05d}.png"), compress_level=1)
+                n += 1
+    finally:
+        proc.stdout.close()
+        proc.wait()
     return os.path.join(out_dir, "m%05d.png"), fps, n
 
 
