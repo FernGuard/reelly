@@ -49,9 +49,9 @@ def test_vertex_data_and_page():
 
 
 def test_off_switch_and_word_limit(monkeypatch):
-    monkeypatch.setenv("REELLY_GPU_TEXT", "off")
+    monkeypatch.setenv("REELLY_TEXT_GPU", "off")
     assert not gputext.enabled()
-    monkeypatch.delenv("REELLY_GPU_TEXT")
+    monkeypatch.delenv("REELLY_TEXT_GPU")
     assert gputext.enabled()
     with pytest.raises(ValueError):
         gputext.page(" ".join(["w"] * 41), 40, 800, 200, 3.0, "headline", None,
@@ -63,7 +63,7 @@ def test_motion_setting(monkeypatch):
     monkeypatch.delenv("REELLY_TEXT_MOTION", raising=False)
     monkeypatch.setattr(brandkit, "brand", lambda name=None: {})
     assert gputext.motion() == "rise"
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"fx": {"text_motion": "blocklock"}})
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"text": {"motion": "blocklock"}})
     assert gputext.motion() == "blocklock"
     monkeypatch.setenv("REELLY_TEXT_MOTION", "wobble")
     assert gputext.motion() == "rise"                         # unknown: the default
@@ -75,7 +75,7 @@ def test_motion_setting(monkeypatch):
 def test_petal_exit(monkeypatch):
     from reelly import brandkit
     monkeypatch.setenv("REELLY_TEXT_EXIT", "petals")
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"fx": {"petal_color": "#ff8800"}})
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"text": {"petal_color": "#ff8800"}})
     lines = [["Curse", "cleared."]]
     html, settle, hold_end, off = gputext.page("Curse cleared.", 72, 856, 200, 3.0, "headline",
                                                1, lines, True, True, 1.0, "#FCFCFB", "#a87cf0")

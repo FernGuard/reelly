@@ -90,7 +90,7 @@ def _pipeline():
                 f"pyannote.audio {_pyannote_version()} does not accept either "
                 f"`token` or `use_auth_token` on Pipeline.from_pretrained "
                 f"({e}). This is a reelly compatibility bug, not a setup "
-                f"problem — the token and model terms are fine.") from e
+                f"problem -- the token and model terms are fine.") from e
         except Exception as e:
             raise RuntimeError(
                 f"could not load {MODEL} ({e}). Most often the model terms have "
@@ -109,8 +109,8 @@ def _pipeline():
 def _to_best_device(pipe):
     """Move the pipeline to the Apple GPU (MPS) when available; CPU otherwise.
 
-    Returns the device name actually in use. ANY failure — no torch, no MPS,
-    an op the MPS backend does not support at load time — falls back to CPU
+    Returns the device name actually in use. ANY failure -- no torch, no MPS,
+    an op the MPS backend does not support at load time -- falls back to CPU
     and says so; it never crashes analyze. REELLY_DIAR_DEVICE=cpu forces CPU.
     """
     if os.environ.get("REELLY_DIAR_DEVICE", "").strip().lower() == "cpu":
@@ -124,7 +124,7 @@ def _to_best_device(pipe):
         pipe.to(torch.device("mps"))
         print("[diar ] pipeline on Apple GPU (MPS)")
         return "mps"
-    except Exception as e:  # noqa: BLE001 — device selection must never crash
+    except Exception as e:  # noqa: BLE001 -- device selection must never crash
         print(f"[diar ] could not move pipeline to MPS ({e}): pipeline on CPU")
         try:
             import torch
@@ -139,7 +139,7 @@ def _infer(pipe, wav, device):
     at inference) retries once on CPU instead of killing the stage."""
     try:
         return pipe(wav)
-    except Exception as e:  # noqa: BLE001 — MPS gaps surface as many types
+    except Exception as e:  # noqa: BLE001 -- MPS gaps surface as many types
         if device != "mps":
             raise
         print(f"[diar ] MPS inference failed ({e}); retrying on CPU")

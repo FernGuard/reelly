@@ -1,19 +1,14 @@
 {
   "version": 1,
   "description": "Software or product demo: the UI must stay exact and readable.",
-  "protect": [
-    "picture",
-    "ui"
-  ],
-  "drivers": [
-    "pops"
-  ],
   "allow": {
-    "outro": "*",
+    "endcard": "*",
     "ambient": [
-      "smoke-ambient"
+      "smoke"
     ],
     "text": "*",
     "finish": []
-  }
+  },
+  "faces": false,
+  "events": false
 }

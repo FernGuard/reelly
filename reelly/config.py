@@ -323,7 +323,7 @@ OUTPUT_FPS_ALLOWED = (24, 25, 30, 50, 60)
 
 def output_fps():
     """Frame rate of the social deliverables: REELLY_FPS, then the brand
-    kit's "fps", then 30. A game captured at 60 and shipped at 30 loses every
+    kit's video.fps, then 30. A game captured at 60 and shipped at 30 loses every
     other frame, which reads as choppy on fast play (falling blocks, hits);
     60 keeps it as smooth as it was recorded. TikTok, Reels and Shorts all
     accept 60."""
@@ -331,7 +331,7 @@ def output_fps():
     if v is None:
         try:
             from . import brandkit
-            v = brandkit.brand().get("fps")
+            v = brandkit.video("fps")
         except Exception:   # noqa: BLE001 -- no kit, no override
             v = None
     try:
@@ -353,11 +353,21 @@ def final_encode_args():
     return list(_FINAL_ENCODE_ARGS)
 
 
+_ON, _OFF = ("1", "on", "yes", "true"), ("0", "off", "no", "false")
+
+
+def env_bool(name, default=False):
+    """One parser for every on/off setting: 1/on/yes/true and 0/off/no/false
+    (any case); unset or anything else = default."""
+    v = os.environ.get(name, "").strip().lower()
+    return True if v in _ON else False if v in _OFF else default
+
+
 def local_only():
     """REELLY_LOCAL_ONLY=1 (or `reelly --local-only`): nothing leaves the
     machine. No subscription CLI (Codex, Claude), no paid provider, no
     vision check; every step uses its local path or is skipped."""
-    return os.environ.get("REELLY_LOCAL_ONLY", "").strip().lower() in ("1", "on", "yes", "true")
+    return env_bool("REELLY_LOCAL_ONLY")
 
 
 def gpu_mode():
@@ -489,7 +499,8 @@ def doctor(as_json=False):
         "id": "chrome",
         "status": "ok" if ch and _bin_ok(ch) else "missing",
         "detail": (ch if ch and _bin_ok(ch)
-                   else "not found (needed for overlay cards). Install Chrome or set CHROME_PATH"),
+                   else "not found (needed for kinetic text, effects and cards). "
+                        "Install Chrome or set CHROME_PATH"),
     })
 
     try:
@@ -522,6 +533,57 @@ def doctor(as_json=False):
                        if found else f"optional: subscription editor brain "
                                      f"(--brain {tool})"),
         })
+    if local_only():
+        checks.append({"id": "local-only", "status": "ok",
+                       "detail": "ON: no CLI, provider, vision or download call leaves this machine"})
+
+    # effects and safety: what the look and the gates need
+    checks.append({
+        "id": "GPU effects",
+        "status": "ok" if ch and _bin_ok(ch) else "missing",
+        "detail": (f"REELLY_GPU={gpu_mode()}: " + (
+            "Direct3D 11" if os.name == "nt" else "Metal" if sys.platform == "darwin"
+            else "OpenGL") + " through Chrome, software GPU if there is none"
+            if ch and _bin_ok(ch) else
+            "needs Chrome: kinetic text and every effect render in it"),
+    })
+    try:
+        import onnxruntime  # noqa: F401
+        ort = True
+    except ImportError:
+        ort = False
+    from . import models as _models, iris as _iris
+    for key, path, what in _models.status():
+        need_ort = key == "depth" and not ort
+        checks.append({
+            "id": f"model: {key}",
+            "status": "ok" if path and not need_ort else "skip",
+            "detail": (path if path and not need_ort else
+                       f"optional, {what}: reelly models fetch {key}"
+                       + (" and uv sync --extra depth" if need_ort else "")),
+        })
+    app = _iris.find()
+    checks.append({
+        "id": "EA IRIS",
+        "status": "ok" if app else "skip",
+        "detail": (f"{app} (photosensitivity gate)" if app else
+                   "optional: the flash gate always runs; IRIS adds red-flash and "
+                   "pattern checks (Windows build: github.com/electronicarts/IRIS, "
+                   "then REELLY_IRIS or <REELLY_HOME>/tools/iris/)"),
+    })
+    try:
+        from . import brandkit as _bk
+        bname = _bk.brand_name()
+        if bname:
+            errs, warns = _bk.check(_bk.brand(bname))
+            checks.append({
+                "id": f"brand: {bname}",
+                "status": "ok" if not errs else "missing",
+                "detail": ("brand.json is valid" + (f" ({len(warns)} warning(s))" if warns else "")
+                           if not errs else f"{len(errs)} error(s): reelly brand check {bname}"),
+            })
+    except Exception:   # noqa: BLE001 -- setup must always print
+        pass
 
     for name, spec in PROVIDERS.items():
         present = have_key(name) if not paid_blocked(name) else bool(
@@ -533,10 +595,10 @@ def doctor(as_json=False):
             status, detail = "ok", spec["used_for"]
         elif spec["required"]:
             status = "missing"
-            detail = (f"MISSING — {spec['used_for']}. Get a key at {spec['url']} "
+            detail = (f"MISSING: {spec['used_for']}. Get a key at {spec['url']} "
                       f"then: export {spec['env'][0]}=your-key")
         else:
-            status, detail = "skip", f"optional — {spec['used_for']}"
+            status, detail = "skip", f"optional: {spec['used_for']}"
         checks.append({"id": spec["env"][0], "status": status, "detail": detail})
 
     if as_json:

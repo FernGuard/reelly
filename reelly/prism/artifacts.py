@@ -1,5 +1,5 @@
 """ARTIFACTS: hook-dense frames, scene-cut timestamps, and a transcription wav
-— everything downstream stages read straight off disk.
+-- everything downstream stages read straight off disk.
 """
 import json
 import os
@@ -27,7 +27,7 @@ def _frame_times(duration):
 
 
 def extract_frames(video, out_dir, duration=None):
-    """[{t, path}] — one 360px-wide jpg per hook-dense timestamp."""
+    """[{t, path}] -- one 360px-wide jpg per hook-dense timestamp."""
     os.makedirs(out_dir, exist_ok=True)
     duration = duration if duration is not None else media.duration(video)
     frames = []
@@ -41,7 +41,7 @@ def extract_frames(video, out_dir, duration=None):
 
 
 def scene_cuts(video, cache_json=None, force=False):
-    """[{t, score}] using PRISM's own (looser) threshold — short-form content
+    """[{t, score}] using PRISM's own (looser) threshold -- short-form content
     cuts far more aggressively than the longform screen recordings scenes.py
     was written for. Cached to cache_json: the full-decode ffmpeg pass used to
     re-run on every invocation of the same slug."""

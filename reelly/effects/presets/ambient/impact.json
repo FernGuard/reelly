@@ -1,8 +1,7 @@
 {
   "version": 1,
   "effect": "impact_ambient",
-  "placement": "ambient",
-  "description": "Brand-neutral ambient preset: comic impact lines that shoot out of the picture's edge where a real impact happens (sound and picture jump together).",
+  "description": "Comic impact lines that shoot out of the picture's edge where a real impact happens (sound and picture jump together).",
   "params": {},
   "render": {
     "scale": 1.0,

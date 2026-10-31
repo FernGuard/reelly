@@ -2,7 +2,7 @@
 
 Inputs: human verdicts (playbook/feedback/VERDICTS.md) and platform metrics
 (metrics.json fetched from analytics export in-session). Output: an evidence report
-plus a PLAYBOOK PROPOSAL file — never an automatic playbook edit; reviewer
+plus a PLAYBOOK PROPOSAL file -- never an automatic playbook edit; reviewer
 approves proposals before they merge (internal workflow autonomy rule).
 
 Outlier math is playbook R1: score = views / channel median. Above 10 is a

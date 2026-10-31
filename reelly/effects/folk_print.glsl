@@ -1,5 +1,5 @@
 /*{
-  "ISFVSN": "2", "VSN": "1.0", "CREDIT": "Patolli / Reelly", "LICENSE": "MIT",
+  "VSN": "1.0", "LICENSE": "MIT",
   "DESCRIPTION": "Folk-print finish for the space around the picture (Reelly's own fill, never the content): the frame is reduced to a 3-colour brand palette (surface, accent, ink) through a 4x4 ordered dither, laid with rotated halftone dots and paper grain, like a loteria card or a relief print. The picture and anything inside u_pic is left untouched.",
   "REELLY": {"kind": "filter"},
   "INPUTS": [

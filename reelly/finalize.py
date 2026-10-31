@@ -3,7 +3,7 @@
 Takes a cut plan and produces deliverables/final/<id>.mp4: composed video
 (same layout as previews), S6 voice stem, generated music bed ducked under
 the voice, sparse SFX on the moments that earn them (S3), word-highlight
-captions, hook, payoff chip, product end tag — plus DESCRIPTION.md with the
+captions, hook, payoff chip, product end tag -- plus DESCRIPTION.md with the
 channel-correct tracked links and the posting checklist. Stems land in
 deliverables/audio/ so everything stays editable.
 """
@@ -199,7 +199,7 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
         t0 = float(payoff["local_t"])
         events.append((chip, chip_y, t0, t0 + 1.6))
 
-    # captions:"none" — see preview._render. Non-narration audio (game VO,
+    # captions:"none" -- see preview._render. Non-narration audio (game VO,
     # music) makes ASR invent lines; those must never reach a deliverable.
     cue_groups = ([] if plan.get("captions") == "none"
                   else speech.group_cue_words(words_tl))
@@ -303,7 +303,7 @@ def _burn_pass(src, dst, events, seek=None):
 def shaderfx_any():
     """Is any shader layer on for this run (worth computing a control track)?"""
     from . import shaderfx
-    return any(shaderfx.active_list(k) for k in ("ambient", "outro", "text"))
+    return any(shaderfx.active_list(k) for k in shaderfx.BRAND_PLACEMENTS)
 
 
 def _pop_times(plan):
@@ -408,7 +408,7 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
         pic, clear = prot                                     # uv, y up
         pops = _pop_times(plan)
         ctrl = plan.get("_ctrl")
-        if ctrl is not None and "events" not in ctrl and not shaderfx.drives("events"):
+        if ctrl is not None and "events" not in ctrl and not shaderfx.content_flag("events"):
             ctrl["events"] = []                 # not a content type with game hits
         if ctrl is not None and "events" not in ctrl:
             from . import control
@@ -577,7 +577,7 @@ def _apply_tail_trim(root, sfx, plan, trim_s):
 def run(project, cut_id=None, tag=None, product="video", targets_for=None,
         review=False, force=False, account=None, variants=None, on_cut=None):
     """on_cut(plan, made_paths), when given, fires on the WORKER thread the
-    moment a cut's deliverables exist — the seam `cut` uses to start that
+    moment a cut's deliverables exist -- the seam `cut` uses to start that
     cut's graphics layer while the remaining cuts are still rendering. It must
     be cheap (hand the work to another pool); an exception in it fails the
     cut like any other error."""
@@ -632,13 +632,13 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
         # pool threads are reused: resolve THIS cut's content type from its
         # own plan, never the previous cut's, and leave nothing behind
         from . import degrade
-        _fx.set_profile(None)
-        _fx.set_profile(_fx.profile_name(p))
+        _fx.set_content_type(None)
+        _fx.set_content_type(_fx.content_type(p, follow=follow))
         degrade.begin()
         try:
             return _finalize_cut(p)
         finally:
-            _fx.set_profile(None)
+            _fx.set_content_type(None)
             degrade.write(root, p["id"], degrade.collect())
 
     def _finalize_cut(p):
@@ -887,7 +887,7 @@ def _write_review_md(root, plans, targets, sfx, cut_id=None):
         watch = f"{p['id']}_gfx.mp4"
         if not os.path.exists(os.path.join(root, outdir, watch)):
             watch = f"{p['id']}.mp4"
-        L += [f"## {p['id']} — {p['title']}  ({p['duration_s']}s)", "",
+        L += [f"## {p['id']} -- {p['title']}  ({p['duration_s']}s)", "",
               f"- **Watch:** `{outdir}/{watch}`"
               + ("  (music + captions + SFX + VFX)" if watch.endswith("_gfx.mp4")
                  else "  (music + captions + SFX; no graphics layer)"),

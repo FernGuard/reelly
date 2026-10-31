@@ -1,19 +1,12 @@
 {
   "version": 1,
   "description": "Game footage letterboxed or cropped: brand space around the picture, hits drive marks.",
-  "protect": [
-    "picture"
-  ],
-  "drivers": [
-    "beats",
-    "pops",
-    "onsets",
-    "events"
-  ],
   "allow": {
-    "outro": "*",
+    "endcard": "*",
     "ambient": "*",
     "text": "*",
     "finish": "*"
-  }
+  },
+  "faces": false,
+  "events": true
 }

@@ -31,5 +31,5 @@ def _fresh_render_state():
     """Per-thread render state never leaks from one test into the next."""
     yield
     from reelly import degrade, shaderfx
-    shaderfx.set_profile(None)
+    shaderfx.set_content_type(None)
     degrade.collect()

@@ -241,11 +241,11 @@ def accent():
 def reframe():
     """The active brand's framing for 16:9 footage in a 9:16 frame, or None.
 
-    brand.json "reframe": "full_width" (or 1.0) shows the whole width of the
+    brand.json "video": {"reframe": "full_width"} (or 1.0) shows the whole width of the
     game, smaller; a number up to 2.0 zooms in and crops the sides. A game
     whose screen must read whole (two boards, a HUD at both edges) sets
     full_width; None leaves Reelly's own choice."""
-    v = brand().get("reframe")
+    v = video("reframe")
     if isinstance(v, str) and v.strip().lower() in ("full_width", "full", "fit"):
         return 1.0
     try:
@@ -266,10 +266,215 @@ def copy_brief():
     return c if isinstance(c, dict) else {}
 
 
+# ---------------------------------------------------------------- schema 1
+# brand.json, version 1. Colours, fonts, copy, music and sfx keep their
+# places; how the video looks and moves is grouped:
+#   "schema": 1,
+#   "video":   {"fps": 30|60, "reframe": "full_width"|1.0-2.0,
+#               "content_type": "gameplay"|..., "clip_len": [min_s, max_s]},
+#   "text":    {"motion": "rise"|"blocklock", "exit": "fade"|"petals",
+#               "petal_color": "#RRGGBB", "behind_subject": false},
+#   "effects": {"endcard": "smoke", "ambient": ["smoke", {"preset": "embers",
+#               "params": {"u_density": 0.4}}], "text": "smoke", "finish": null}
+# `reelly brand check NAME` validates a kit; `reelly brand migrate NAME`
+# rewrites an older one.
+SCHEMA = 1
+TOP_KEYS = {"schema", "name", "accent", "ink", "surface", "fonts", "copy", "music", "sfx",
+            "video", "text", "effects", "source", "license", "notes"}
+SECTION_KEYS = {
+    "video": {"fps", "reframe", "content_type", "clip_len"},
+    "text": {"motion", "exit", "petal_color", "behind_subject"},
+    "effects": {"endcard", "ambient", "text", "finish"},
+    "copy": {"audience", "promise", "proof", "voice", "cta", "cta_hot", "avoid",
+             "approved_lines", "rejected_lines"},
+    "music": {"tracks", "match", "default", "cleared", "bpm", "source"},
+}
+# where keys from before schema 1 went (for clear errors and `migrate`)
+MOVED = {"fps": "video.fps", "reframe": "video.reframe", "profile": "video.content_type",
+         "fx": "effects (+ text.motion / text.exit / text.petal_color / "
+               "text.behind_subject)",
+         "outro_fx": "effects.endcard", "ambient_fx": "effects.ambient",
+         "text_fx": "effects.text", "copy.clip_len": "video.clip_len"}
+
+
+def section(name):
+    """One schema-1 section of the active brand ({} when absent)."""
+    v = brand().get(name)
+    return v if isinstance(v, dict) else {}
+
+
+def video(key, default=None):
+    return section("video").get(key, default)
+
+
+def text_style(key, default=None):
+    return section("text").get(key, default)
+
+
+def effect_entries(placement):
+    """[(preset name, params)] the brand plays at a placement, stack order."""
+    entry = section("effects").get(placement)
+    out = []
+    for e in (entry if isinstance(entry, list) else [entry]):
+        if isinstance(e, dict):
+            out.append((str(e.get("preset") or ""), e.get("params") or {}))
+        elif isinstance(e, str) and e:
+            out.append((e, {}))
+    return out
+
+
+def check(data):
+    """(errors, warnings) for a brand.json dict. Errors stop a run at its
+    first second (a typo must never silently switch an effect off)."""
+    from . import gputext, performance, shaderfx
+    err, warn = [], []
+    if not isinstance(data, dict):
+        return ["brand.json is not a JSON object"], []
+    if data.get("schema") is None:
+        warn.append('no "schema": 1 (add it, or run `reelly brand migrate`)')
+    elif data.get("schema") != SCHEMA:
+        err.append(f"schema {data.get('schema')!r} is not supported (this Reelly reads {SCHEMA})")
+    for k in data:
+        if k in MOVED:
+            err.append(f'"{k}" moved to {MOVED[k]} (run `reelly brand migrate`)')
+        elif k not in TOP_KEYS:
+            err.append(f'unknown key "{k}"')
+    for k in ("accent", "ink", "surface"):
+        if k in data and not (isinstance(data[k], str) and _HEX.fullmatch(data[k])):
+            err.append(f'"{k}" must be a #RRGGBB colour')
+    fonts = data.get("fonts", {})
+    if not isinstance(fonts, dict) or not all(isinstance(v, str) and os.path.basename(v) == v
+                                              for v in fonts.values()):
+        err.append('"fonts" must map roles to font file names in the brand folder')
+    for sec, keys in SECTION_KEYS.items():
+        v = data.get(sec)
+        if v is None:
+            continue
+        if not isinstance(v, dict):
+            err.append(f'"{sec}" must be an object')
+            continue
+        for k in v:
+            if f"{sec}.{k}" in MOVED:
+                err.append(f'"{sec}.{k}" moved to {MOVED[sec + "." + k]}')
+            elif k not in keys:
+                (warn if sec == "copy" else err).append(f'unknown key "{sec}.{k}"')
+    vid, txt, fx = (data.get(k) if isinstance(data.get(k), dict) else {}
+                    for k in ("video", "text", "effects"))
+    if "fps" in vid and vid["fps"] not in (24, 25, 30, 50, 60):
+        err.append('"video.fps" must be 24, 25, 30, 50 or 60')
+    if "reframe" in vid:
+        r = vid["reframe"]
+        ok = (isinstance(r, str) and r.strip().lower() in ("full_width", "full", "fit")) or \
+             (isinstance(r, (int, float)) and 1.0 <= r <= 2.0)
+        if not ok:
+            err.append('"video.reframe" must be "full_width" or a zoom from 1.0 to 2.0')
+    if "content_type" in vid and vid["content_type"] not in shaderfx.content_types():
+        err.append(f'"video.content_type" must be one of {shaderfx.content_types()}')
+    if "clip_len" in vid and performance._parse_len(vid["clip_len"]) is None:
+        err.append('"video.clip_len" must be [min, max] seconds, 5 <= min < max <= 180')
+    if "motion" in txt and txt["motion"] not in gputext.MOTIONS:
+        err.append(f'"text.motion" must be one of {list(gputext.MOTIONS)}')
+    if "exit" in txt and txt["exit"] not in gputext.EXITS:
+        err.append(f'"text.exit" must be one of {list(gputext.EXITS)}')
+    if "petal_color" in txt and not (isinstance(txt["petal_color"], str)
+                                     and _HEX.fullmatch(txt["petal_color"])):
+        err.append('"text.petal_color" must be a #RRGGBB colour')
+    if "behind_subject" in txt and not isinstance(txt["behind_subject"], bool):
+        err.append('"text.behind_subject" must be true or false')
+    for placement, entry in fx.items():
+        if placement not in SECTION_KEYS["effects"] or entry is None:
+            continue
+        if placement != "ambient" and isinstance(entry, list):
+            err.append(f'"effects.{placement}" takes one preset, not a list')
+            continue
+        for e in (entry if isinstance(entry, list) else [entry]):
+            name, params = (e.get("preset"), e.get("params") or {}) if isinstance(e, dict) \
+                else (e, {})
+            if not isinstance(name, str) or not name:
+                err.append(f'"effects.{placement}": every entry needs a preset name')
+                continue
+            if name in ("off", "none"):
+                continue
+            pid = f"{placement}/{name}"
+            if pid not in shaderfx.presets():
+                have = [p.split("/", 1)[1] for p in shaderfx.presets()
+                        if p.startswith(placement + "/")]
+                err.append(f'"effects.{placement}": no preset "{name}" (have: {", ".join(have)})')
+                continue
+            try:
+                shaderfx.uniforms(pid, params)
+            except shaderfx.EffectError as e2:
+                err.append(f'"effects.{placement}" {name}: {e2}')
+    music = data.get("music")
+    if isinstance(music, dict) and "cleared" in music and not isinstance(music["cleared"], bool):
+        err.append('"music.cleared" must be true or false')
+    return err, warn
+
+
+def require_valid():
+    """Stop a run at its first second when the active brand.json has errors
+    (a typo in an effect name must not silently switch it off at minute 10)."""
+    name = brand_name()
+    if not name:
+        return
+    d = brand_dir(name)
+    p = os.path.join(d, "brand.json")
+    if not os.path.exists(p):
+        return                         # brand() already warns about a missing kit
+    errs, warns = check(brand(name))
+    for w in warns:
+        print(f"[brand] {name}: {w}")
+    if errs:
+        raise SystemExit(f"[brand] {name}: brand.json has {len(errs)} error(s):\n  - "
+                         + "\n  - ".join(errs) + f"\nFix them, then `reelly brand check {name}`.")
+
+
+def migrate(data):
+    """An older brand.json dict rewritten to schema 1 (a new dict)."""
+    old = dict(data)
+    out = {k: v for k, v in old.items() if k not in MOVED}
+    vid = dict(out.get("video") or {})
+    txt = dict(out.get("text") or {})
+    eff = dict(out.get("effects") or {})
+    if "fps" in old:
+        vid.setdefault("fps", old["fps"])
+    if "reframe" in old:
+        vid.setdefault("reframe", old["reframe"])
+    if "profile" in old:
+        vid.setdefault("content_type", str(old["profile"]).replace("_", "-"))
+    copy = dict(out.get("copy") or {})
+    if "clip_len" in copy:
+        vid.setdefault("clip_len", copy.pop("clip_len"))
+        out["copy"] = copy
+    fx = old.get("fx") if isinstance(old.get("fx"), dict) else {}
+    names = {"smoke-endcard": "smoke", "smoke-ambient": "smoke", "embers-ambient": "embers",
+             "impact-ambient": "impact", "focus-ambient": "focus", "smoke-aura": "smoke"}
+
+    def conv(e):
+        if isinstance(e, dict):
+            return {**e, "preset": names.get(e.get("preset"), e.get("preset"))}
+        return names.get(e, e)
+    for placement, legacy, key in (("endcard", "outro_fx", "outro"), ("ambient", "ambient_fx", "ambient"),
+                                   ("text", "text_fx", "text"), ("finish", None, "finish")):
+        v = fx.get(key)
+        if v is None and legacy and old.get(legacy):
+            v = old[legacy]                     # "smoke"
+        if v is not None:
+            eff.setdefault(placement, [conv(x) for x in v] if isinstance(v, list) else conv(v))
+    for a, b in (("text_motion", "motion"), ("text_exit", "exit"), ("petal_color", "petal_color"),
+                 ("text_behind", "behind_subject")):
+        if a in fx:
+            txt.setdefault(b, fx[a])
+    for k, v in (("video", vid), ("text", txt), ("effects", eff)):
+        if v:
+            out[k] = v
+    return {"schema": SCHEMA, **{k: v for k, v in out.items() if k != "schema"}}
+
+
 def record_verdict(name, approve=(), reject=(), keep=40):
-    """Append owner-approved / rejected lines to brands/<name>/brand.json
-    "copy" (deduplicated, newest last, at most `keep` each), so the next hook
-    writer and judge learn the owner's taste. Returns the copy dict."""
+    """Append approved / rejected lines to brands/<name>/brand.json "copy"
+    (deduplicated, newest last, at most `keep` each), so the next hook
+    writer and judge learn the brand's taste. Returns the copy dict."""
     d = brand_dir(name)
     p = os.path.join(d, "brand.json") if d else None
     if not p or not os.path.exists(p):

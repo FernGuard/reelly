@@ -263,7 +263,7 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
         for cname, fu in futures:
             try:
                 fu.result()
-            except Exception as e:  # noqa: BLE001 — every chain must finish
+            except Exception as e:  # noqa: BLE001 -- every chain must finish
                 errors.append((cname, e))
                 print(f"[FAIL] {cname} chain: {e}")
 

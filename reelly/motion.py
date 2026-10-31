@@ -441,7 +441,7 @@ def _warn_lettering_style(name, spec):
     asset another campaign already uses.
 
     One style asset shared across campaigns/registers makes every campaign's
-    type read identically — the candidates->pick flow (see the module docstring)
+    type read identically -- the candidates->pick flow (see the module docstring)
     exists precisely so each register gets its own style. This does not raise:
     style reuse is sometimes deliberate, so the human decides. It just refuses
     to be silent about it."""

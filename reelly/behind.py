@@ -13,8 +13,8 @@ HOW
   does not flicker) and feathered, then written as greyscale frames.
 - Composite: the burned cut, then the raw cut with the mask as its alpha
   on top: the person covers the text, everything else keeps it.
-- Only where a brand asks for it (fx.text_behind) AND the content profile
-  protects faces (talking_head, podcast): never on gameplay or demos.
+- Only where a brand asks for it (text.behind_subject) AND the content type
+  protects faces (talking-head, podcast): never on gameplay or demos.
 
 Install the model with `reelly models fetch segmenter` (or REELLY_SEGMENTER).
 """
@@ -32,23 +32,20 @@ def find_model():
 
 
 def enabled(plan=None):
-    """Brand fx.text_behind AND a content profile that protects faces."""
-    from . import shaderfx
+    """The brand's text.behind_subject (or REELLY_TEXT_BEHIND) AND a content
+    type that protects faces."""
+    from . import config, shaderfx
     try:
         from . import brandkit
-        fx = brandkit.brand().get("fx")
-        on = bool(isinstance(fx, dict) and fx.get("text_behind"))
+        on = brandkit.text_style("behind_subject") is True
     except Exception:   # noqa: BLE001
         on = False
-    if os.environ.get("REELLY_TEXT_BEHIND", "").strip().lower() in ("1", "on", "yes"):
-        on = True
-    if not on:
+    if not config.env_bool("REELLY_TEXT_BEHIND", on):
         return False
     try:
-        prof = shaderfx.load_profile(shaderfx.profile_name(plan))
+        return shaderfx.content_flag("faces", shaderfx.content_type(plan))
     except Exception:   # noqa: BLE001
         return False
-    return "faces" in (prof.get("protect") or [])
 
 
 GUIDE_R, GUIDE_EPS = 8, 1e-4     # chosen on a 3x hair-edge comparison of 4 settings

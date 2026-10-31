@@ -3,7 +3,7 @@
 Samples frames via signalstats, measures mean luma / luma range / saturation,
 and emits a small eq correction for underexposure, flatness, and desaturation.
 Every axis is hard-capped (max ~8 percent) so the output reads "clean", not
-"graded" — no LUTs, no color shifts, no taste in code.
+"graded" -- no LUTs, no color shifts, no taste in code.
 
 Adapted from MIT-licensed browser-use/video-use helpers/grade.py.
 See THIRD_PARTY_NOTICES.md.
@@ -18,7 +18,7 @@ from . import config, media
 
 # signalstats decodes the sampled range every time; the result only depends
 # on (file identity, range, sample count), so it is cached on disk like
-# faceio's face cache — keyed by abspath|mtime|size, self-invalidating.
+# faceio's face cache -- keyed by abspath|mtime|size, self-invalidating.
 CACHE_DIR = os.path.join(config.HOME, "cache", "grade")
 
 

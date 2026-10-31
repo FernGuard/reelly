@@ -58,7 +58,7 @@ def load_cached(path):
 
 
 def ocr_frames(frames, out_json=None):
-    """[{t, path, text}] — one OCR pass per artifact frame."""
+    """[{t, path, text}] -- one OCR pass per artifact frame."""
     engine = _engine()
     if engine is None:
         print("[skip] ocr (neither pyobjc Vision nor pytesseract installed)")

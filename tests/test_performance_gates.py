@@ -196,7 +196,7 @@ def test_end_card_sits_as_low_as_the_shared_safe_area_allows():
 
 def test_end_card_never_lands_on_the_caption_band():
     """Regression: a 1020px card found no legal x, best_box fell through to its
-    corner fallback, and the fallback ignored the zone — putting the closing
+    corner fallback, and the fallback ignored the zone -- putting the closing
     card on top of a karaoke cue."""
     from reelly import placement as P
     g = [[(60.0, 5.0)] * P.COLS for _ in range(P.ROWS)]

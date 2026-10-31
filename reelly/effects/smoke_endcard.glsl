@@ -1,6 +1,4 @@
 /*{
- "ISFVSN": "2",
- "CREDIT": "Patolli / Reelly",
  "LICENSE": "MIT",
  "VSN": "1.1",
  "DESCRIPTION": "Smoke rising over a dimmed backdrop, thinner across the ask's band, a smoke-torn ring of light when the ask's action word pops. Opens with an ink-blot transition from the content's last frame (u_trans seconds, 0 = hard cut).",

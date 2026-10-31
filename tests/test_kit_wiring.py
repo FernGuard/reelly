@@ -133,7 +133,7 @@ def test_kit_endcard_accessor_gates(kit, monkeypatch):
 
 
 def test_composite_skips_chrome_for_kitcard_events(kit, monkeypatch, tmp_path):
-    """_composite must feed the kit PNG straight to ffmpeg — no HTML, no
+    """_composite must feed the kit PNG straight to ffmpeg -- no HTML, no
     Chrome subprocess for a kitcard event."""
     ran = {}
 

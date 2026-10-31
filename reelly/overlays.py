@@ -345,7 +345,7 @@ def _src_duration(src):
     from . import media
     try:
         return float(media.probe(src)["format"]["duration"])
-    except Exception:   # noqa: BLE001 — no duration means no clamp, not a crash
+    except Exception:   # noqa: BLE001 -- no duration means no clamp, not a crash
         return None
 
 

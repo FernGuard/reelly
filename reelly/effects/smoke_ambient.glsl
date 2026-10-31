@@ -1,6 +1,4 @@
 /*{
-  "ISFVSN": "2",
-  "CREDIT": "Patolli / Reelly",
   "LICENSE": "MIT",
   "VSN": "1.0",
   "DESCRIPTION": "Smoke veil outside a protected picture rect and text band, swelling on control-track pops, building into the end.",

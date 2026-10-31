@@ -1,6 +1,6 @@
 /*{
-  "ISFVSN": "2", "VSN": "1.0", "CREDIT": "Patolli / Reelly", "LICENSE": "MIT",
-  "DESCRIPTION": "Manga focus lines (shuchusen) on the biggest real impacts only: fine radial strokes converge on the exact spot of the hit from the space around the picture, never over it, ~0.35 s, line boil at 12 fps. Pairs with impact-ambient; u_min_s picks how big a hit must be.",
+  "VSN": "1.0", "LICENSE": "MIT",
+  "DESCRIPTION": "Manga focus lines (shuchusen) on the biggest real impacts only: fine radial strokes converge on the exact spot of the hit from the space around the picture, never over it, ~0.35 s, line boil at 12 fps. Pairs with the ambient impact preset; u_min_s picks how big a hit must be.",
   "REELLY": {"kind": "overlay"},
   "INPUTS": [
     {"NAME": "u_line", "TYPE": "color", "DEFAULT": [0.96, 0.94, 1.0]},

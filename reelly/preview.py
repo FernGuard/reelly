@@ -34,7 +34,7 @@ def run_parallel(items, fn, max_workers=3):
         for it in items:
             try:
                 out.append((it, fn(it), None))
-            except Exception as e:  # noqa: BLE001 — isolate per item
+            except Exception as e:  # noqa: BLE001 -- isolate per item
                 out.append((it, None, e))
         return out
     from concurrent.futures import ThreadPoolExecutor

@@ -55,16 +55,16 @@ def test_the_mask_stays_inside_the_text_chosen_for_it(tmp_path):
 def test_only_where_the_brand_asks_and_faces_matter(monkeypatch):
     from reelly import brandkit
     monkeypatch.delenv("REELLY_TEXT_BEHIND", raising=False)
-    monkeypatch.delenv("REELLY_PROFILE", raising=False)
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"fx": {"text_behind": True}})
-    shaderfx.set_profile("talking_head")
+    monkeypatch.delenv("REELLY_CONTENT_TYPE", raising=False)
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"text": {"behind_subject": True}})
+    shaderfx.set_content_type("talking-head")
     assert behind.enabled()
-    shaderfx.set_profile("gameplay")
+    shaderfx.set_content_type("gameplay")
     assert not behind.enabled()                     # never on gameplay
     monkeypatch.setattr(brandkit, "brand", lambda name=None: {})
-    shaderfx.set_profile("talking_head")
+    shaderfx.set_content_type("talking-head")
     assert not behind.enabled()                     # the brand did not ask
-    shaderfx.set_profile(None)
+    shaderfx.set_content_type(None)
 
 
 @pytest.mark.skipif(not behind.find_model(), reason="segmenter model not installed")

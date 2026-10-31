@@ -372,7 +372,7 @@ def pick_bed(plan):
 
 
 # Music prefetch: the bed depends ONLY on the cut plan, so it can be queued at
-# FAL the moment plans exist and download while segments encode — instead of
+# FAL the moment plans exist and download while segments encode -- instead of
 # each finalize worker sitting through the 10-13s queue+poll wait mid-chain.
 # Registry maps out_mp3 path -> Future; check-then-act on (registry, file) is
 # under _PREFETCH_LOCK so a prefetch and a later music() call can never both
@@ -426,7 +426,7 @@ def music(plan, out_mp3, project=""):
     if fut is not None:
         try:
             return fut.result()
-        except Exception as e:  # noqa: BLE001 — prefetch failed; retry inline
+        except Exception as e:  # noqa: BLE001 -- prefetch failed; retry inline
             print(f"         music prefetch failed ({e}); regenerating inline")
             with _PREFETCH_LOCK:
                 if _PREFETCH.get(out_mp3) is fut:
@@ -535,7 +535,7 @@ def _music_generate(plan, out_mp3, project=""):
         if brandkit.register_bed(out_mp3, bed, real):
             print(f"         music: bed generated + registered into the kit "
                   f"library ({bed}, {real:.0f}s)")
-    except Exception:   # noqa: BLE001 — registration must never fail a render
+    except Exception:   # noqa: BLE001 -- registration must never fail a render
         pass
     return out_mp3
 
@@ -825,7 +825,7 @@ def enforce_true_peak(path, ceiling=None, margin=0.3, source_audio=None):
 
     Normalising the MIX is not enough: the AAC encode at mux time adds
     inter-sample overshoot, and on dense low-end content that was measured at
-    +3.6 dB — a mix correctly normalised to -2.0 dBFS arrived at +1.6 dBFS in
+    +3.6 dB -- a mix correctly normalised to -2.0 dBFS arrived at +1.6 dBFS in
     the mp4. Nothing upstream can predict that reliably, so the only honest fix
     is to measure what was actually written and correct it if it is over.
 
@@ -891,7 +891,7 @@ def enforce_loudness(path, lo=None, hi=None, target=None, source_audio=None):
 
     The window and its centre come from the judge (judge.LUFS_LO/LUFS_HI) so a
     freshly composited file is corrected to exactly the band the judge will
-    grade it against — the two cannot drift apart (the paid-for failure was
+    grade it against -- the two cannot drift apart (the paid-for failure was
     enforcement landing ~1 dB below the judge's window on quiet bases). The
     overlay pass mixes SFX in without re-normalising, which pushed two files to
     -12.3 LUFS against a -12.5 ceiling. Correcting loudness can break the

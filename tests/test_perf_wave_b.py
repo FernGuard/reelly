@@ -102,7 +102,7 @@ def test_analyze_dag_respects_word_dependencies_but_runs_chains_concurrently(wir
     for dep in ("srt", "speech_map", "topics", "guests"):
         assert ev[dep][0] >= ev["transcribe"][1], f"{dep} ran before transcribe finished"
     # independent chains overlap the (slow) transcribe stage instead of
-    # queueing behind it — the whole point of the DAG
+    # queueing behind it -- the whole point of the DAG
     overlapped = [n for n in ("scenes", "loudness", "diarize", "visual")
                   if ev[n][0] < ev["transcribe"][1]]
     assert overlapped, "no independent chain started while transcribe was running"

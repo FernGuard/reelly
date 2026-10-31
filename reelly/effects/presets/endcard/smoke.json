@@ -1,8 +1,7 @@
 {
   "version": 1,
   "effect": "smoke_endcard",
-  "placement": "outro",
-  "description": "Brand-neutral outro preset: smoke endcard.",
+  "description": "Smoke rising through the end card with a ring of light on the ask's beat.",
   "params": {},
   "render": {
     "scale": 0.5,

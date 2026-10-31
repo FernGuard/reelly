@@ -52,7 +52,7 @@ def test_output_fps_order_and_guard(monkeypatch):
     from reelly import brandkit
     monkeypatch.setattr(brandkit, "brand", lambda name=None: {})
     assert config.output_fps() == 30                  # public default
-    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"fps": 60})
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"video": {"fps": 60}})
     assert config.output_fps() == 60                  # brand kit
     monkeypatch.setenv("REELLY_FPS", "30")
     assert config.output_fps() == 30                  # env beats the kit

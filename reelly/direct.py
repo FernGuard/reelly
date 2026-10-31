@@ -1197,7 +1197,7 @@ def _subtract_regions(keep, drops, min_keep=0.4):
 
 # PACING (taste wave, 2026-08-02): how much silence survives around kept
 # speech when dead air is collapsed. The old 0.35s pad clipped breaths a touch
-# tight — deliveries landed and were immediately cut off, which reads rushed on
+# tight -- deliveries landed and were immediately cut off, which reads rushed on
 # rewatch. One notch less aggressive (+20%) keeps the beat AFTER a line without
 # reopening real dead air (join_gap still merges anything under 2.5s apart).
 PACING = {"keep_silence_pad_s": 0.42}   # was 0.35

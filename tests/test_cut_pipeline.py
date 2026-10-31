@@ -34,7 +34,7 @@ def _fakes(monkeypatch, calls, fail_apply=()):
 
 
 def test_cutgfx_serialises_per_cut_plan_then_apply(monkeypatch):
-    """1-wide pool: autoplan(cut) then apply(cut), cuts in arrival order —
+    """1-wide pool: autoplan(cut) then apply(cut), cuts in arrival order --
     overlay_specs.json is read-modify-write, so gfx jobs must not interleave."""
     calls = []
     _fakes(monkeypatch, calls)
@@ -70,7 +70,7 @@ def test_cutgfx_isolates_failures_and_reports_them_together(monkeypatch):
 
 
 def test_finalize_invokes_on_cut_from_the_worker(monkeypatch):
-    """The seam fires with (plan, made) after a cut's deliverables exist —
+    """The seam fires with (plan, made) after a cut's deliverables exist --
     exercised through the same closure shape _finalize_one uses."""
     seen = []
 

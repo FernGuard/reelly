@@ -23,7 +23,7 @@ HOW (the same look and footprint as kinetic.page_html)
 - Frames: premultiplied RGBA read back through shaderfx's binary pipe,
   un-premultiplied and written as k%05d.png, so the aura pass and the burn
   consume them exactly like the DOM frames. Any failure falls back to the
-  DOM renderer. REELLY_GPU_TEXT=off forces the DOM renderer.
+  DOM renderer. REELLY_TEXT_GPU=off forces the DOM renderer.
 """
 import base64
 import io
@@ -40,14 +40,13 @@ MOTIONS = ("rise", "blocklock")
 
 def motion():
     """How entering text arrives: REELLY_TEXT_MOTION, then brand.json
-    fx.text_motion, else "rise" (the kinetic default). "blocklock": each word
+    text.motion, else "rise" (the kinetic default). "blocklock": each word
     drops in like a falling block, lands with a squash, flashes as it locks."""
     v = os.environ.get("REELLY_TEXT_MOTION", "").strip().lower()
     if not v:
         try:
             from . import brandkit
-            fx = brandkit.brand().get("fx")
-            v = str((fx or {}).get("text_motion") or "").strip().lower() if isinstance(fx, dict) else ""
+            v = str(brandkit.text_style("motion") or "").strip().lower()
         except Exception:   # noqa: BLE001
             v = ""
     return v if v in MOTIONS else "rise"
@@ -61,14 +60,13 @@ DISSOLVE_S = 0.75        # the dissolve + petals window at the end of a leaving 
 
 def exit_style():
     """How a leaving line goes: REELLY_TEXT_EXIT, then brand.json
-    fx.text_exit, else "fade" (the kinetic default). "petals": the letters
+    text.exit, else "fade" (the kinetic default). "petals": the letters
     erode along a burning edge and petals peel off and drift up."""
     v = os.environ.get("REELLY_TEXT_EXIT", "").strip().lower()
     if not v:
         try:
             from . import brandkit
-            fx = brandkit.brand().get("fx")
-            v = str((fx or {}).get("text_exit") or "").strip().lower() if isinstance(fx, dict) else ""
+            v = str(brandkit.text_style("exit") or "").strip().lower()
         except Exception:   # noqa: BLE001
             v = ""
     return v if v in EXITS else "fade"
@@ -76,13 +74,14 @@ def exit_style():
 
 def _petal_colors():
     from . import brandkit
-    fx = brandkit.brand().get("fx") if isinstance(brandkit.brand().get("fx"), dict) else {}
-    second = fx.get("petal_color") if isinstance(fx.get("petal_color"), str) else "#ffa322"
+    c = brandkit.text_style("petal_color")
+    second = c if isinstance(c, str) and brandkit._HEX.fullmatch(c) else "#ffa322"
     return _rgb01(brandkit.accent()), _rgb01(second)
 
 
 def enabled():
-    return os.environ.get("REELLY_GPU_TEXT", "").strip().lower() not in ("off", "0", "no")
+    from . import config
+    return config.env_bool("REELLY_TEXT_GPU", True)
 
 
 def _font(size, role):

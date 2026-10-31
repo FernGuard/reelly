@@ -18,7 +18,7 @@ def test_refine_prompt_prefers_loop_closure_endings():
 
 
 def test_hook_overlay_lands_on_frame_one(monkeypatch, tmp_path):
-    """finalize's hook burn event starts at t0=0.0 — the hook is readable on
+    """finalize's hook burn event starts at t0=0.0 -- the hook is readable on
     the first frame, which is also the cover frame."""
     from reelly import captions, finalize
     monkeypatch.setattr(captions, "hook_png", lambda text, path, **k: path)

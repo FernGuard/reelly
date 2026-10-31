@@ -1,8 +1,7 @@
 {
   "version": 1,
   "effect": "parallax_still",
-  "placement": "outro",
-  "description": "Brand-neutral still preset: a slow 2.5D push-in on key art or a photo from its depth map.",
+  "description": "A slow 2.5D push-in on key art or a photo from its depth map.",
   "params": {},
   "render": {
     "scale": 1.0

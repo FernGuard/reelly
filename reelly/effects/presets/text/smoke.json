@@ -1,8 +1,7 @@
 {
   "version": 1,
   "effect": "smoke_aura",
-  "placement": "text",
-  "description": "Brand-neutral text preset: smoke aura.",
+  "description": "A smoky glow around kinetic text that flares when the hot word pops.",
   "params": {},
   "render": {
     "blur_px": 12,

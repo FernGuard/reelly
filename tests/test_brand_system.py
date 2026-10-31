@@ -245,7 +245,7 @@ def test_cli_brand_add_and_list(kit, capsys):
 def test_brand_reframe(kit, monkeypatch, value, want):
     spec = {"name": "g"}
     if value is not None:
-        spec["reframe"] = value
+        spec["video"] = {"reframe": value}
     d = kit / "brands" / "g"
     d.mkdir(parents=True)
     (d / "brand.json").write_text(json.dumps(spec))
@@ -257,7 +257,7 @@ def test_brand_full_width_wins_over_the_cinematic_guess(kit, monkeypatch):
     from reelly import direct
     d = kit / "brands" / "g"
     d.mkdir(parents=True)
-    (d / "brand.json").write_text(json.dumps({"reframe": "full_width"}))
+    (d / "brand.json").write_text(json.dumps({"video": {"reframe": "full_width"}}))
     monkeypatch.setenv("REELLY_BRAND", "g")
     monkeypatch.setattr(direct, "_source_video", lambda root: pytest.fail("no probe needed"))
     assert direct._auto_reframe("unused") == 1.0

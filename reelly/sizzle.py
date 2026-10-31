@@ -297,7 +297,7 @@ def _survey_one(entry, studio, project, crop=None, tries=3):
     for n in range(tries):
         try:
             return _survey_call(entry, key, studio, project, crop)
-        except Exception as e:      # noqa: BLE001 — isolate the window
+        except Exception as e:      # noqa: BLE001 -- isolate the window
             last = f"{type(e).__name__}: {e}"[:160]
             if n + 1 < tries:
                 time.sleep(1.5 * (n + 1))

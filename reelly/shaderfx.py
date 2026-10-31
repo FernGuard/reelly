@@ -15,18 +15,24 @@ so frame n is exactly time n/fps (seeking, never wall clock). Frames render
 at half resolution (the effects are soft) and are scaled up in the encode.
 
 PLATFORM (one contract for every effect, every brand, every content type)
-- Effect files, reelly/effects/<name>.glsl: an ISF-style JSON header in a
-  leading /*{...}*/ comment declares the effect's kind (backdrop | overlay |
-  text) and its typed INPUTS (DEFAULT, MIN, MAX, SLOT = a brand colour, HOST
-  = filled per frame by Reelly). The host writes the uniform block and
-  expands #include "lib/..." so effects never declare or copy plumbing.
-- Presets, reelly/effects/presets/<name>.json (brand-neutral, versioned):
-  which effect, where it plays (outro | ambient | text), parameter values,
-  render options (scale, fps, ...) and a "lite" variant.
-- Brand kits choose presets: brand.json "fx": {"outro": "smoke-endcard",
-  "ambient": {"preset": "smoke-ambient", "params": {"u_level": 0.3}},
-  "text": "smoke-aura"}. Legacy keys (outro_fx / ambient_fx / text_fx:
-  "smoke") still work. REELLY_<PLACEMENT>_FX=<preset>|off overrides a run.
+- Effect files, reelly/effects/<name>.glsl: a JSON header in a leading
+  /*{...}*/ comment (ISF-inspired, not ISF-compatible) declares the
+  effect's kind (backdrop | overlay | text | filter) and its typed INPUTS
+  (DEFAULT, MIN, MAX, SLOT = a brand colour, HOST = filled per frame by
+  Reelly). The host writes the uniform block and expands #include "lib/..."
+  so effects never declare or copy plumbing.
+- Presets, reelly/effects/presets/<placement>/<name>.json (brand-neutral,
+  versioned): which effect, parameter values, render options (scale, fps,
+  bloom, sparse) and a "lite" variant. A preset's id is "<placement>/<name>";
+  placements: endcard | ambient | text | finish (brand kits) and still
+  (`reelly parallax`).
+- Brand kits choose presets by name per placement: brand.json "effects":
+  {"endcard": "smoke", "ambient": ["smoke", {"preset": "embers", "params":
+  {"u_density": 0.4}}], "text": "smoke", "finish": null}.
+  REELLY_FX_<PLACEMENT>=<name>[,<name>...]|off overrides a run.
+- Content types, reelly/effects/content_types/<name>.json: which presets
+  each kind of footage allows, whether faces are protected and whether
+  real impacts drive marks.
 - Resolution order per input: effect DEFAULT < brand SLOT colour < preset
   params < brand params < host values; every value is type-checked and
   clamped to MIN/MAX, and an unknown parameter name is refused.
@@ -43,7 +49,8 @@ import threading
 from . import config
 
 EFFECTS_DIR = os.path.join(os.path.dirname(__file__), "effects")
-PLACEMENTS = ("outro", "ambient", "text", "finish")
+PLACEMENTS = ("endcard", "ambient", "text", "finish", "still")
+BRAND_PLACEMENTS = ("endcard", "ambient", "text", "finish")
 KINDS = ("backdrop", "overlay", "text", "filter")
 TYPES = {"float": "float", "color": "vec3", "vec2": "vec2", "vec3": "vec3",
          "vec4": "vec4", "float[8]": "float"}
@@ -63,11 +70,6 @@ HOST_UNIFORMS = {
     # a filter reads the cut's own frames (u_txt, one per output frame)
     "filter": ["uniform sampler2D u_txt;", "uniform sampler2D u_blur;"],
 }
-# Legacy brand values ("smoke") -> the preset each placement used to mean.
-LEGACY = {("outro", "smoke"): "smoke-endcard", ("ambient", "smoke"): "smoke-ambient",
-          ("text", "smoke"): "smoke-aura"}
-
-
 class EffectError(ValueError):
     """A malformed effect, preset or brand fx entry (refused before render)."""
 
@@ -112,22 +114,28 @@ def fragment(name):
     return "precision highp float;\n" + "\n".join(decl) + "\n" + body
 
 
-def load_preset(name):
-    if not re.fullmatch(r"[a-z0-9-]+", name or ""):
-        raise EffectError(f"bad preset name {name!r}")
-    path = os.path.join(EFFECTS_DIR, "presets", name + ".json")
+def load_preset(pid):
+    """A preset by id, "<placement>/<name>" (e.g. "ambient/smoke")."""
+    if not re.fullmatch(r"[a-z]+/[a-z0-9-]+", pid or ""):
+        raise EffectError(f"bad preset id {pid!r} (want placement/name)")
+    placement = pid.split("/", 1)[0]
+    if placement not in PLACEMENTS:
+        raise EffectError(f"{pid}: placement must be one of {PLACEMENTS}")
+    path = os.path.join(EFFECTS_DIR, "presets", pid + ".json")
     if not os.path.exists(path):
-        raise EffectError(f"no preset {name!r}")
+        raise EffectError(f"no preset {pid!r}")
     p = json.load(open(path, encoding="utf-8"))
-    if p.get("version") != 1 or p.get("placement") not in PLACEMENTS:
-        raise EffectError(f"{name}: needs version 1 and a placement in {PLACEMENTS}")
+    if p.get("version") != 1:
+        raise EffectError(f"{pid}: needs version 1")
     load_effect(p.get("effect", ""))
-    return p
+    return {**p, "placement": placement, "id": pid}
 
 
 def presets():
+    """Every preset id, "<placement>/<name>", sorted."""
     d = os.path.join(EFFECTS_DIR, "presets")
-    return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".json"))
+    return sorted(f"{pl}/{f[:-5]}" for pl in os.listdir(d) if os.path.isdir(os.path.join(d, pl))
+                  for f in os.listdir(os.path.join(d, pl)) if f.endswith(".json"))
 
 
 def _slot(slot):
@@ -194,32 +202,17 @@ def uniforms(preset, brand_params=None, host=None, overrides=None):
 
 
 def _brand_entries(placement):
-    """[(preset name, brand params)] the brand kit plays at a placement, in
-    stack order: "fx": {placement: name | {preset, params} | [those...]},
-    else the legacy "<placement>_fx" key."""
+    """[(preset id, brand params)] the brand kit plays at a placement, in
+    stack order (brand.json "effects")."""
     try:
         from . import brandkit
-        b = brandkit.brand()
+        return [(f"{placement}/{n.strip().lower()}", params)
+                for n, params in brandkit.effect_entries(placement)
+                if n.strip().lower() not in ("off", "none")]
     except Exception:   # noqa: BLE001 -- no kit, no effect
         return []
-    entry = (b.get("fx") or {}).get(placement) if isinstance(b.get("fx"), dict) else None
-    if entry is None:
-        entry = b.get(f"{placement}_fx")
-    out = []
-    for e in (entry if isinstance(entry, list) else [entry]):
-        if isinstance(e, dict):
-            out.append((e.get("preset"), e.get("params") or {}))
-        elif e:
-            out.append((e, {}))
-    return out
 
 
-def _brand_choice(placement):
-    e = _brand_entries(placement)
-    return e[0] if e else (None, {})
-
-
-# brand.json "ambient_fx" / REELLY_AMBIENT_FX: the cut-long layer
 SCALE = 0.5                  # render at half size; the encode scales back up
 _PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent}}
@@ -372,111 +365,103 @@ AMBIENT_SCALE = 0.25         # the veil is very soft: quarter size is plenty
 AMBIENT_FPS = 30             # slow smoke; the encode repeats frames for 60
 
 
-def active_list(kind="outro"):
-    """Every preset playing at `kind` for this run, in stack order (bottom
-    first): REELLY_<KIND>_FX (comma-separated) or the brand kit. Legacy
-    "smoke" maps to the preset it always meant; unknown or misplaced presets
-    are dropped with a log line."""
-    env = os.environ.get(f"REELLY_{kind.upper()}_FX", "").strip().lower()
-    names = [x.strip() for x in env.split(",")] if env else \
-        [str(n or "").strip().lower() for n, _ in _brand_entries(kind)]
+def active_list(kind="endcard"):
+    """Every preset id playing at `kind` for this run, in stack order
+    (bottom first): REELLY_FX_<KIND> (comma-separated names) or the brand
+    kit. Unknown presets, or presets the content type does not allow, are
+    dropped with a log line (`reelly brand check` catches them up front)."""
+    env = os.environ.get(f"REELLY_FX_{kind.upper()}", "").strip().lower()
+    ids = [f"{kind}/{x.strip()}" for x in env.split(",") if x.strip() not in ("", "off", "none")] \
+        if env else [pid for pid, _ in _brand_entries(kind)]
     out = []
-    for v in names:
-        if not v or v in ("off", "none", "0"):
-            continue
-        v = LEGACY.get((kind, v), v)
+    for pid in ids:
         try:
-            p = load_preset(v)
+            load_preset(pid)
         except EffectError as e:
             print(f"[fx   ] {kind}: {e}; layer off")
             continue
-        if p["placement"] != kind:
-            print(f"[fx   ] preset {v!r} plays at {p['placement']}, not {kind}; layer off")
+        if not allowed(kind, pid):
+            print(f"[fx   ] {pid} is not for {content_type()} content; layer off")
             continue
-        if not allowed(kind, v):
-            print(f"[fx   ] preset {v!r} is not for {profile_name()} content; layer off")
-            continue
-        out.append(v)
+        out.append(pid)
     return out
 
 
-PROFILES_DIR = os.path.join(EFFECTS_DIR, "profiles")
-PROFILE_DEFAULT = "gameplay"
+CONTENT_DIR = os.path.join(EFFECTS_DIR, "content_types")
+CONTENT_DEFAULT = "gameplay"
 
 
-def profiles():
-    return sorted(f[:-5] for f in os.listdir(PROFILES_DIR) if f.endswith(".json"))
+def content_types():
+    return sorted(f[:-5] for f in os.listdir(CONTENT_DIR) if f.endswith(".json"))
 
 
-def load_profile(name):
-    if not re.fullmatch(r"[a-z_]+", name or "") or name not in profiles():
-        raise EffectError(f"no content profile {name!r} (have: {', '.join(profiles())})")
-    p = json.load(open(os.path.join(PROFILES_DIR, name + ".json"), encoding="utf-8"))
+def load_content_type(name):
+    if not re.fullmatch(r"[a-z-]+", name or "") or name not in content_types():
+        raise EffectError(f"no content type {name!r} (have: {', '.join(content_types())})")
+    p = json.load(open(os.path.join(CONTENT_DIR, name + ".json"), encoding="utf-8"))
     if p.get("version") != 1:
-        raise EffectError(f"profile {name}: needs version 1")
+        raise EffectError(f"content type {name}: needs version 1")
     return p
 
 
-_PROFILE = threading.local()   # per cut: cuts finalize in parallel threads
+_CONTENT = threading.local()   # per cut: cuts finalize in parallel threads
 
 
-def set_profile(name):
-    """The content profile for what this thread renders now (None = resolve)."""
-    _PROFILE.name = name
+def set_content_type(name):
+    """The content type of what this thread renders now (None = resolve)."""
+    _CONTENT.name = name
 
 
-def profile_name(plan=None):
-    """The content type: REELLY_PROFILE, then the cut's set profile, then
-    the plan's content_type, then the brand kit's "profile", then a guess
-    from the plan (a facecam composition -> talking_head), else gameplay."""
-    for v in (os.environ.get("REELLY_PROFILE"), getattr(_PROFILE, "name", None),
+def content_type(plan=None, follow=False):
+    """REELLY_CONTENT_TYPE, then the cut's set type, then the plan's
+    "content_type", then the brand's video.content_type, then a guess:
+    a crop that follows faces is talking-head, everything else (a screen
+    recording, gameplay with or without a facecam) is gameplay."""
+    for v in (os.environ.get("REELLY_CONTENT_TYPE"), getattr(_CONTENT, "name", None),
               (plan or {}).get("content_type")):
         if v:
-            return str(v).strip().lower()
+            return str(v).strip().lower().replace("_", "-")
     try:
         from . import brandkit
-        v = brandkit.brand().get("profile")
+        v = brandkit.video("content_type")
         if v:
-            return str(v).strip().lower()
+            return str(v).strip().lower().replace("_", "-")
     except Exception:   # noqa: BLE001
         pass
-    if (plan or {}).get("composition"):
-        return "talking_head"
-    return PROFILE_DEFAULT
+    return "talking-head" if follow else CONTENT_DEFAULT
 
 
-def allowed(kind, preset, profile=None):
-    """Does the content profile let `preset` play at `kind`?"""
+def _content(name=None):
     try:
-        p = load_profile(profile or profile_name())
+        return load_content_type(name or content_type())
     except EffectError as e:
-        print(f"[fx   ] {e}; using {PROFILE_DEFAULT}")
-        p = load_profile(PROFILE_DEFAULT)
-    rule = (p.get("allow") or {}).get(kind, "*")
-    return rule == "*" or preset in (rule or [])
+        print(f"[fx   ] {e}; using {CONTENT_DEFAULT}")
+        return load_content_type(CONTENT_DEFAULT)
 
 
-def drives(driver, profile=None):
-    """Is this control-track driver (beats, pops, onsets, events, energy)
-    meaningful for the content profile?"""
-    try:
-        p = load_profile(profile or profile_name())
-    except EffectError:
-        p = load_profile(PROFILE_DEFAULT)
-    return driver in (p.get("drivers") or [])
+def allowed(kind, pid, name=None):
+    """Does the content type let preset `pid` play at `kind`?"""
+    rule = (_content(name).get("allow") or {}).get(kind, "*")
+    return rule == "*" or pid.split("/", 1)[-1] in (rule or [])
 
 
-def active(kind="outro"):
+def content_flag(flag, name=None):
+    """A content type's switch: "faces" (keep the face clear: text behind
+    the subject allowed) or "events" (real impacts drive marks)."""
+    return bool(_content(name).get(flag))
+
+
+def active(kind="endcard"):
     """The (first) preset playing at `kind` for this run, or None (off)."""
     lst = active_list(kind)
     return lst[0] if lst else None
 
 
-def brand_params(preset):
+def brand_params(pid):
     """The brand kit's parameter overrides for a preset."""
-    p = load_preset(preset)
-    for name, params in _brand_entries(p["placement"]):
-        if LEGACY.get((p["placement"], str(name).lower()), str(name).lower()) == preset:
+    p = load_preset(pid)
+    for bid, params in _brand_entries(p["placement"]):
+        if bid == pid:
             return params
     return {}
 
@@ -526,7 +511,7 @@ def _bloom(b, w):
 
 def _render_opts(preset):
     p = load_preset(preset)
-    lite = os.environ.get("REELLY_FX_LITE", "").strip().lower() in ("1", "on", "yes")
+    lite = config.env_bool("REELLY_FX_LITE")
     return {**(p.get("render") or {}), **(((p.get("lite") or {}).get("render") or {}) if lite else {})}
 
 

@@ -1,5 +1,5 @@
 /*{
-  "ISFVSN": "2", "VSN": "2.0", "CREDIT": "Patolli / Reelly", "LICENSE": "MIT",
+  "VSN": "2.0", "LICENSE": "MIT",
   "DESCRIPTION": "Comic impact lines (emanata) on real impacts only (control events: the sound AND the picture jump). A fan of tapered ink strokes shoots out of the picture's edge right where the impact happened, then retracts tip-first (~0.25 s); ink outline, bright accent body, a short flash at the root, line boil at 15 fps. Lives outside the picture, entering it by at most u_bite px.",
   "REELLY": {"kind": "overlay"},
   "INPUTS": [

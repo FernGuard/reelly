@@ -75,7 +75,7 @@ def target_len():
         return env
     try:
         from . import brandkit
-        b = _parse_len(brandkit.copy_brief().get("clip_len"))
+        b = _parse_len(brandkit.video("clip_len"))
         if b:
             return b
     except Exception:   # noqa: BLE001

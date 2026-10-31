@@ -1,5 +1,5 @@
 /*{
-  "ISFVSN": "2", "VSN": "1.0", "CREDIT": "Patolli / Reelly", "LICENSE": "MIT",
+  "VSN": "1.0", "LICENSE": "MIT",
   "DESCRIPTION": "Stateless embers rising outside the protected picture and text band: three depth layers, hashed per grid cell (any frame renders on its own), flaring on beats, onsets and hot-word pops, denser when the audio is loud.",
   "REELLY": {"kind": "overlay"},
   "INPUTS": [

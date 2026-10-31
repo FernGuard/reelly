@@ -44,15 +44,15 @@ def cases(tmp):
     t = "Every frame counts."
     lines = [t.split()]
     out = {
-        "endcard": (shaderfx.page_html("smoke-endcard", bg, 270, 480, "#a87cf0", pulse_t=0.4,
+        "endcard": (shaderfx.page_html("endcard/smoke", bg, 270, 480, "#a87cf0", pulse_t=0.4,
                                        from_png=bg, ctrl=_ctrl()), 270, 480, (0.1, 0.5, 1.2), False),
-        "smoke": (shaderfx.ambient_html("smoke-ambient", 270, 480, "#a87cf0", pic, clear, [0.6],
+        "smoke": (shaderfx.ambient_html("ambient/smoke", 270, 480, "#a87cf0", pic, clear, [0.6],
                                         end=2.0, ctrl=_ctrl()), 270, 480, (0.3, 1.0, 1.9), False),
-        "embers": (shaderfx.ambient_html("embers-ambient", 270, 480, "#a87cf0", pic, clear, [0.6],
+        "embers": (shaderfx.ambient_html("ambient/embers", 270, 480, "#a87cf0", pic, clear, [0.6],
                                          end=2.0, ctrl=_ctrl()), 270, 480, (0.3, 0.45, 1.5), False),
-        "impact": (shaderfx.ambient_html("impact-ambient", 540, 960, "#a87cf0", pic, clear, [],
+        "impact": (shaderfx.ambient_html("ambient/impact", 540, 960, "#a87cf0", pic, clear, [],
                                          end=2.0, ctrl=_ctrl()), 540, 960, (0.53, 0.6, 0.7), False),
-        "focus": (shaderfx.ambient_html("focus-ambient", 540, 960, "#a87cf0", pic, clear, [],
+        "focus": (shaderfx.ambient_html("ambient/focus", 540, 960, "#a87cf0", pic, clear, [],
                                         end=2.0, ctrl=_ctrl()), 540, 960, (0.55, 0.7), False),
     }
     # finish (folk print) over a cut's frames; parallax on a still + depth
@@ -63,14 +63,14 @@ def cases(tmp):
     for i in range(3):
         src.save(os.path.join(fdir, f"s{i:05d}.jpg"), quality=95)
     frames = [Path(os.path.join(fdir, f"s{i:05d}.jpg")).resolve().as_uri() for i in range(3)]
-    out["finish"] = (shaderfx.finish_html("folk-print", frames, 270, 480, 60, pic, clear),
+    out["finish"] = (shaderfx.finish_html("finish/folk-print", frames, 270, 480, 60, pic, clear),
                      270, 480, (0.0, 0.02), False)
     dep = os.path.join(tmp, "depth.png")
     dm = Image.new("L", (540, 960))
     for y in range(960):
         dm.paste(int(255 * y / 959), (0, y, 540, y + 1))     # near at the bottom
     dm.save(dep)
-    out["parallax"] = (shaderfx.parallax_html("parallax-still", bg, dep, 270, 480, 2.0),
+    out["parallax"] = (shaderfx.parallax_html("still/parallax", bg, dep, 270, 480, 2.0),
                        270, 480, (0.0, 1.0, 1.9), False)
     for motion in ("rise", "blocklock"):
         os.environ["REELLY_TEXT_MOTION"] = motion
@@ -79,7 +79,7 @@ def cases(tmp):
         out[f"text_{motion}"] = (html, 800 + 2 * off, 180 + 2 * off, (0.15, 0.5, 1.0), True)
     os.environ["REELLY_TEXT_EXIT"] = "petals"
     html, _, _, off = gputext.page(t, 64, 800, 180, 2.0, "headline", 1, lines, True, True,
-                                   0.9, "#FCFCFB", "#a87cf0", aura="smoke-aura")
+                                   0.9, "#FCFCFB", "#a87cf0", aura="text/smoke")
     out["text_aura_petals"] = (html, 800 + 2 * off, 180 + 2 * off, (0.5, 1.45, 1.7), False)
     for k in ("REELLY_TEXT_MOTION", "REELLY_TEXT_EXIT"):
         os.environ.pop(k, None)
@@ -109,8 +109,8 @@ def tier():
 
 
 _NEUTRAL = ("REELLY_HOME", "REELLY_BRAND", "REELLY_TEXT_MOTION", "REELLY_TEXT_EXIT",
-            "REELLY_PROFILE", "REELLY_FX_LITE", "REELLY_OUTRO_FX", "REELLY_AMBIENT_FX",
-            "REELLY_TEXT_FX", "REELLY_FINISH_FX")
+            "REELLY_CONTENT_TYPE", "REELLY_FX_LITE", "REELLY_FX_ENDCARD", "REELLY_FX_AMBIENT",
+            "REELLY_FX_TEXT", "REELLY_FX_FINISH")
 
 
 def run(update=False, only=None):

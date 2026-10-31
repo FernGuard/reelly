@@ -61,7 +61,7 @@ class _CutGfx:
         for cid, fu in self.futs:
             try:
                 fu.result()
-            except Exception as e:  # noqa: BLE001 — isolate per cut
+            except Exception as e:  # noqa: BLE001 -- isolate per cut
                 print(f"[overlays] {cid} FAILED: {e}")
                 failed.append(cid)
         self.pool.shutdown()
@@ -77,13 +77,16 @@ BRAIN_HELP = ("editor brain: auto (default) uses the signed-in codex CLI "
 
 
 def _global_flags(argv):
-    """Strip --allow-paid / --brand NAME from anywhere in argv into the env,
-    so they work before or after the subcommand. Returns the remaining argv."""
+    """Strip --allow-paid / --local-only / --brand NAME / --length from
+    anywhere in argv into the env, so they work before or after the
+    subcommand. Returns the remaining argv."""
     out, i = [], 0
     while i < len(argv):
         a = argv[i]
         if a == "--allow-paid":
             os.environ["REELLY_ALLOW_PAID"] = "1"
+        elif a == "--local-only":
+            os.environ["REELLY_LOCAL_ONLY"] = "1"
         elif a == "--brand" and i + 1 < len(argv):
             os.environ["REELLY_BRAND"] = argv[i + 1]
             i += 1
@@ -102,7 +105,9 @@ def _global_flags(argv):
 
 def main(argv=None):
     argv = _global_flags(list(sys.argv[1:] if argv is None else argv))
+    from . import __version__
     ap = argparse.ArgumentParser(prog="reelly")
+    ap.add_argument("--version", action="version", version=f"reelly {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("analyze", help="full analysis bundle for a recording")
@@ -386,7 +391,18 @@ def main(argv=None):
     ba.add_argument("--replace", action="store_true",
                     help="start brand.json fresh instead of updating it")
     brs.add_parser("list", help="list the brands in the local kit")
-    bv = brs.add_parser("verdict", help="record owner-approved / rejected lines "
+    bc = brs.add_parser("check", help="validate a brand's brand.json (schema, presets, values)")
+    bc.add_argument("name", nargs="?", help="brand name (default: the active brand)")
+    bm = brs.add_parser("migrate", help="rewrite an older brand.json to the current schema")
+    bm.add_argument("name", nargs="?", help="brand name (default: the active brand)")
+    bm.add_argument("--write", action="store_true",
+                    help="write it (keeps brand.json.bak); default: print the result")
+    cf = sub.add_parser("config", help="every REELLY_* setting and its value in effect")
+    cf.add_argument("--all", action="store_true", help="include advanced settings")
+    md = sub.add_parser("models", help="optional local models: status, or `fetch NAME`")
+    md.add_argument("action", nargs="?", choices=["fetch"], help="download and verify")
+    md.add_argument("name", nargs="?", help="depth | segmenter | all")
+    bv = brs.add_parser("verdict", help="record approved / rejected lines "
                                         "into the brand brief (the hook writer learns them)")
     bv.add_argument("name")
     bv.add_argument("--approve", action="append", default=[], metavar="LINE")
@@ -449,7 +465,7 @@ def main(argv=None):
             params["u_center"] = [cx, cy]
         params["u_fit"] = 0.0 if args.fit == "cover" else 1.0
         try:
-            pat = shaderfx.render_parallax("parallax-still", image, dpng,
+            pat = shaderfx.render_parallax("still/parallax", image, dpng,
                                            os.path.join(work, "f"), args.dur, params=params)
             subprocess.run([config.FFMPEG, "-y", "-v", "error", "-framerate",
                             str(config.output_fps()), "-i", pat, "-pix_fmt", "yuv420p",
@@ -471,6 +487,55 @@ def main(argv=None):
             raise SystemExit("hooks: no signed-in subscription brain (codex) and paid "
                              "brains are off; nothing to write with")
         hooks.rewrite(direct.resolve_project(args.project), brain, cut_id=args.cut)
+        return
+    if args.cmd == "config":
+        from . import settings
+        settings.report(args.all)
+        return
+    if args.cmd == "models":
+        from . import models
+        if args.action == "fetch":
+            keys = list(models.MODELS) if args.name in (None, "all") else [args.name]
+            for k in keys:
+                if k not in models.MODELS:
+                    raise SystemExit(f"models: no model {k!r} (have: {', '.join(models.MODELS)})")
+                models.fetch(k)
+            return
+        for k, p, what in models.status():
+            print(f"  {k:<10} {'installed' if p else 'not installed':<14} {what}"
+                  + (f"\n             {p}" if p else f"\n             reelly models fetch {k}"))
+        return
+    if args.cmd == "brand" and args.brand_cmd in ("check", "migrate"):
+        import json as _json
+        import os
+        from . import brandkit
+        name = args.name or brandkit.brand_name()
+        d = brandkit.brand_dir(name) if name else None
+        p = os.path.join(d, "brand.json") if d else None
+        if not p or not os.path.exists(p):
+            raise SystemExit(f"brand {args.brand_cmd}: no brand.json for {name or '(no active brand)'}")
+        data = _json.load(open(p, encoding="utf-8"))
+        if args.brand_cmd == "check":
+            errs, warns = brandkit.check(data)
+            for w in warns:
+                print(f"  warning: {w}")
+            for e in errs:
+                print(f"  ERROR: {e}")
+            print(f"brand '{name}': " + ("OK" if not errs else f"{len(errs)} error(s)"))
+            sys.exit(1 if errs else 0)
+        new = brandkit.migrate(data)
+        errs, _ = brandkit.check(new)
+        if not args.write:
+            print(_json.dumps(new, indent=1, ensure_ascii=False))
+            print(f"\n(dry run; `reelly brand migrate {name} --write` saves it)", file=sys.stderr)
+        else:
+            import shutil
+            shutil.copyfile(p, p + ".bak")
+            with open(p, "w", encoding="utf-8") as f:
+                _json.dump(new, f, indent=1, ensure_ascii=False)
+            print(f"brand '{name}': migrated to schema {brandkit.SCHEMA} (old file: {p}.bak)")
+        for e in errs:
+            print(f"  still to fix by hand: {e}", file=sys.stderr)
         return
     if args.cmd == "brand":
         import json as _json
@@ -511,6 +576,10 @@ def main(argv=None):
     if args.cmd == "setup":
         from . import config
         sys.exit(config.doctor(as_json=args.json))
+    if args.cmd in ("cut", "finalize", "direct", "preview", "overlays", "motion", "sizzle",
+                    "longform", "burnin", "reveal", "hooks"):
+        from . import brandkit
+        brandkit.require_valid()
     if args.cmd != "budget":
         # every real command heartbeats: `reelly runs` then answers "which of
         # my parallel sessions is stuck, and on what stage" in one glance

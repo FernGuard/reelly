@@ -1,4 +1,4 @@
-"""Clip length window: public default 20-28 s; a brand brief ("clip_len")
+"""Clip length window: public default 20-28 s; a brand's video.clip_len
 or --length / REELLY_CLIP_LEN allow short beat cuts."""
 import json
 import os
@@ -12,7 +12,7 @@ from reelly import cli, direct, performance
 def brand(tmp_path, monkeypatch):
     d = tmp_path / "kit" / "brands" / "game-a"
     d.mkdir(parents=True)
-    (d / "brand.json").write_text(json.dumps({"copy": {"clip_len": [12, 28]}}))
+    (d / "brand.json").write_text(json.dumps({"video": {"clip_len": [12, 28]}}))
     monkeypatch.setenv("REELLY_BRANDKIT", str(tmp_path / "kit"))
     monkeypatch.setenv("REELLY_BRAND", "game-a")
     monkeypatch.delenv("REELLY_CLIP_LEN", raising=False)

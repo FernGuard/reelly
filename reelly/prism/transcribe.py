@@ -1,5 +1,5 @@
 """TRANSCRIBE: mlx-whisper off the artifact wav. Apple-Silicon-only and heavy,
-so it's imported lazily and skipped (not errored) when unavailable — PRISM
+so it's imported lazily and skipped (not errored) when unavailable -- PRISM
 must still produce a report without it.
 """
 import json

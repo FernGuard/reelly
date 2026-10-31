@@ -1,7 +1,5 @@
 /*{
- "ISFVSN": "2",
  "VSN": "1.2",
- "CREDIT": "Patolli / Reelly",
  "LICENSE": "MIT",
  "DESCRIPTION": "2.5D camera move on a still from its depth map: a slow push-in (near layers grow faster than far ones) or a dolly (near layers slide more). u_fit 1 (default) shows the WHOLE still across the width over a blurred, darkened copy of itself (wide key art keeps its composition); u_fit 0 fills the frame (cover crop around u_center). Depth sampled iteratively so edges stay attached to their layer.",
  "REELLY": {

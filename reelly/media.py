@@ -101,7 +101,7 @@ def sdr_chain(path):
     """Tonemap chain for an HDR source, or '' when nothing is needed OR the
     build cannot do it. The zscale steps need libzimg, which lean homebrew
     builds omit (same story as libass): in that case warn loudly and ship
-    untonemapped — the judge's sdr_transfer gate FAILs the deliverable, so
+    untonemapped -- the judge's sdr_transfer gate FAILs the deliverable, so
     the problem stays visible instead of erroring mid-render."""
     if not is_hdr(path):
         return ""

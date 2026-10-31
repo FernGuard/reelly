@@ -1,8 +1,7 @@
 {
   "version": 1,
   "effect": "smoke_ambient",
-  "placement": "ambient",
-  "description": "Brand-neutral ambient preset: smoke ambient.",
+  "description": "A smoke veil in the space around the picture, swelling on pops and building into the end.",
   "params": {
     "u_level": 0.45
   },

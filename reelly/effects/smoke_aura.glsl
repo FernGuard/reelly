@@ -1,6 +1,4 @@
 /*{
- "ISFVSN": "2",
- "CREDIT": "Patolli / Reelly",
  "LICENSE": "MIT",
  "VSN": "1.1",
  "DESCRIPTION": "Dark smoky wisps off a rendered text layer and an accent flare on the hot word's pop; the type itself is untouched.",

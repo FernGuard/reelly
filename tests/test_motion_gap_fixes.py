@@ -521,7 +521,7 @@ def test_fal_audio_retries_once_instrumental_on_content_policy(monkeypatch):
 
 
 def test_fal_audio_reraises_clearly_when_still_rejected(monkeypatch):
-    """One retry, then a clear message — never an infinite loop or a bare crash."""
+    """One retry, then a clear message -- never an infinite loop or a bare crash."""
     _no_ledger(monkeypatch)
     calls = []
 

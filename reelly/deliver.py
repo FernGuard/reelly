@@ -105,7 +105,7 @@ def run(project, tag=None, product="video", account=None, variants=None,
          f"{len(keeps)} cut(s) shipped, {len(kills)} killed (left in "
          f"`deliverables/final{sfx}/`, nothing deleted).", ""]
     for new_id, m in mapping["delivered"].items():
-        L += [f"## {new_id} — {m['title']}  (was {m['source_cut']})", ""]
+        L += [f"## {new_id} -- {m['title']}  (was {m['source_cut']})", ""]
         L += [f"- `{f}`" for f in m["files"]]
         L += [f"- Posting block: `{new_id}_DESCRIPTION.md`", ""]
     if kills:

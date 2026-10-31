@@ -158,7 +158,7 @@ def caption_coverage(plan, words):
 
     Skipped for captions:"none" cuts. Those are picture-planned, their audio is
     music or game VO, and the ASR words were rejected as untrustworthy on
-    purpose (P-TRUST) — so "0 of 0 words reached cues" is the correct outcome,
+    purpose (P-TRUST) -- so "0 of 0 words reached cues" is the correct outcome,
     not a defect. Failing them here would train a human to ignore the gate.
     """
     if plan.get("captions") == "none":
