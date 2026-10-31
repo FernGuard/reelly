@@ -1,6 +1,6 @@
 /*{
  "ISFVSN": "2",
- "VSN": "1.1",
+ "VSN": "1.2",
  "CREDIT": "Patolli / Reelly",
  "LICENSE": "MIT",
  "DESCRIPTION": "2.5D camera move on a still from its depth map: a slow push-in (near layers grow faster than far ones) or a dolly (near layers slide more). u_fit 1 (default) shows the WHOLE still across the width over a blurred, darkened copy of itself (wide key art keeps its composition); u_fit 0 fills the frame (cover crop around u_center). Depth sampled iteratively so edges stay attached to their layer.",
@@ -74,12 +74,16 @@
 vec4 img(vec2 s){ return texture2D(u_bg, vec2(s.x, 1.0 - s.y)); }
 float dep(vec2 s){ return texture2D(u_depth, vec2(s.x, 1.0 - s.y)).r; }
 
-vec2 parallax(vec2 c, float p){
-  vec2 s = u_center + c;
+// base: where the still sits (fit width: its centre; cover: the crop centre);
+// the zoom heads for u_center, so a push can close in on the logo or a face
+// without sliding the picture off it
+vec2 parallax(vec2 base, vec2 c, float p){
+  vec2 q = base + c;
+  vec2 s = q;
   for (int i = 0; i < 4; i++){
     float d = dep(s) - u_focus;
     float z = 1.0 + u_push * p + u_depthk * p * d;               // near grows faster
-    s = u_center + c / z + vec2(u_dolly * (p - 0.5) * d, 0.0);
+    s = u_center + (q - u_center) / z + vec2(u_dolly * (p - 0.5) * d, 0.0);
   }
   return clamp(s, vec2(0.001), vec2(0.999));
 }
@@ -95,7 +99,7 @@ void main(){
     // the whole still across the width; a blurred, darkened copy around it
     vec2 cw = vec2(c.x, c.y * ia / fa);
     if (abs(cw.y) <= 0.5) {
-      col = img(parallax(cw, p)).rgb;
+      col = img(parallax(vec2(0.5), cw, p)).rgb;
     } else {
       vec2 cc = c; cc.x *= fa / ia;
       vec2 b = vec2(0.5) + cc / (1.0 + 0.04 * p);
@@ -108,7 +112,7 @@ void main(){
     }
   } else {
     if (ia > fa) c.x *= fa / ia; else c.y *= ia / fa;            // cover crop
-    col = img(parallax(c, p)).rgb;
+    col = img(parallax(u_center, c, p)).rgb;
   }
   float vig = 1.0 - 0.25 * smoothstep(0.35, 0.85, length((uv - 0.5) * vec2(fa, 1.0)) * 1.2);
   gl_FragColor = vec4(dither(col * vig, gl_FragCoord.xy), 1.0);
