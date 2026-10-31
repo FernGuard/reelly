@@ -695,6 +695,22 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
             with timing.stage(f"{p['id']} caption burn", tpath):
                 vid = _burn_final(lit, os.path.join(td, "burn.mp4"), p, words_tl,
                                   dur, td, layout, product)
+            from . import behind as _behind
+            if _behind.enabled(p):
+                with timing.stage(f"{p['id']} text behind", tpath):
+                    try:
+                        from . import judge as _judge
+                        mpat, mfps, mn = _behind.masks(raw, os.path.join(td, "masks"))
+                        boxes = [(r[0], r[1], r[5], r[2], r[6], r[3])
+                                 for r in _judge._text_layers(p, [], with_x=True)
+                                 if not str(r[4]).startswith("cue@")]
+                        dec = _behind.guard(mpat, mn, mfps, boxes)
+                        vid = _behind.apply(vid, raw, mpat, mfps, os.path.join(td, "behind.mp4"))
+                        print("        text behind the subject: "
+                              + ", ".join(f"{'behind' if b else 'on top'} (covered {c:.0%})"
+                                          for _, c, b in dec))
+                    except Exception as e:   # noqa: BLE001 -- text stays on top
+                        print(f"        text behind failed ({e}); text on top")
             from . import legibility as _leg
             if "_text_contrast" in p:
                 _leg.record(root, p["id"], p.pop("_text_contrast"))
