@@ -65,6 +65,7 @@ def test_guided_filter_snaps_a_soft_mask_to_the_image_edge():
     rgb[:, 32:] = 220                                   # a hard edge at x = 32
     soft = np.tile(np.clip((np.arange(64) - 20) / 24.0, 0, 1), (64, 1)).astype(np.float32)
     out = behind.guided_filter(rgb, soft, r=4, eps=1e-4)
-    row = out[32]
-    assert row[28] < soft[32][28] and row[36] > soft[32][36]   # pushed apart at the edge
-    assert row[36] - row[28] > (soft[32][36] - soft[32][28]) * 1.5
+    row, before = out[32], soft[32]
+    # the step between the two pixels either side of the image edge
+    assert row[32] - row[31] > 3 * (before[32] - before[31])
+    assert row[28] < before[28] and row[36] > before[36]      # pushed apart around it
