@@ -39,3 +39,6 @@ credentials.json
 id_rsa
 id_ed25519
 
+
+# golden reference frames ARE tracked (tests/test_golden.py)
+!tests/golden/**/*.png
