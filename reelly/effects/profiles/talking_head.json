@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "A person speaking to camera (facecam, creator, interview): the face and the speech come first.",
+  "protect": [
+    "picture",
+    "faces"
+  ],
+  "drivers": [
+    "beats",
+    "pops",
+    "energy"
+  ],
+  "allow": {
+    "outro": "*",
+    "ambient": [
+      "smoke-ambient",
+      "embers-ambient"
+    ],
+    "text": "*",
+    "finish": []
+  }
+}

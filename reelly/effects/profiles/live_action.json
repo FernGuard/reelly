@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "description": "Full-bleed trailer or b-roll: no bars to decorate, effects only at the edges and the end.",
+  "protect": [
+    "picture"
+  ],
+  "drivers": [
+    "beats",
+    "pops"
+  ],
+  "allow": {
+    "outro": "*",
+    "ambient": [],
+    "text": "*",
+    "finish": []
+  }
+}

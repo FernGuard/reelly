@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "Text on a designed background: nothing to protect but legibility, everything to read.",
+  "protect": [],
+  "drivers": [
+    "beats",
+    "pops"
+  ],
+  "allow": {
+    "outro": "*",
+    "ambient": "*",
+    "text": "*",
+    "finish": "*"
+  }
+}

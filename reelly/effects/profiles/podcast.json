@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "description": "Two or more speakers, split or alternating: no marks on people, calm space.",
+  "protect": [
+    "picture",
+    "faces"
+  ],
+  "drivers": [
+    "pops",
+    "energy"
+  ],
+  "allow": {
+    "outro": "*",
+    "ambient": [
+      "smoke-ambient"
+    ],
+    "text": "*",
+    "finish": []
+  }
+}

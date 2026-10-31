@@ -397,6 +397,8 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
         clear = (1 - top / H, 1 - max(0, text_top) / H)
         pops = _pop_times(plan)
         ctrl = plan.get("_ctrl")
+        if ctrl is not None and "events" not in ctrl and not shaderfx.drives("events"):
+            ctrl["events"] = []                 # not a content type with game hits
         if ctrl is not None and "events" not in ctrl:
             from . import control
             try:
@@ -613,6 +615,8 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
 
     def _finalize_one(p):
         from . import outro as outro_mod
+        from . import shaderfx as _fx
+        _fx.set_profile(_fx.profile_name(p))
         comp = p.get("composition")
         layout = comp.get("cam") if comp and facecam else None
         print(f"[final] {p['id']}: {p['title']} ...")

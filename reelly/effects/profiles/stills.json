@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "description": "Key art or photos: the image is the content, motion comes from text and the end card.",
+  "protect": [
+    "picture"
+  ],
+  "drivers": [
+    "beats",
+    "pops"
+  ],
+  "allow": {
+    "outro": "*",
+    "ambient": [
+      "smoke-ambient",
+      "embers-ambient"
+    ],
+    "text": "*",
+    "finish": "*"
+  }
+}

@@ -386,3 +386,28 @@ def test_finish_is_its_own_placement(monkeypatch, tmp_path):
     monkeypatch.setattr(shaderfx, "render_finish", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
     monkeypatch.setattr(finalize.subprocess, "run", lambda *a, **k: None)
     assert finalize._finish_pass("raw.mp4", "f.mp4", {"reframe": 1.0}, 10.0, str(tmp_path), None) == "raw.mp4"
+
+
+def test_content_profiles_filter_effects(monkeypatch):
+    monkeypatch.delenv("REELLY_PROFILE", raising=False)
+    monkeypatch.delenv("REELLY_AMBIENT_FX", raising=False)
+    assert set(shaderfx.profiles()) >= {"gameplay", "talking_head", "podcast", "screen_demo",
+                                        "live_action", "stills", "quote_card"}
+    for name in shaderfx.profiles():
+        p = shaderfx.load_profile(name)
+        assert p["version"] == 1 and "allow" in p and "drivers" in p
+    _brand(monkeypatch, {"fx": {"ambient": ["smoke-ambient", "impact-ambient"]}})
+    shaderfx.set_profile(None)
+    assert shaderfx.profile_name({}) == "gameplay"                    # the default
+    assert shaderfx.profile_name({"composition": {"cam": "split"}}) == "talking_head"
+    assert shaderfx.active_list("ambient") == ["smoke-ambient", "impact-ambient"]
+    shaderfx.set_profile("podcast")
+    assert shaderfx.active_list("ambient") == ["smoke-ambient"]      # no hit marks on people
+    assert not shaderfx.drives("events") and shaderfx.drives("pops")
+    shaderfx.set_profile("live_action")
+    assert shaderfx.active_list("ambient") == []                      # no bars to decorate
+    monkeypatch.setenv("REELLY_PROFILE", "gameplay")
+    assert shaderfx.active_list("ambient") == ["smoke-ambient", "impact-ambient"]
+    shaderfx.set_profile(None)
+    with pytest.raises(shaderfx.EffectError):
+        shaderfx.load_profile("opera")

@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 
 from . import config
 
@@ -390,8 +391,77 @@ def active_list(kind="outro"):
         if p["placement"] != kind:
             print(f"[fx   ] preset {v!r} plays at {p['placement']}, not {kind}; layer off")
             continue
+        if not allowed(kind, v):
+            print(f"[fx   ] preset {v!r} is not for {profile_name()} content; layer off")
+            continue
         out.append(v)
     return out
+
+
+PROFILES_DIR = os.path.join(EFFECTS_DIR, "profiles")
+PROFILE_DEFAULT = "gameplay"
+
+
+def profiles():
+    return sorted(f[:-5] for f in os.listdir(PROFILES_DIR) if f.endswith(".json"))
+
+
+def load_profile(name):
+    if not re.fullmatch(r"[a-z_]+", name or "") or name not in profiles():
+        raise EffectError(f"no content profile {name!r} (have: {', '.join(profiles())})")
+    p = json.load(open(os.path.join(PROFILES_DIR, name + ".json"), encoding="utf-8"))
+    if p.get("version") != 1:
+        raise EffectError(f"profile {name}: needs version 1")
+    return p
+
+
+_PROFILE = threading.local()   # per cut: cuts finalize in parallel threads
+
+
+def set_profile(name):
+    """The content profile for what this thread renders now (None = resolve)."""
+    _PROFILE.name = name
+
+
+def profile_name(plan=None):
+    """The content type: REELLY_PROFILE, then the cut's set profile, then
+    the plan's content_type, then the brand kit's "profile", then a guess
+    from the plan (a facecam composition -> talking_head), else gameplay."""
+    for v in (os.environ.get("REELLY_PROFILE"), getattr(_PROFILE, "name", None),
+              (plan or {}).get("content_type")):
+        if v:
+            return str(v).strip().lower()
+    try:
+        from . import brandkit
+        v = brandkit.brand().get("profile")
+        if v:
+            return str(v).strip().lower()
+    except Exception:   # noqa: BLE001
+        pass
+    if (plan or {}).get("composition"):
+        return "talking_head"
+    return PROFILE_DEFAULT
+
+
+def allowed(kind, preset, profile=None):
+    """Does the content profile let `preset` play at `kind`?"""
+    try:
+        p = load_profile(profile or profile_name())
+    except EffectError as e:
+        print(f"[fx   ] {e}; using {PROFILE_DEFAULT}")
+        p = load_profile(PROFILE_DEFAULT)
+    rule = (p.get("allow") or {}).get(kind, "*")
+    return rule == "*" or preset in (rule or [])
+
+
+def drives(driver, profile=None):
+    """Is this control-track driver (beats, pops, onsets, events, energy)
+    meaningful for the content profile?"""
+    try:
+        p = load_profile(profile or profile_name())
+    except EffectError:
+        p = load_profile(PROFILE_DEFAULT)
+    return driver in (p.get("drivers") or [])
 
 
 def active(kind="outro"):
