@@ -47,14 +47,14 @@ def scene_cuts(video, cache_json=None, force=False):
     re-run on every invocation of the same slug."""
     if cache_json and not force and os.path.exists(cache_json):
         try:
-            cuts = json.load(open(cache_json))
+            cuts = json.load(open(cache_json, encoding="utf-8"))
             if isinstance(cuts, list):
                 return cuts
         except (ValueError, OSError):
             pass
     cuts = scenes.scene_cuts(video, thresh=SCENE_THRESH)
     if cache_json:
-        json.dump(cuts, open(cache_json, "w"))
+        json.dump(cuts, open(cache_json, "w", encoding="utf-8"))
     return cuts
 
 

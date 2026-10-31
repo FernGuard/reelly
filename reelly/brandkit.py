@@ -72,7 +72,7 @@ def kit_dir():
 def _kit_json():
     p = os.path.join(kit_dir(), "kit.json")
     try:
-        with open(p) as f:
+        with open(p, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
@@ -159,7 +159,7 @@ def brand(name=None):
     if not d:
         return {}
     try:
-        with open(os.path.join(d, "brand.json")) as f:
+        with open(os.path.join(d, "brand.json"), encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
@@ -274,7 +274,7 @@ def record_verdict(name, approve=(), reject=(), keep=40):
     p = os.path.join(d, "brand.json") if d else None
     if not p or not os.path.exists(p):
         raise ValueError(f"no brand.json for brand {name!r}")
-    with open(p) as f:
+    with open(p, encoding="utf-8") as f:
         spec = json.load(f)
     copy = spec.setdefault("copy", {})
     for key, new in (("approved_lines", approve), ("rejected_lines", reject)):
@@ -284,7 +284,7 @@ def record_verdict(name, approve=(), reject=(), keep=40):
             if line:
                 cur = [x for x in cur if x != line] + [line]
         copy[key] = cur[-keep:]
-    with open(p, "w") as f:
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(spec, f, indent=1)
     return copy
 
@@ -331,7 +331,7 @@ def add_brand(name, fonts=None, accent=None, ink=None, surface=None,
     spec = {}
     if os.path.exists(os.path.join(d, "brand.json")) and not force:
         try:
-            with open(os.path.join(d, "brand.json")) as f:
+            with open(os.path.join(d, "brand.json"), encoding="utf-8") as f:
                 spec = json.load(f) or {}
         except (OSError, ValueError):
             spec = {}
@@ -351,7 +351,7 @@ def add_brand(name, fonts=None, accent=None, ink=None, surface=None,
     for key, c in (("accent", accent), ("ink", ink), ("surface", surface)):
         if c is not None:
             spec[key] = c
-    with open(os.path.join(d, "brand.json"), "w") as f:
+    with open(os.path.join(d, "brand.json"), "w", encoding="utf-8") as f:
         json.dump(spec, f, indent=1)
     return d
 
@@ -381,7 +381,7 @@ def copy_bank():
             return {}
     try:
         import yaml
-        with open(p) as f:
+        with open(p, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return data if isinstance(data, dict) else {}
     except Exception:
@@ -395,7 +395,7 @@ def music_manifest():
         p = os.path.join(d, fn)
         if os.path.exists(p):
             try:
-                with open(p) as f:
+                with open(p, encoding="utf-8") as f:
                     data = loader(f)
                 return data if isinstance(data, dict) else {}
             except (OSError, ValueError):
@@ -460,7 +460,7 @@ def register_bed(path, genre, duration, source="fal-ai/elevenlabs/music"):
                          "date": datetime.date.today().isoformat()})
             man.update({"version": KIT_VERSION, "beds": beds})
             tmp = man_p + ".tmp"
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(man, f, indent=1)
             os.replace(tmp, man_p)
             return dst
@@ -557,7 +557,7 @@ def _default_copy_bank_data():
 def _write_default_copy_bank(path):
     import yaml
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(_default_copy_bank_data(), f, sort_keys=False,
                        allow_unicode=True)
     return path
@@ -722,7 +722,7 @@ def build_defaults(force=False):
 
     kit_out = {"version": KIT_VERSION, "sources": recorded, "accent": acc,
                "accent_source": acc_src}
-    with open(os.path.join(root, "kit.json"), "w") as f:
+    with open(os.path.join(root, "kit.json"), "w", encoding="utf-8") as f:
         json.dump(kit_out, f, indent=1)
     summary = {"kit_dir": root, "accent": acc, "endcards_built": built,
                "endcards_kept": kept, "copy_bank": bank_path,

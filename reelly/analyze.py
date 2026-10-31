@@ -73,10 +73,10 @@ def _sources_changed(an, video, facecam, crop):
            "facecam": fingerprint(facecam) if facecam else None,
            "crop": crop or None}
     try:
-        before = json.load(open(p))
+        before = json.load(open(p, encoding="utf-8"))
     except (OSError, ValueError):
         before = None
-    json.dump(now, open(p, "w"), indent=1)
+    json.dump(now, open(p, "w", encoding="utf-8"), indent=1)
     if before is None:
         # no record: a fresh folder, or one analysed before fingerprints
         # existed. Only the latter can be stale; re-run it to be sure.
@@ -153,7 +153,7 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
         probe_p = os.path.join(an, "probe.json")
         _step("probe", probe_p, force, lambda: json.dump(
             {os.path.basename(f): media.probe(f) for f in [video] + ([facecam] if facecam else [])},
-            open(probe_p, "w"), indent=1))
+            open(probe_p, "w", encoding="utf-8"), indent=1))
         if facecam:
             session_p = os.path.join(an, "session.json")
 
@@ -162,7 +162,7 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
                 data = {"screen": video, "facecam": facecam,
                         "facecam_offset_s": round(off, 3), "confidence": round(conf, 3),
                         "note": "screen_time = facecam_time + offset"}
-                json.dump(data, open(session_p, "w"), indent=1)
+                json.dump(data, open(session_p, "w", encoding="utf-8"), indent=1)
                 return data
             _cpu_step("session sync (waveform)", session_p, force, _sync)
 
@@ -178,11 +178,11 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
 
         speech_p = os.path.join(an, "speech_map.json")
         _cpu_step("speech map (silence + fillers)", speech_p, force, lambda: json.dump(
-            speech.speech_map(video, words), open(speech_p, "w"), indent=1))
+            speech.speech_map(video, words), open(speech_p, "w", encoding="utf-8"), indent=1))
 
         topics_p = os.path.join(an, "topics.json")
         _step("topic clips (TF-IDF)", topics_p, force, lambda: json.dump(
-            topics.topic_clips(topics.sentences(words)), open(topics_p, "w"), indent=1))
+            topics.topic_clips(topics.sentences(words)), open(topics_p, "w", encoding="utf-8"), indent=1))
 
         from . import clearance
         guest_p = os.path.join(an, "guest_blocks.json")
@@ -192,12 +192,12 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
     def chain_scenes():  # D
         scenes_p = os.path.join(an, "scenes.json")
         _cpu_step("scene cuts", scenes_p, force, lambda: json.dump(
-            scenes.scene_cuts(video), open(scenes_p, "w")))
+            scenes.scene_cuts(video), open(scenes_p, "w", encoding="utf-8")))
 
     def chain_loudness():  # E
         loud_p = os.path.join(an, "loudness.json")
         _cpu_step("loudness map (R128)", loud_p, force, lambda: json.dump(
-            audio_mod.loudness(video), open(loud_p, "w")))
+            audio_mod.loudness(video), open(loud_p, "w", encoding="utf-8")))
 
     def chain_diarize():  # F: extracts its own wav -> independent of transcribe
         from . import diarize
@@ -212,7 +212,7 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
                 # only (clearly labelled) guess. Never pretend single-speaker.
                 print(f"[diar ] DIARIZATION UNAVAILABLE -- voice identity is "
                       f"UNVERIFIED for this session.\n{e}")
-                json.dump(diarize.unavailable_artifact(e), open(turns_p, "w"),
+                json.dump(diarize.unavailable_artifact(e), open(turns_p, "w", encoding="utf-8"),
                           indent=1)
         # an unavailable artifact is retried every run (mirrors the
         # visual-stage rule: incomplete work is never a cache hit)
@@ -272,7 +272,7 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
     summary_p = os.path.join(an, "ANALYSIS.md")
     _summary(name, an, summary_p)
     print(f"\nbundle: {an}")
-    print(open(summary_p).read())
+    print(open(summary_p, encoding="utf-8").read())
     if errors:
         raise RuntimeError(
             "analyze finished with failing stage chain(s): "
@@ -283,7 +283,7 @@ def run(video, facecam=None, name=None, out_root=None, skip_visual=False,
 def _summary(name, an, out_path):
     def j(fname):
         p = os.path.join(an, fname)
-        return json.load(open(p)) if os.path.exists(p) else None
+        return json.load(open(p, encoding="utf-8")) if os.path.exists(p) else None
 
     from . import visual
     sm = j("speech_map.json") or {}
@@ -332,4 +332,4 @@ def _summary(name, an, out_path):
     for f in sorted(os.listdir(an)):
         if f != "ANALYSIS.md":
             lines.append(f"- `{f}`")
-    open(out_path, "w").write("\n".join(lines) + "\n")
+    open(out_path, "w", encoding="utf-8").write("\n".join(lines) + "\n")

@@ -175,7 +175,7 @@ def motion_settle(video, w0, w1, analysis_dir):
     params = {"w0": round(w0, 3), "w1": round(w1, 3), "probe": "signalstats.v1"}
     cp = _cache_path(analysis_dir, video, params)
     try:
-        return json.load(open(cp))["settle"]
+        return json.load(open(cp, encoding="utf-8"))["settle"]
     except (OSError, ValueError, KeyError):
         pass
     r = media.sh(config.FFMPEG, "-v", "info",
@@ -199,7 +199,7 @@ def motion_settle(video, w0, w1, analysis_dir):
     settle = settle_point(samples, cap=w1)
     try:
         os.makedirs(os.path.dirname(cp), exist_ok=True)
-        json.dump({"settle": settle, "samples": len(samples)}, open(cp, "w"))
+        json.dump({"settle": settle, "samples": len(samples)}, open(cp, "w", encoding="utf-8"))
     except OSError:
         pass
     return settle
@@ -415,6 +415,6 @@ def _load_scenes(analysis_dir):
     if not os.path.exists(p):
         return []
     try:
-        return [c["t"] for c in json.load(open(p))]
+        return [c["t"] for c in json.load(open(p, encoding="utf-8"))]
     except (ValueError, OSError, KeyError, TypeError):
         return []

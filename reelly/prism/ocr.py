@@ -51,7 +51,7 @@ def load_cached(path):
     if not os.path.exists(path):
         return None
     try:
-        data = json.load(open(path))
+        data = json.load(open(path, encoding="utf-8"))
         return data if isinstance(data, list) else None
     except (ValueError, OSError):
         return None
@@ -74,7 +74,7 @@ def ocr_frames(frames, out_json=None):
                 text = ""
             results.append({"t": f["t"], "path": f["path"], "text": text})
     if out_json:
-        json.dump(results, open(out_json, "w"), indent=1)
+        json.dump(results, open(out_json, "w", encoding="utf-8"), indent=1)
     return results
 
 

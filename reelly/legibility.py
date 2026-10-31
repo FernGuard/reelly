@@ -22,6 +22,7 @@ REELLY_LEGIBILITY=off skips the pass.
 import json
 import os
 import subprocess
+import threading
 
 from . import config
 
@@ -114,15 +115,25 @@ def plates(results, workdir, surface_hex):
     return ev
 
 
+_RECORD_LOCK = threading.Lock()   # cuts finalize in parallel threads
+
+
 def record(root, cut_id, results):
-    """qc/text_contrast.json: {cut_id: [results]} for judge's gate."""
+    """qc/text_contrast.json: {cut_id: [results]} for judge's gate. results
+    None = not measured this run (the judge says so instead of reading the
+    last run's verdict). Locked and replaced atomically: parallel cuts
+    write the same file."""
     qc = os.path.join(root, "qc")
     os.makedirs(qc, exist_ok=True)
     p = os.path.join(qc, "text_contrast.json")
-    try:
-        data = json.load(open(p))
-    except (OSError, ValueError):
-        data = {}
-    data[cut_id] = results
-    json.dump(data, open(p, "w"), indent=1)
+    with _RECORD_LOCK:
+        try:
+            data = json.load(open(p, encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[cut_id] = results
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, p)
     return p

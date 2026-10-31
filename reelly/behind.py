@@ -16,25 +16,19 @@ HOW
 - Only where a brand asks for it (fx.text_behind) AND the content profile
   protects faces (talking_head, podcast): never on gameplay or demos.
 
-REELLY_SEGMENTER = path to selfie_segmenter.tflite (else the usual places).
+Install the model with `reelly models fetch segmenter` (or REELLY_SEGMENTER).
 """
 import os
 import subprocess
 
 from . import config
 
-CANDIDATES = (
-    r"C:\Patolli\tools\models\selfie-segmenter\selfie_segmenter.tflite",
-    os.path.expanduser("~/.reelly/models/selfie-segmenter/selfie_segmenter.tflite"),
-)
 EMA = 0.55               # weight of the new frame in the temporal smoothing
 
 
 def find_model():
-    p = os.environ.get("REELLY_SEGMENTER", "").strip()
-    if p and os.path.exists(p):
-        return p
-    return next((c for c in CANDIDATES if os.path.exists(c)), None)
+    from . import models
+    return models.path("segmenter")
 
 
 def enabled(plan=None):
@@ -93,7 +87,8 @@ def masks(video, out_dir, fps=30, width=540):
     from PIL import Image
     model = find_model()
     if not model:
-        raise FileNotFoundError("selfie_segmenter.tflite not installed")
+        from . import models
+        raise FileNotFoundError(models.missing_message("segmenter"))
     # (OpenCV's contrib guidedFilter crashed natively next to MediaPipe in
     # one process on the worker: the filter is a few box filters, done here)
     os.makedirs(out_dir, exist_ok=True)
@@ -149,32 +144,49 @@ def apply(burned, raw, mask_pattern, mask_fps, dst):
 MAX_COVER = 0.25         # a layer the person covers more than this stays on top
 
 
-def guard(mask_pattern, n, fps, boxes, max_cover=MAX_COVER):
-    """Readability first: for each text layer box (t0, t1, x0, y0, x1, y1 in
-    the 1080x1920 frame), the share of it the person covers over its
-    window; a layer covered more than `max_cover` keeps its text ON TOP
-    (the mask is cleared inside its box for its window). Rewrites the mask
-    frames in place. Returns [(box, cover, behind?)]."""
+def guard(mask_pattern, n, fps, boxes, max_cover=MAX_COVER, on_top=()):
+    """Readability first. For each text layer box (t0, t1, x0, y0, x1, y1 in
+    the 1080x1920 frame): the share of it the person covers over its window;
+    a layer covered more than `max_cover` keeps its text ON TOP. The mask is
+    then LIMITED to the boxes allowed behind, during their windows, and
+    cleared inside every `on_top` box (captions: always readable), so the
+    subject only ever steps in front of the text chosen for it and nothing
+    else in the frame (effects, plates, end tag) is replaced by the raw cut.
+    Rewrites the mask frames in place. Returns [(box, cover, behind?)]."""
     import numpy as np
     from PIL import Image
-    if not boxes or n < 1:
+    if n < 1:
         return []
     probe = Image.open(mask_pattern % 0)
     mw, mh = probe.size
     sx, sy = mw / 1080.0, mh / 1920.0
-    out = []
-    for (t0, t1, x0, y0, x1, y1) in boxes:
+
+    def frame_box(b):
+        t0, t1, x0, y0, x1, y1 = b
         i0, i1 = max(0, int(t0 * fps)), min(n - 1, int(t1 * fps))
-        bx = (int(x0 * sx), int(y0 * sy), max(int(x0 * sx) + 1, int(x1 * sx)),
-              max(int(y0 * sy) + 1, int(y1 * sy)))
+        x0, y0 = max(0, int(x0 * sx)), max(0, int(y0 * sy))
+        return i0, i1, (x0, y0, max(x0 + 1, int(x1 * sx)), max(y0 + 1, int(y1 * sy)))
+
+    out, allow = [], []
+    for b in boxes:
+        i0, i1, bx = frame_box(b)
         covers = [float((np.asarray(Image.open(mask_pattern % i))[bx[1]:bx[3], bx[0]:bx[2]] > 127).mean())
                   for i in range(i0, i1 + 1)]
         cover = float(np.mean(covers)) if covers else 0.0
         behind = cover <= max_cover
-        if not behind:
-            for i in range(i0, i1 + 1):
-                m = np.array(Image.open(mask_pattern % i))
-                m[bx[1]:bx[3], bx[0]:bx[2]] = 0
-                Image.fromarray(m, "L").save(mask_pattern % i, compress_level=1)
-        out.append(((t0, t1, x0, y0, x1, y1), round(cover, 3), behind))
+        if behind:
+            allow.append((i0, i1, bx))
+        out.append((tuple(b), round(cover, 3), behind))
+    block = [frame_box(b) for b in on_top]
+    for i in range(n):
+        m = np.asarray(Image.open(mask_pattern % i))
+        keep = np.zeros(m.shape, bool)
+        for i0, i1, bx in allow:
+            if i0 <= i <= i1:
+                keep[bx[1]:bx[3], bx[0]:bx[2]] = True
+        for i0, i1, bx in block:
+            if i0 <= i <= i1:
+                keep[bx[1]:bx[3], bx[0]:bx[2]] = False
+        Image.fromarray(np.where(keep, m, 0).astype(np.uint8), "L").save(
+            mask_pattern % i, compress_level=1)
     return out

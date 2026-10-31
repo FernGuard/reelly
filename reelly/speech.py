@@ -97,7 +97,7 @@ def words_from(result, min_prob=MIN_WORD_PROB):
     words below `min_prob` confidence."""
     from . import vocab
     if isinstance(result, str):
-        result = json.load(open(result))
+        result = json.load(open(result, encoding="utf-8"))
     out = []
     for seg in result.get("segments", []):
         for w in seg.get("words", []):
@@ -195,7 +195,7 @@ def clean_srt(words, path, **kw):
     out = []
     for i, (s, e, t) in enumerate(cues, 1):
         out += [str(i), f"{_srt_ts(s)} --> {_srt_ts(max(e, s + 0.4))}", t, ""]
-    open(path, "w").write("\n".join(out))
+    open(path, "w", encoding="utf-8").write("\n".join(out))
     return len(cues)
 
 

@@ -540,8 +540,10 @@ def _shared_gpu_chrome(flags):
     import subprocess
     import tempfile
     proc = _SHARED.get("proc")
-    if proc is not None and proc.poll() is None:
+    if proc is not None and proc.poll() is None and _SHARED.get("flags") == list(flags):
         return _SHARED["port"]
+    if proc is not None:
+        reset_shared()                       # other flags (the software fallback)
     port = _free_port()
     profile = tempfile.mkdtemp(prefix="reelly-gpu-chrome-")
     proc = subprocess.Popen(
@@ -556,7 +558,7 @@ def _shared_gpu_chrome(flags):
          "--disable-backgrounding-occluded-windows",
          f"--remote-debugging-port={port}", f"--user-data-dir={profile}", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    _SHARED.update(proc=proc, port=port, profile=profile)
+    _SHARED.update(proc=proc, port=port, profile=profile, flags=list(flags))
 
     def _stop():
         if proc.poll() is None:
@@ -800,7 +802,7 @@ def make(text, out, sub=None, beats=None, bg=None, logo=None, dur=None,
                  else list(enumerate(times))[:n_still + 1])
 
         page = os.path.join(td, "card.html")
-        with open(page, "w") as f:
+        with open(page, "w", encoding="utf-8") as f:
             f.write(_html(plan, total, logo_uri, head_size, sub_size,
                           bg_uri, pal, still_at=still_at))
 

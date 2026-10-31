@@ -16,14 +16,14 @@ DEFAULT_CAP = 20.0
 
 def _load():
     if os.path.exists(LEDGER):
-        return json.load(open(LEDGER))
+        return json.load(open(LEDGER, encoding="utf-8"))
     return {"entries": [], "budget": {"monthly_cap": DEFAULT_CAP, "sprint": None}}
 
 
 def _save(d):
     os.makedirs(config.HOME, exist_ok=True)
     tmp = LEDGER + ".tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(d, fh, indent=1)
     os.replace(tmp, LEDGER)
 
@@ -64,7 +64,7 @@ def add(service, detail, cost, project=""):
     # here, and the unlocked read-modify-write raced (a render once read the
     # file mid-write and died on a JSONDecodeError). _save is atomic
     # (tmp + rename) so lock-free readers always see a complete file.
-    with open(LEDGER + ".lock", "a+") as lk:
+    with open(LEDGER + ".lock", "a+", encoding="utf-8") as lk:
         _lock_blocking(lk)
         d = _load()
         d["entries"].append({

@@ -70,6 +70,8 @@ def resolve_backend():
     mode = os.environ.get("REELLY_SIGHT", "").strip().lower() or "auto"
     if mode in ("off", "0", "no"):
         return None
+    if config.local_only():             # your own endpoint only, never a cloud CLI
+        return "local" if mode in ("auto", "local") and _local_url() else None
     if mode == "codex":
         return "codex" if _codex_ready() else None
     if mode == "local":
@@ -157,7 +159,7 @@ def _one_sheet(video, backend, i, n_sheets, t0, step, n, total, crop, project,
     cp = _cache_path(cache_dir, video, t0, t1, backend)
     tag = f"[sight] sheet {i + 1}/{n_sheets} [{media.fmt(t0)}-{media.fmt(t1)}]"
     if os.path.exists(cp):
-        data = json.load(open(cp))
+        data = json.load(open(cp, encoding="utf-8"))
         print(f"{tag} cached")
         return "ok", data.get("frames", []), data.get("sequences", [])
     times = [round(t0 + step * k, 1) for k in range(n)]
@@ -201,7 +203,7 @@ def _one_sheet(video, backend, i, n_sheets, t0, step, n, total, crop, project,
                      "strong_hook": bool(s.get("strong_hook"))})
     json.dump({"video": os.path.basename(video), "start_s": t0, "end_s": t1,
                "backend": backend, "frames": frames, "sequences": seqs},
-              open(cp, "w"), indent=1)
+              open(cp, "w", encoding="utf-8"), indent=1)
     print(f"{tag} {len(frames)} frames, {len(seqs)} sequence(s), $0")
     return "ok", frames, seqs
 
@@ -255,10 +257,10 @@ def review(video, out_json, out_md, crop=None, project="", backend=None):
     artifact = {"video": os.path.basename(video), "model": engine,
                 "engine": "sight", "step_s": step, "duration_s": round(total, 2),
                 "complete": not missing, "missing": missing, "sequences": seqs}
-    json.dump(artifact, open(out_json, "w"), indent=1)
+    json.dump(artifact, open(out_json, "w", encoding="utf-8"), indent=1)
     json.dump({"video": os.path.basename(video), "engine": engine, "step_s": step,
                "frames": frames},
-              open(os.path.join(os.path.dirname(out_json), "frames.json"), "w"),
+              open(os.path.join(os.path.dirname(out_json), "frames.json"), "w", encoding="utf-8"),
               indent=1)
     lines = [f"# Visual review (zero-paid, {engine}): {os.path.basename(video)}", "",
              f"{len(seqs)} sequences across {media.fmt(total)}, a frame every "
@@ -279,7 +281,7 @@ def review(video, out_json, out_md, crop=None, project="", backend=None):
         lines += [f"- {f['t']:g}s ({f['opening_score']}/10): {f['what_happens']}"
                   + (f"  [text: {f['on_screen_text'][:60]}]" if f["on_screen_text"] else "")
                   for f in best]
-    open(out_md, "w").write("\n".join(lines) + "\n")
+    open(out_md, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     if missing:
         print(f"[sight] WARNING: {len(missing)} sheet(s) failed; their ranges are "
               f"recorded as missing and retried on the next analyze")

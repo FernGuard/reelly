@@ -211,13 +211,13 @@ def _timeline_markers(plan, comp):
 def run(project, tag=None):
     root = direct.resolve_project(project)
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
-    full = json.load(open(os.path.join(root, "edl", "full_edit.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
+    full = json.load(open(os.path.join(root, "edl", "full_edit.json"), encoding="utf-8"))
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     sess_p = os.path.join(root, "analysis", "session.json")
-    sess = json.load(open(sess_p)) if os.path.exists(sess_p) else None
+    sess = json.load(open(sess_p, encoding="utf-8")) if os.path.exists(sess_p) else None
     topics_p = os.path.join(root, "analysis", "topics.json")
-    topics = json.load(open(topics_p)) if os.path.exists(topics_p) else []
+    topics = json.load(open(topics_p, encoding="utf-8")) if os.path.exists(topics_p) else []
     screen = direct._source_video(root)
     from .preview import _facecam_source
     facecam = _facecam_source(root)
@@ -237,8 +237,8 @@ def run(project, tag=None):
         body = _cut_timeline(p, screen, facecam, offset, comp)
         name = f"{p['id']} {p['title']}"
         fx = os.path.join(out, f"{p['id']}.fcpxml")
-        open(fx, "w").write(_fcpxml(name, body, assets, vertical=True))
-        open(os.path.join(out, f"{p['id']}.xml"), "w").write(
+        open(fx, "w", encoding="utf-8").write(_fcpxml(name, body, assets, vertical=True))
+        open(os.path.join(out, f"{p['id']}.xml"), "w", encoding="utf-8").write(
             _xmeml(name, p["segments"], screen, facecam, offset,
                    _timeline_markers(p, comp), vertical=True))
         _retimed_srt(words, p["segments"], os.path.join(out, f"{p['id']}.srt"))
@@ -265,7 +265,7 @@ def run(project, tag=None):
                     f'{cam}{marks}      </asset-clip>')
         tl += dur
     fx = os.path.join(out, "full_edit.fcpxml")
-    open(fx, "w").write(_fcpxml(f"{os.path.basename(root)} full edit",
+    open(fx, "w", encoding="utf-8").write(_fcpxml(f"{os.path.basename(root)} full edit",
                                 "\n".join(rows), assets, vertical=False))
     ch_marks, tl = [], 0.0
     for s, e in full["keep"]:
@@ -273,7 +273,7 @@ def run(project, tag=None):
             if s <= cs < e:
                 ch_marks.append((_xf(tl + cs - s), f"CHAPTER: {txt}"))
         tl += e - s
-    open(os.path.join(out, "full_edit.xml"), "w").write(
+    open(os.path.join(out, "full_edit.xml"), "w", encoding="utf-8").write(
         _xmeml(f"{os.path.basename(root)} full edit", full["keep"],
                screen, facecam, offset, ch_marks, vertical=False))
     _retimed_srt(words, full["keep"], os.path.join(out, "full_edit.srt"))
@@ -430,7 +430,7 @@ def _blur_comp(out):
 	},
 }
 """
-    open(os.path.join(out, "reelly_blur.comp"), "w").write(comp)
+    open(os.path.join(out, "reelly_blur.comp"), "w", encoding="utf-8").write(comp)
 
 
 def _manifest(out, root, plans, full, screen, facecam, offset, topics, words):
@@ -482,7 +482,7 @@ def _manifest(out, root, plans, full, screen, facecam, offset, topics, words):
             if act:
                 ax, ay, aw, ah = act
                 cpath = os.path.join(out, f"co7_{p['id']}.comp")
-                open(cpath, "w").write(_co7_comp(ax, ay, aw, ah,
+                open(cpath, "w", encoding="utf-8").write(_co7_comp(ax, ay, aw, ah,
                                                  sv["width"], sv["height"]))
                 entry["co7_comp"] = cpath
         entry["overlays"] = _overlays(out, p, words)
@@ -520,7 +520,7 @@ def _manifest(out, root, plans, full, screen, facecam, offset, topics, words):
         "offset_s": offset,
         "timelines": timelines,
     }
-    json.dump(man, open(os.path.join(out, "manifest.json"), "w"), indent=1)
+    json.dump(man, open(os.path.join(out, "manifest.json"), "w", encoding="utf-8"), indent=1)
     print(f"[handoff] manifest.json ({len(timelines)} timelines)")
 
 
@@ -565,4 +565,4 @@ def _write_md(out, cut_ids, has_cam):
          "Circle_Insert power-bin macro or your own; the engine's preview MP4s "
          "show the intended composition.", "",
          f"Timelines: {', '.join(cut_ids)}, full_edit", ""]
-    open(os.path.join(out, "HANDOFF.md"), "w").write("\n".join(L))
+    open(os.path.join(out, "HANDOFF.md"), "w", encoding="utf-8").write("\n".join(L))

@@ -16,7 +16,7 @@
   ]
 }*/
 #include "lib/finish.glsl"
-float hh(float x){ return fract(sin(x * 91.345) * 47453.5453); }
+float hh(float x){ x = fract(x * 0.1031); x *= x + 33.33; x *= x + x; return fract(x); }
 float easeOut(float x){ x = clamp(x, 0.0, 1.0); return 1.0 - (1.0 - x) * (1.0 - x) * (1.0 - x); }
 
 void main(){

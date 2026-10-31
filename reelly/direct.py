@@ -196,7 +196,7 @@ GPT_MODEL = "gpt-5.6-sol"
 
 def _load(an, f):
     p = os.path.join(an, f)
-    return json.load(open(p)) if os.path.exists(p) else None
+    return json.load(open(p, encoding="utf-8")) if os.path.exists(p) else None
 
 
 def resolve_project(project):
@@ -213,7 +213,7 @@ def source_crop(root):
     analysis/source.json, or None. The render applies the same crop, so a
     capture's editor chrome never reaches a deliverable."""
     try:
-        c = json.load(open(os.path.join(root, "analysis", "source.json"))).get("crop")
+        c = json.load(open(os.path.join(root, "analysis", "source.json"), encoding="utf-8")).get("crop")
     except (OSError, ValueError):
         return None
     return c if isinstance(c, str) and re.fullmatch(r"\d+:\d+:\d+:\d+", c) else None
@@ -353,6 +353,8 @@ def cli_ready(tool):
     subscription on this machine. Probed once per process."""
     import shutil
     import subprocess
+    if config.local_only():
+        return False
     exe = shutil.which(tool)
     if not exe:
         return False
@@ -383,6 +385,9 @@ def resolve_brain(brain):
     codex/claude asked for by name but not signed in -> None, said loudly.
     gemini/gpt without --allow-paid -> SystemExit with the opt-in message."""
     brain = brain or "auto"
+    if config.local_only():
+        print("[brain] local-only: no CLI or provider calls; planning with heuristics only")
+        return None
     if brain in PAID_BRAINS:
         if config.paid_blocked(PAID_BRAINS[brain]):
             raise SystemExit(config.paid_disabled_message(PAID_BRAINS[brain]))
@@ -422,6 +427,8 @@ def _ask_cli(tool, prompt, project, label, images=None):
     import shutil
     import subprocess
     import tempfile
+    if config.local_only():             # backstop: nothing leaves the machine
+        return None
     exe = shutil.which(tool)
     prompt = prompt + "\n\nReply with the JSON object only."
     r, text = None, ""
@@ -444,9 +451,10 @@ def _ask_cli(tool, prompt, project, label, images=None):
                 r = _run_cli(cmd, td, tool, stdin_text=prompt)
                 if r is None:
                     return None
-                text = open(out_p).read() if os.path.exists(out_p) else ""
+                text = open(out_p, encoding="utf-8").read() if os.path.exists(out_p) else ""
                 if r.returncode == 0 or not _model_refused(r):
-                    _CODEX_MODEL_OK[0] = model
+                    if r.returncode == 0:      # remember only a model that answered
+                        _CODEX_MODEL_OK[0] = model
                     break
                 print(f"  [codex] model {model or '(CLI default)'} refused: "
                       f"{_cli_error(r)}; trying the next")
@@ -497,9 +505,10 @@ def _run_cli(cmd, cwd, tool, stdin_text=None):
         # stdin is the prompt (stdin_text) or closed: both CLIs read a piped
         # stdin as (extra) prompt and would otherwise wait on the parent's
         # stdin until the timeout
-        extra = ({"input": stdin_text, "encoding": "utf-8"} if stdin_text is not None
+        extra = ({"input": stdin_text} if stdin_text is not None
                  else {"stdin": subprocess.DEVNULL})
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
                               timeout=CLI_TIMEOUT_S, env=_cli_env(), **extra)
     except (OSError, subprocess.SubprocessError) as e:
         print(f"  [{tool}] call failed ({e}); heuristic for this window")
@@ -1473,8 +1482,8 @@ def run(project, ai=True, max_cuts=8, brain="auto", tag=None):
             used.add(re.sub(r"[^a-z0-9']", "", first[0]))
 
     full = _full_edit(sm, sents)
-    json.dump(plans, open(os.path.join(edl, f"cut_plans{sfx}.json"), "w"), indent=1)
-    json.dump(full, open(os.path.join(edl, "full_edit.json"), "w"), indent=1)
+    json.dump(plans, open(os.path.join(edl, f"cut_plans{sfx}.json"), "w", encoding="utf-8"), indent=1)
+    json.dump(full, open(os.path.join(edl, "full_edit.json"), "w", encoding="utf-8"), indent=1)
     _write_md(name, plans, full, os.path.join(edl, f"CUT-PLANS{sfx}.md"))
     print(f"\n{len(plans)} cut plans ({brain}) -> {edl}/CUT-PLANS{sfx}.md")
     return plans
@@ -1527,4 +1536,4 @@ def _write_md(name, plans, full, path):
           f"- {media.fmt(full['original_s'])} -> {media.fmt(full['edited_s'])} "
           f"({full['removed_s']:.0f}s of dead air out, {len(full['keep'])} kept blocks)",
           "- Renders in M4; data in `full_edit.json`", ""]
-    open(path, "w").write("\n".join(L))
+    open(path, "w", encoding="utf-8").write("\n".join(L))

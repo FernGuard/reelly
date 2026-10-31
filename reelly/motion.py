@@ -432,7 +432,7 @@ def _scaffold(name):
     words = os.path.join(root, "analysis", "words.json")
     if not os.path.exists(words):
         # No speech exists: an honest empty transcript keeps judge/learn working.
-        json.dump({"segments": []}, open(words, "w"))
+        json.dump({"segments": []}, open(words, "w", encoding="utf-8"))
     return root
 
 
@@ -458,7 +458,7 @@ def _warn_lettering_style(name, spec):
         if not fn.endswith(".json") or fn == f"{name}.json":
             continue
         try:
-            other = json.load(open(os.path.join(camp_dir, fn)))
+            other = json.load(open(os.path.join(camp_dir, fn), encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         oref = other.get("lettering_style_ref")
@@ -488,7 +488,7 @@ def load_campaign(name):
     p = os.path.join(config.HOME, "campaigns", f"{name}.json")
     if not os.path.exists(p):
         raise SystemExit(f"no campaign spec at {p}")
-    spec = json.load(open(p))
+    spec = json.load(open(p, encoding="utf-8"))
     _warn_lettering_style(name, spec)
     return spec
 
@@ -860,7 +860,7 @@ def _lettering(style_ref, text, project, out, tries=4):
     key = _lettering_key(style_ref, text)
     keyfile = out + ".key"
     if os.path.exists(out) and os.path.exists(keyfile):
-        cached = open(keyfile).read().strip()
+        cached = open(keyfile, encoding="utf-8").read().strip()
         if cached == key:
             print(f"[motion] reusing cached lettering: {text!r}")
             return out
@@ -888,7 +888,7 @@ def _lettering(style_ref, text, project, out, tries=4):
         td = os.path.dirname(out) or "."
         nm = os.path.splitext(os.path.basename(out))[0]
         overlays._render_png(td, nm, body, size=(1000, 400))
-        open(keyfile, "w").write(key)
+        open(keyfile, "w", encoding="utf-8").write(key)
         print(f"[motion] typeset lettering (no fal): {text!r}")
         return out
     spec = " and ".join(f"\"{ln}\" on line {i + 1}" for i, ln in enumerate(lines))
@@ -969,7 +969,7 @@ def _lettering(style_ref, text, project, out, tries=4):
                  "by": who, "at": datetime.now(timezone.utc).isoformat(),
                  "reason": failure or "critic rejection"}
         print(f"[motion] HUMAN LETTERING OVERRIDE by {who}: {audit['reason']}")
-        with open(out + ".override.json", "w") as fh:
+        with open(out + ".override.json", "w", encoding="utf-8") as fh:
             json.dump(audit, fh, indent=2)
     im = np.array(Image.open(raw).convert("RGB")).astype(int)
     # Row-wise background from the left/right margins: decorative plates come
@@ -982,7 +982,7 @@ def _lettering(style_ref, text, project, out, tries=4):
     ys, xs = np.nonzero(alpha > 20)
     rgba = np.dstack([im.astype(np.uint8), alpha])
     Image.fromarray(rgba, "RGBA").crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)).save(out)
-    open(keyfile, "w").write(key)
+    open(keyfile, "w", encoding="utf-8").write(key)
     os.remove(raw)
     return out
 
@@ -1081,7 +1081,7 @@ def _sample_occupancy(vid, t0, t1, project, samples=5, diag=None):
     try:
         chash = hashlib.sha1(open(vid, "rb").read()).hexdigest()[:16]
         if os.path.exists(cache_file):
-            cache = json.load(open(cache_file))
+            cache = json.load(open(cache_file, encoding="utf-8"))
         if cache.get("hash") == chash and ckey in cache.get("windows", {}):
             occ = {k: [tuple(b) for b in v]
                    for k, v in cache["windows"][ckey].items()}
@@ -1164,7 +1164,7 @@ def _sample_occupancy(vid, t0, t1, project, samples=5, diag=None):
         try:
             windows = cache.get("windows", {}) if cache.get("hash") == chash else {}
             windows[ckey] = occ
-            with open(cache_file, "w") as fh:
+            with open(cache_file, "w", encoding="utf-8") as fh:
                 json.dump({"hash": chash, "windows": windows}, fh)
         except Exception as e:
             print(f"[motion] occupancy cache write failed ({e}); continuing")
@@ -1613,9 +1613,9 @@ def _events(root, vid, ai, campaign, cut, total, project, attempt=0, avoid=(),
     if bug:
         events.insert(0, bug)          # bottom layer: rides the clip under the type
     spec_path = os.path.join(root, "edl", "overlay_specs.json")
-    specs = json.load(open(spec_path)) if os.path.exists(spec_path) else {}
+    specs = json.load(open(spec_path, encoding="utf-8")) if os.path.exists(spec_path) else {}
     specs["cut_01"] = events
-    json.dump(specs, open(spec_path, "w"), indent=1)
+    json.dump(specs, open(spec_path, "w", encoding="utf-8"), indent=1)
     return events
 
 
@@ -1646,7 +1646,7 @@ def _style_gate(video, source, cut, total, project, root):
     for f in frames:
         L.append(f"- t={f['t']}s: {'match' if f.get('match') else 'DRIFT'}"
                  + (f" -- {f['drift']}" if f.get("drift") else ""))
-    with open(os.path.join(qc, "style_report.md"), "w") as fh:
+    with open(os.path.join(qc, "style_report.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(L) + "\n")
     if not ok:
         print("[motion] STYLE GATE FAIL: video drifts from the source art style; "
@@ -1702,7 +1702,7 @@ def _band_clear_gate(video, cut, total, project, root):
     bottom = not _face_in_zone(faces, TEXT_ZONE_BOTTOM_Y, FRAME_H)
     qc = os.path.join(root, "qc")
     os.makedirs(qc, exist_ok=True)
-    with open(os.path.join(qc, "band_report.md"), "w") as fh:
+    with open(os.path.join(qc, "band_report.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join([
             "# Text-zone clearance (reserved bands) -- faces only", "",
             f"TOP band (y < {TEXT_ZONE_TOP_Y}px): {'CLEAR' if top else 'BLOCKED (face)'}",
@@ -1924,7 +1924,7 @@ def _design_gate(root, out_video, ai, cut, total, project, recompose=None,
                 f"asset_hue={d.get('asset_hue')} backdrop_hue={d.get('backdrop_hue')} "
                 f"hue_delta={d.get('hue_delta')} scrim->{d.get('scrim')}")
         L.append("")
-    open(os.path.join(qc, "design_report.md"), "w").write("\n".join(L))
+    open(os.path.join(qc, "design_report.md"), "w", encoding="utf-8").write("\n".join(L))
     return {"pass": ok, "attempts": attempts, "placement": placement,
             "d1": diag.get("d1", []), "d7": diag.get("d7", [])}
 
@@ -2152,7 +2152,7 @@ def _write_manifest(root, plan):
         "band_gate": plan.get("band_gate", {}).get("result"),
         "quality_blocked": bool(plan.get("quality_blocked", False)),
     }
-    with open(os.path.join(root, "deliverables", "manifest.json"), "w") as fh:
+    with open(os.path.join(root, "deliverables", "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(m, fh, indent=2)
 
 
@@ -2291,7 +2291,7 @@ def run(image, message, campaign=None, name=None, tier="draft",
                        "copy": ai.get("copy_source", "brain"),
                        "shots": ai["shots"]},
     }
-    json.dump([plan], open(os.path.join(root, "edl", "cut_plans.json"), "w"), indent=1)
+    json.dump([plan], open(os.path.join(root, "edl", "cut_plans.json"), "w", encoding="utf-8"), indent=1)
 
     print("[motion] type + placement (occupancy-aware, M3/M7) ...")
     diag = {"placement": "subject-aware", "windows": [], "d1": [], "d7": []}
@@ -2341,10 +2341,10 @@ def run(image, message, campaign=None, name=None, tier="draft",
     for leaf in ("hook.png.override.json", "payoff.png.override.json"):
         p = os.path.join(root, "type", leaf)
         if os.path.exists(p):
-            overrides.append(json.load(open(p)))
+            overrides.append(json.load(open(p, encoding="utf-8")))
     if overrides:
         plan["human_overrides"] = overrides
-    json.dump([plan], open(os.path.join(root, "edl", "cut_plans.json"), "w"), indent=1)
+    json.dump([plan], open(os.path.join(root, "edl", "cut_plans.json"), "w", encoding="utf-8"), indent=1)
     if not gate["pass"]:
         print("[motion] DESIGN GATE FAIL: see qc/design_report.md")
 

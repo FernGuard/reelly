@@ -107,7 +107,7 @@ def _frames_near(an_dir, s0, seg_end):
     hi = max(s0, hi)
     out = []
     try:
-        fr = json.load(open(os.path.join(an_dir, "frames.json"))).get("frames", [])
+        fr = json.load(open(os.path.join(an_dir, "frames.json"), encoding="utf-8")).get("frames", [])
     except (OSError, ValueError):
         fr = []
     for f in fr:
@@ -323,10 +323,10 @@ def rewrite(root, brain, cut_id=None):
     cut plans (the moments stay), e.g. after new approved/rejected lines."""
     from . import direct
     edl = os.path.join(root, "edl", "cut_plans.json")
-    plans = json.load(open(edl))
+    plans = json.load(open(edl, encoding="utf-8"))
     an = os.path.join(root, "analysis")
     try:
-        vr = json.load(open(os.path.join(an, "visual_review.json"))).get("sequences", [])
+        vr = json.load(open(os.path.join(an, "visual_review.json"), encoding="utf-8")).get("sequences", [])
     except (OSError, ValueError, AttributeError):
         vr = []
     used = set()
@@ -343,7 +343,7 @@ def rewrite(root, brain, cut_id=None):
         first = (plan.get("hook") or {}).get("text", "").lower().split()
         if first:
             used.add(re.sub(r"[^a-z0-9']", "", first[0]))
-    json.dump(plans, open(edl, "w"), indent=1)
+    json.dump(plans, open(edl, "w", encoding="utf-8"), indent=1)
     return plans
 
 

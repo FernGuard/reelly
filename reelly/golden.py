@@ -3,9 +3,11 @@ and compared with stored reference images, so a change that alters how an
 effect LOOKS fails a test instead of shipping quietly.
 
 The references are per renderer tier (GPU output is reproducible on one
-machine, not bit-identical across GPUs or against the software renderer):
-tests/golden/<tier>/<case>_<i>.png, where tier is a slug of the WebGL
-renderer string. Cases whose tier has no references are skipped.
+machine; the noise is hash-based, not sin-based, so tiers agree closely but
+not bit for bit): tests/golden/<tier>/<case>_<i>.png, where tier is a slug
+of the WebGL renderer string. A tier with no references is skipped (unless
+REELLY_GOLDEN=required); a case missing from a tier that has references
+fails.
 
     python -m reelly.golden --update      # (re)write references for this machine
     python -m reelly.golden               # compare, print the worst differences
@@ -39,7 +41,7 @@ def cases(tmp):
             im.paste((40 + y // 12, 20, 70 + x // 6), (x, y, x + 60, y + 1))
     im.save(bg)
     pic, clear = (0.0, 0.34, 1.0, 0.66), (0.66, 0.8)
-    t = "Curses bite back."
+    t = "Every frame counts."
     lines = [t.split()]
     out = {
         "endcard": (shaderfx.page_html("smoke-endcard", bg, 270, 480, "#a87cf0", pulse_t=0.4,
@@ -53,6 +55,23 @@ def cases(tmp):
         "focus": (shaderfx.ambient_html("focus-ambient", 540, 960, "#a87cf0", pic, clear, [],
                                         end=2.0, ctrl=_ctrl()), 540, 960, (0.55, 0.7), False),
     }
+    # finish (folk print) over a cut's frames; parallax on a still + depth
+    fdir = os.path.join(tmp, "finish_src")
+    os.makedirs(fdir, exist_ok=True)
+    from pathlib import Path
+    src = im.resize((270, 480))
+    for i in range(3):
+        src.save(os.path.join(fdir, f"s{i:05d}.jpg"), quality=95)
+    frames = [Path(os.path.join(fdir, f"s{i:05d}.jpg")).resolve().as_uri() for i in range(3)]
+    out["finish"] = (shaderfx.finish_html("folk-print", frames, 270, 480, 60, pic, clear),
+                     270, 480, (0.0, 0.02), False)
+    dep = os.path.join(tmp, "depth.png")
+    dm = Image.new("L", (540, 960))
+    for y in range(960):
+        dm.paste(int(255 * y / 959), (0, y, 540, y + 1))     # near at the bottom
+    dm.save(dep)
+    out["parallax"] = (shaderfx.parallax_html("parallax-still", bg, dep, 270, 480, 2.0),
+                       270, 480, (0.0, 1.0, 1.9), False)
     for motion in ("rise", "blocklock"):
         os.environ["REELLY_TEXT_MOTION"] = motion
         html, _, _, off = gputext.page(t, 64, 800, 180, 2.0, "headline", 1, lines, True, True,
@@ -89,7 +108,7 @@ def tier():
     return re.sub(r"[^a-z0-9]+", "-", r.lower()).strip("-")[:60]
 
 
-_NEUTRAL = ("REELLY_GPU", "REELLY_HOME", "REELLY_BRAND", "REELLY_TEXT_MOTION", "REELLY_TEXT_EXIT",
+_NEUTRAL = ("REELLY_HOME", "REELLY_BRAND", "REELLY_TEXT_MOTION", "REELLY_TEXT_EXIT",
             "REELLY_PROFILE", "REELLY_FX_LITE", "REELLY_OUTRO_FX", "REELLY_AMBIENT_FX",
             "REELLY_TEXT_FX", "REELLY_FINISH_FX")
 
@@ -124,8 +143,15 @@ def _run(update, only, tmp):
     for name, (html, w, h, times, _pm) in cases(tmp).items():
         if only and name not in only:
             continue
+        if not update and shaderfx._RENDERER[0] is not None and \
+                not os.path.isdir(os.path.join(ROOT, tier())):
+            results[name] = None                # this tier has no references at all
+            continue
         frames = _grab(html, w, h, times, tmp, name)
         d = os.path.join(ROOT, tier())
+        if not update and not os.path.isdir(d):
+            results[name] = None
+            continue
         worst = None
         for i, fr in enumerate(frames):
             ref = os.path.join(d, f"{name}_{i}.png")
@@ -134,6 +160,7 @@ def _run(update, only, tmp):
                 Image.fromarray((fr * 255 + 0.5).astype(np.uint8), "RGBA").save(ref)
                 continue
             if not os.path.exists(ref):
+                worst = float("inf")            # a case this tier never recorded
                 continue
             r = np.asarray(Image.open(ref).convert("RGBA")).astype(np.float32) / 255.0
             if r.shape != fr.shape:
@@ -156,6 +183,6 @@ if __name__ == "__main__":
     res = run(update=upd)
     print("tier:", tier())
     for k, v in res.items():
-        print(f"  {k:<18} {'written' if upd else ('no reference' if v is None else f'{v:.4f}')}")
+        print(f"  {k:<18} {'written' if upd else ('no references for this tier' if v is None else ('MISSING' if v == float('inf') else f'{v:.4f}'))}")
     if not upd and any(v is not None and v > TOL for v in res.values()):
         sys.exit(1)

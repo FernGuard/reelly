@@ -144,7 +144,7 @@ def check_file(path, expect_vertical=True, plan_dur=None):
         try:
             R.append(flashqc.gate(path))
         except Exception as e:   # noqa: BLE001 -- a broken probe must not pass silently
-            R.append(("flashes", "WARN", f"flash check could not run ({e})"))
+            R.append(("flashes", "FAIL", f"flash check could not run ({e})"))
         from . import iris
         try:
             R.append(iris.gate(path))
@@ -239,7 +239,7 @@ def text_contrast(root, plan):
     unreadable, PASS otherwise (saying which layers needed a plate)."""
     p = os.path.join(root, "qc", "text_contrast.json")
     try:
-        rows = json.load(open(p)).get(plan.get("id"), None)
+        rows = json.load(open(p, encoding="utf-8")).get(plan.get("id"), None)
     except (OSError, ValueError):
         rows = None
     if rows is None:
@@ -374,7 +374,7 @@ def hook_from_frame1(root, plan):
     spec_p = os.path.join(root, "edl", "overlay_specs.json")
     if not os.path.exists(spec_p):
         return ("hook_frame1", "SKIP", "no overlay specs")
-    events = json.load(open(spec_p)).get(plan["id"], [])
+    events = json.load(open(spec_p, encoding="utf-8")).get(plan["id"], [])
     for ev in events:
         t = ev.get("t", [None])
         if t and t[0] is not None and float(t[0]) <= 0.01 and ev.get("fade_in", True) is False:
@@ -394,7 +394,7 @@ def _spec_data(root, plan_id):
     p = os.path.join(root, "edl", "overlay_specs.json")
     if not os.path.exists(p):
         return None, None
-    specs = json.load(open(p))
+    specs = json.load(open(p, encoding="utf-8"))
     return specs.get(plan_id) or [], (specs.get("_meta") or {}).get(plan_id) or {}
 
 
@@ -595,7 +595,7 @@ def run(project, tag=None, visual=False):
     root = direct.resolve_project(project)
     sfx = f"_{tag}" if tag else ""
     plans_p = os.path.join(root, "edl", f"cut_plans{sfx}.json")
-    plans = {p["id"]: p for p in json.load(open(plans_p))} if os.path.exists(plans_p) else {}
+    plans = {p["id"]: p for p in json.load(open(plans_p, encoding="utf-8"))} if os.path.exists(plans_p) else {}
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     blocked = clearance.blocked_ranges(root)
     reports, fails = [], 0
@@ -625,6 +625,8 @@ def run(project, tag=None, visual=False):
             rep["results"].append(caption_collisions(plan, words))
             rep["results"].append(ui_zones(plan, words))
             rep["results"].append(text_contrast(root, plan))
+            from . import degrade
+            rep["results"].append(degrade.gate(root, plan["id"]))
             rep["results"].append(plain.verdict(plan))
             rep["results"].append(retention.bait(plan))
             rep["results"].append(safety.verdict(plan))
@@ -685,8 +687,8 @@ def run(project, tag=None, visual=False):
                     "SKIP": "n/a"}[status]
             L.append(f"- {gate}: {mark} ({detail})")
         L.append("")
-    open(os.path.join(qc, f"qc_report{sfx}.md"), "w").write("\n".join(L))
-    json.dump(reports, open(os.path.join(qc, f"qc_report{sfx}.json"), "w"),
+    open(os.path.join(qc, f"qc_report{sfx}.md"), "w", encoding="utf-8").write("\n".join(L))
+    json.dump(reports, open(os.path.join(qc, f"qc_report{sfx}.json"), "w", encoding="utf-8"),
               indent=1, default=str)
     print("\n".join(L))
     print(f"[judge] {len(reports)} files, {fails} failing gates -> {qc}/qc_report{sfx}.md")

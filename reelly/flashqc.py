@@ -32,15 +32,21 @@ MAX_PER_S = 3
 def _frames(path):
     import numpy as np
     from . import media
-    try:
-        v = next(s for s in media.probe(path)["streams"] if s.get("codec_type") == "video")
-        num, den = (v.get("r_frame_rate") or "30/1").split("/")
-        fps = float(num) / max(1.0, float(den))
-    except Exception:   # noqa: BLE001
-        fps = 30.0
+    info = media.probe(path)
+    v = next((s for s in info.get("streams") or [] if s.get("codec_type") == "video"), None)
+    if v is None:
+        raise RuntimeError(f"flash check: no readable video in {path}")
+    num, den = (v.get("r_frame_rate") or "30/1").split("/")
+    fps = float(num) / max(1.0, float(den))
     r = subprocess.run([config.FFMPEG, "-v", "error", "-i", path, "-vf", f"scale={W}:{H}",
                         "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True)
     n = len(r.stdout) // (W * H)
+    # fail closed: a safety check that could not see the whole file must not
+    # pass it (a truncated decode would be judged on its readable part only)
+    dur = float(info.get("format", {}).get("duration") or 0)
+    if r.returncode != 0 or n == 0 or (dur > 0 and n < 0.9 * dur * fps):
+        raise RuntimeError(f"flash check could not decode {path}: {n} frames "
+                           f"of ~{dur * fps:.0f} (ffmpeg exit {r.returncode})")
     y = np.frombuffer(r.stdout[: n * W * H], np.uint8).reshape(n, H, W) / 255.0
     lin = np.where(y <= 0.04045, y / 12.92, ((y + 0.055) / 1.055) ** 2.4)
     return lin, fps

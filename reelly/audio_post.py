@@ -106,7 +106,7 @@ def _job_key(endpoint, payload, project):
 
 def _pending_load():
     try:
-        with open(_PENDING) as fh:
+        with open(_PENDING, encoding="utf-8") as fh:
             return json.load(fh)
     except Exception:
         return {}
@@ -115,7 +115,7 @@ def _pending_load():
 def _pending_save(reg):
     os.makedirs(config.HOME, exist_ok=True)
     tmp = _PENDING + ".tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(reg, fh)
     os.replace(tmp, _PENDING)
 
@@ -233,7 +233,7 @@ def _log_wait(endpoint, service, project, seconds):
     there was no data to rank them against the instrumented stages."""
     try:
         os.makedirs(config.HOME, exist_ok=True)
-        with open(os.path.join(config.HOME, "fal_timings.jsonl"), "a") as f:
+        with open(os.path.join(config.HOME, "fal_timings.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps({"ts": time.time(), "endpoint": endpoint,
                                 "service": service, "project": project,
                                 "seconds": round(seconds, 1)}) + "\n")
@@ -432,8 +432,46 @@ def music(plan, out_mp3, project=""):
                 if _PREFETCH.get(out_mp3) is fut:
                     del _PREFETCH[out_mp3]
     if os.path.exists(out_mp3):
-        return out_mp3
+        want = _brand_source(plan)
+        have = _source_of(out_mp3)
+        # the cached bed is reused only while it still comes from what the
+        # cut would pick now: adding or changing the brand's track (or the
+        # plan's "music") rebuilds it, and its stated bpm stays true
+        if want == have or (want is None and have in (None, "bed")):
+            if want:
+                _warn_uncleared(plan)
+            return out_mp3
+        print(f"         music: the cached bed is from {have or 'an older run'}; rebuilding")
+        os.remove(out_mp3)
     return _music_generate(plan, out_mp3, project)
+
+
+def _brand_source(plan):
+    """What the brand track for this cut is right now (key, file, mtime),
+    or None when the cut takes a generated or kit bed."""
+    track, key = brand_track(plan)
+    if not track:
+        return None
+    return f"brand:{key}:{os.path.basename(track)}:{int(os.path.getmtime(track))}"
+
+
+def _source_of(out_mp3):
+    try:
+        return json.load(open(out_mp3 + ".src.json", encoding="utf-8")).get("source")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _mark_source(out_mp3, source):
+    with open(out_mp3 + ".src.json", "w", encoding="utf-8") as f:
+        json.dump({"source": source}, f)
+
+
+def _warn_uncleared(plan):
+    from . import brandkit
+    if (brandkit.brand().get("music") or {}).get("cleared") is not True:
+        print(f"         music for {plan.get('id', '?')}: the brand track is NOT marked "
+              "cleared for marketing in brand.json; confirm the rights before posting")
 
 
 def _music_generate(plan, out_mp3, project=""):
@@ -454,6 +492,7 @@ def _music_generate(plan, out_mp3, project=""):
         print(f"         music: brand track '{key}' ({os.path.basename(track)}, $0)"
               + ("" if cleared else " -- NOT marked cleared for marketing in brand.json; "
                  "confirm the rights before posting"))
+        _mark_source(out_mp3, _brand_source(plan))
         with _LEDGER_LOCK:
             ledger.add("brand-music", f"music {plan['id']} ({key})", 0.0, project)
         return out_mp3
@@ -469,6 +508,7 @@ def _music_generate(plan, out_mp3, project=""):
         shutil.copyfile(kit_bed, out_mp3)
         print(f"         music: {bed} bed from kit ($0): "
               f"{os.path.basename(kit_bed)}")
+        _mark_source(out_mp3, "bed")
         with _LEDGER_LOCK:
             ledger.add("brandkit-music", f"music {plan['id']} ({bed}, kit)",
                        0.0, project)
@@ -487,6 +527,7 @@ def _music_generate(plan, out_mp3, project=""):
                {"prompt": prompt, "music_length_ms": min(dur, 300) * 1000},
                EST_MUSIC, f"music {plan['id']}", project)
     _download(url, out_mp3)
+    _mark_source(out_mp3, "bed")
     # Grow the library: the bed this cut just paid for serves every future
     # cut with the same genre and a shorter-or-equal length.
     try:
@@ -765,7 +806,13 @@ def level_mix(src, target=-14.0, peak_db=-4.5, tolerance=0.4):
         gain += target - after
     print(f"         mix levelled {i:.1f} -> "
           f"{after if after is None else round(after, 1)} LUFS "
-          f"(+{gain:.1f} dB, peaks limited at {peak_db} dB)")
+          f"({gain:+.1f} dB, peaks limited at {peak_db} dB)")
+    if after is not None and after < target - 3.0:
+        # a near-silent mix cannot be lifted to target (the gain is capped):
+        # say so here; the judge's loudness gate fails the file
+        from . import degrade
+        degrade.note("loudness", f"the mix is nearly silent ({i:.1f} LUFS); "
+                     f"reached only {after:.1f} of {target:.0f} LUFS")
     return out
 
 

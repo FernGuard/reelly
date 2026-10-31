@@ -303,7 +303,7 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
     text_h = captions.block_height(text, width=width, size=size, role=role)
     cw, ch = width + 2 * PAD, text_h + 2 * PAD
     page = os.path.join(out_dir, "line.html")
-    with open(page, "w") as f:
+    with open(page, "w", encoding="utf-8") as f:
         f.write(page_html(text, size, cw, ch, dur, role=role, hot=hi,
                           lines=wrap_lines(text, size, width, role),
                           enter=enter, leave=leave, pop=pop))
@@ -344,7 +344,9 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
             print(f"        kinetic {label or kind}: GPU text, {n} frames in "
                   f"{_time.time() - t0:.1f}s")
         except Exception as e:   # noqa: BLE001 -- the DOM renderer is the fallback
-            print(f"        kinetic {label or kind}: GPU text failed ({e}); browser text")
+            from . import degrade
+            degrade.note(f"text '{label or kind}'", f"GPU text failed ({e}); browser text "
+                         "(no block-lock motion or petal exit)")
             for f in os.listdir(out_dir):
                 if f.startswith("k") and f.endswith(".png"):
                     os.remove(os.path.join(out_dir, f))
@@ -385,7 +387,8 @@ def _aura(out_dir, n, cw, ch, fps, pop, enter, label):
               + (f", flare with the pop at {pop:.2f}s" if pop is not None else ""))
         return pat, cw + 2 * off, ch + 2 * off, PAD + off
     except Exception as e:   # noqa: BLE001 -- plain kinetic frames instead
-        print(f"        kinetic {label}: aura failed ({e}); plain text")
+        from . import degrade
+        degrade.note(f"text '{label}'", f"aura '{fx}' failed ({e}); plain text")
         return None
 
 

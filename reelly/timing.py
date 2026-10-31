@@ -28,7 +28,7 @@ def stage(label, path=None):
                      "ts": datetime.datetime.now().isoformat(timespec="seconds")}
             with _LOCK:
                 try:
-                    data = json.load(open(path)) if os.path.exists(path) else []
+                    data = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else []
                     if not isinstance(data, list):
                         data = []
                 except (ValueError, OSError):
@@ -38,7 +38,7 @@ def stage(label, path=None):
                     d = os.path.dirname(path)
                     if d:
                         os.makedirs(d, exist_ok=True)
-                    json.dump(data, open(path, "w"), indent=1)
+                    json.dump(data, open(path, "w", encoding="utf-8"), indent=1)
                 except OSError as e:  # timing must never kill a render
                     print(f"[time] could not write {path}: {e}")
 

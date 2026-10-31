@@ -111,7 +111,8 @@ def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None,
                 beat=kinetic.local_beat(beats, t0), linger=linger)
             return _Seq(pattern), -pad
         except Exception as e:  # noqa: BLE001 -- static fallback, never break the burn
-            print(f"        kinetic '{name}' failed ({e}); static text instead")
+            from . import degrade
+            degrade.note(f"text '{name}'", f"kinetic text failed ({e}); static text")
     return captions.hook_png(text, os.path.join(workdir, f"{name}.png")), 0
 
 
@@ -328,11 +329,19 @@ def _pop_times(plan):
     return sorted(out)
 
 
-def _protected(plan, layout_template):
+def _protected(plan, layout_template, follow=False):
     """(pic, clear) in uv (y up): the picture rect and the caption band above
-    it, which brand-space layers never cover."""
+    it, which brand-space layers never cover; None when the content fills
+    the frame (a follow-the-faces crop) and there is no brand space at all.
+    A split cut protects the facecam and the screen together (the camera
+    sits on top), so smoke and sparks never cross a face."""
     from . import layout as _layout
     H = _layout.FRAME_H
+    if follow:
+        return None
+    if layout_template and layout_template in _layout.TEMPLATES:
+        _, scr_y, out_h = _layout._split_geometry(plan.get("composition"))
+        return (0.0, 1 - min(H, scr_y + out_h) / H, 1.0, 1.0), (0.0, 0.0)
     top = _layout.picture_top(plan.get("reframe", 1.0))
     bottom = H - top
     L = _layout.plan_text(plan, layout_template)
@@ -340,7 +349,7 @@ def _protected(plan, layout_template):
     return (0.0, 1 - bottom / H, 1.0, 1 - top / H), (1 - top / H, 1 - max(0, text_top) / H)
 
 
-def _finish_pass(src, dst, plan, dur, workdir, layout_template):
+def _finish_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
     """The brand's finish (shaderfx "finish", e.g. folk-print) over the space
     around the picture, AFTER the ambient layers, so the fill, smoke and
     sparks print as one surface; never the picture. Reads the cut's own
@@ -349,8 +358,11 @@ def _finish_pass(src, dst, plan, dur, workdir, layout_template):
     fx = shaderfx.active("finish")
     if not fx or not kinetic.enabled():
         return src
+    prot = _protected(plan, layout_template, follow)
+    if prot is None:
+        return src                       # the content fills the frame
     try:
-        pic, clear = _protected(plan, layout_template)
+        pic, clear = prot
         ro = shaderfx._render_opts(fx)
         fps = int(ro.get("fps", 60))
         w, h = shaderfx._size(ro.get("scale", 0.5))
@@ -372,29 +384,28 @@ def _finish_pass(src, dst, plan, dur, workdir, layout_template):
         print(f"        finish '{fx}': around the picture, {n} frames")
         return dst
     except Exception as e:   # noqa: BLE001 -- the cut ships without the finish
-        print(f"        finish '{fx}' failed ({e}); no finish")
+        from . import degrade
+        degrade.note("finish", f"'{fx}' failed ({e}); no finish")
         return src
 
 
-def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
+def _ambient_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
     """The brand's cut-long shader layers (shaderfx ambient, stacked bottom
     first) over the pre-caption cut, only outside the picture and the text
     band, so the content is never tinted or covered. Every layer reads the
     cut's control track (plan "_ctrl"). Returns dst, or src when the brand
     has no ambient layer or none renders."""
-    from . import kinetic, layout as _layout, shaderfx
+    from . import kinetic, shaderfx
     layers = shaderfx.active_list("ambient")
     if not layers or not kinetic.enabled():
         return src
+    prot = _protected(plan, layout_template, follow)
+    if prot is None:
+        print("        ambient: the content fills the frame; no brand space to fill")
+        return src
     fx = "+".join(layers)
     try:
-        H = _layout.FRAME_H
-        top = _layout.picture_top(plan.get("reframe", 1.0))
-        bottom = H - top
-        L = _layout.plan_text(plan, layout_template)
-        text_top = min(L.get("hook", {}).get("y", top), L.get("game_name", {}).get("y", top)) - 24
-        pic = (0.0, 1 - bottom / H, 1.0, 1 - top / H)          # uv, y up
-        clear = (1 - top / H, 1 - max(0, text_top) / H)
+        pic, clear = prot                                     # uv, y up
         pops = _pop_times(plan)
         ctrl = plan.get("_ctrl")
         if ctrl is not None and "events" not in ctrl and not shaderfx.drives("events"):
@@ -409,7 +420,8 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
                 ctrl["events"] = control.verify_events(src, cand, pic, workdir,
                                                        plan.get("id", ""), cache)[:control.MAX_EVENTS]
             except Exception as e:   # noqa: BLE001 -- marks simply do not fire
-                print(f"        impact events failed ({e})")
+                from . import degrade
+                degrade.note("impacts", f"detection failed ({e}); no impact marks")
                 ctrl["events"] = []
         inputs, chain, last = [], [], "0:v"
         for i, name in enumerate(layers, start=1):
@@ -418,7 +430,8 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
                     name, os.path.join(workdir, f"fx_ambient{i}"), dur, pic, clear, pops,
                     ctrl=plan.get("_ctrl"))
             except Exception as e:   # noqa: BLE001 -- the other layers still play
-                print(f"        ambient '{name}' failed ({e}); layer skipped")
+                from . import degrade
+                degrade.note("ambient", f"'{name}' failed ({e}); layer skipped")
                 continue
             k = len(inputs) // 4 + 1
             inputs += ["-framerate", str(fx_fps), "-i", seq]
@@ -438,7 +451,8 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template):
               f"impacts at {[e['t'] for e in c.get('events', [])]}")
         return dst
     except Exception as e:   # noqa: BLE001 -- the cut ships without the layer
-        print(f"        ambient '{fx}' failed ({e}); no ambient layer")
+        from . import degrade
+        degrade.note("ambient", f"'{fx}' failed ({e}); no ambient layers")
         return src
 
 
@@ -455,7 +469,7 @@ def _burn_final(src, dst, plan, words_tl, dur, workdir, layout, product_key):
         part = os.path.join(workdir, f"burnpart{i:03d}.mp4")
         parts.append(_burn_pass(src, part, local, seek=(s, e)))
     lst = os.path.join(workdir, "burnparts.txt")
-    open(lst, "w").write("".join(f"file '{p}'\n" for p in parts))
+    open(lst, "w", encoding="utf-8").write("".join(f"file '{p}'\n" for p in parts))
     subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat",
                     "-safe", "0", "-i", lst, "-c", "copy", dst], check=True)
     return dst
@@ -509,7 +523,7 @@ def _cached_raw(root, plan, sfx, key, force, render_fn):
     meta = raw + ".json"
     if not force and os.path.exists(raw) and os.path.exists(meta):
         try:
-            if json.load(open(meta)).get("key") == key:
+            if json.load(open(meta, encoding="utf-8")).get("key") == key:
                 print(f"[final] {plan['id']}: raw cut unchanged, reusing cached "
                       "segments+concat")
                 return raw
@@ -523,7 +537,7 @@ def _cached_raw(root, plan, sfx, key, force, render_fn):
     with slots.hold("render", plan["id"]):
         render_fn(tmp)
     os.replace(tmp, raw)
-    json.dump({"key": key, "id": plan["id"]}, open(meta, "w"))
+    json.dump({"key": key, "id": plan["id"]}, open(meta, "w", encoding="utf-8"))
     return raw
 
 
@@ -551,9 +565,9 @@ def _apply_tail_trim(root, sfx, plan, trim_s):
     p = os.path.join(root, "edl", f"cut_plans{sfx}.json")
     with _PLANS_LOCK:
         try:
-            plans = json.load(open(p))
+            plans = json.load(open(p, encoding="utf-8"))
             plans = [plan if q.get("id") == plan["id"] else q for q in plans]
-            json.dump(plans, open(p, "w"), indent=1)
+            json.dump(plans, open(p, "w", encoding="utf-8"), indent=1)
         except (OSError, ValueError) as e:
             print(f"[tail ] {plan['id']}: could not persist the trimmed "
                   f"plan ({e})")
@@ -593,7 +607,7 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
           f"variants: {', '.join(wanted)}"
           + ("" if "music" in needed_mixes else " (no music generation needed)"))
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     video = direct._source_video(root)
     facecam = _facecam_source(root)
@@ -614,9 +628,21 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
     tpath = timing.timings_path(root)
 
     def _finalize_one(p):
-        from . import outro as outro_mod
         from . import shaderfx as _fx
+        # pool threads are reused: resolve THIS cut's content type from its
+        # own plan, never the previous cut's, and leave nothing behind
+        from . import degrade
+        _fx.set_profile(None)
         _fx.set_profile(_fx.profile_name(p))
+        degrade.begin()
+        try:
+            return _finalize_cut(p)
+        finally:
+            _fx.set_profile(None)
+            degrade.write(root, p["id"], degrade.collect())
+
+    def _finalize_cut(p):
+        from . import outro as outro_mod
         comp = p.get("composition")
         layout = comp.get("cam") if comp and facecam else None
         print(f"[final] {p['id']}: {p['title']} ...")
@@ -668,6 +694,10 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     payoff = p.get("payoff") or {}
                     beat_target = (float(payoff["local_t"]) if payoff.get("jump")
                                    else float(p["hook"].get("show_s", 3.6)))
+                    if not mus:
+                        from . import degrade
+                        degrade.note("music", "no music bed (no brand track or kit bed, and "
+                                     "paid generation is off); voice and SFX only")
                     if mus:
                         src_track, key = audio_post.brand_track(p)
                         bpm = audio_post.track_bpm(src_track, key) if src_track else None
@@ -685,13 +715,16 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     p["_qc"] = os.path.join(root, "qc")
                     os.makedirs(p["_qc"], exist_ok=True)
                 except Exception as e:   # noqa: BLE001 -- effects run on the beat grid only
-                    print(f"        control track failed ({e}); beats and pops only")
+                    from . import degrade
+                    degrade.note("control track", f"failed ({e}); effects follow beats and pops only")
             with timing.stage(f"{p['id']} ambient fx", tpath):
-                lit = _ambient_pass(raw, os.path.join(td, "ambient.mp4"), p, dur, td, layout)
+                lit = _ambient_pass(raw, os.path.join(td, "ambient.mp4"), p, dur, td, layout,
+                                    follow=follow)
             with timing.stage(f"{p['id']} finish fx", tpath):
                 # AFTER the ambient layers: smoke, sparks and the fill print as
                 # one surface (before them the print hid under the smoke)
-                lit = _finish_pass(lit, os.path.join(td, "finish.mp4"), p, dur, td, layout)
+                lit = _finish_pass(lit, os.path.join(td, "finish.mp4"), p, dur, td, layout,
+                                   follow=follow)
             with timing.stage(f"{p['id']} caption burn", tpath):
                 vid = _burn_final(lit, os.path.join(td, "burn.mp4"), p, words_tl,
                                   dur, td, layout, product)
@@ -701,19 +734,22 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                     try:
                         from . import judge as _judge
                         mpat, mfps, mn = _behind.masks(raw, os.path.join(td, "masks"))
-                        boxes = [(r[0], r[1], r[5], r[2], r[6], r[3])
-                                 for r in _judge._text_layers(p, [], with_x=True)
-                                 if not str(r[4]).startswith("cue@")]
-                        dec = _behind.guard(mpat, mn, mfps, boxes)
+                        rows = [((r[0], r[1], r[5], r[2], r[6], r[3]), str(r[4]))
+                                for r in _judge._text_layers(p, words, with_x=True)]
+                        boxes = [b for b, label in rows if not label.startswith("cue@")]
+                        cues = [b for b, label in rows if label.startswith("cue@")]
+                        dec = _behind.guard(mpat, mn, mfps, boxes, on_top=cues)
                         vid = _behind.apply(vid, raw, mpat, mfps, os.path.join(td, "behind.mp4"))
                         print("        text behind the subject: "
                               + ", ".join(f"{'behind' if b else 'on top'} (covered {c:.0%})"
                                           for _, c, b in dec))
                     except Exception as e:   # noqa: BLE001 -- text stays on top
-                        print(f"        text behind failed ({e}); text on top")
+                        from . import degrade
+                        degrade.note("text behind", f"failed ({e}); text on top")
             from . import legibility as _leg
-            if "_text_contrast" in p:
-                _leg.record(root, p["id"], p.pop("_text_contrast"))
+            # always written: a cut whose measurement failed must not keep
+            # the previous run's verdict
+            _leg.record(root, p["id"], p.pop("_text_contrast", None))
             if ob:
                 with timing.stage(f"{p['id']} outro", tpath):
                     # backdrop from the PRE-CAPTION raw so no burned text
@@ -833,9 +869,12 @@ def _write_review_md(root, plans, targets, sfx, cut_id=None):
     """The single review surface: fully treated files, what to watch, what ships."""
     outdir = f"deliverables/final{sfx}"
     shown = [p for p in plans if not cut_id or p["id"] == cut_id]
+    from . import degrade
     L = [f"# Review: {os.path.basename(root)}", "",
-         "Every file below is **fully treated**: music bed, karaoke captions, "
-         "hook and on-screen lines, SFX, end tag, loudness. What you watch is what ships.",
+         "Every file below is **fully treated** with everything this run could render: "
+         "music bed, karaoke captions, hook and on-screen lines, SFX, effects, end tag, "
+         "loudness. Anything that fell back is listed under its cut. What you watch is "
+         "what ships.",
          "", "**Watch** the plain `<cut>.mp4` (music baked in). **Post** the file named "
          "per platform in each cut's `_DESCRIPTION.md`: TikTok, Reels and Shorts take the "
          "`_trending` file with no bed so in-app trending audio can ride under the voice (P5).",
@@ -860,9 +899,13 @@ def _write_review_md(root, plans, targets, sfx, cut_id=None):
         L += [f"- Handles: {', '.join(p.get('handles') or ['NONE'])} | "
               f"captions: {p.get('captions', 'burned')} | "
               f"planned from: {p.get('planned_from', 'speech')}",
-              f"- Posting block: `{outdir}/{p['id']}_DESCRIPTION.md`",
-              "- **Verdict:** _pending_", ""]
+              f"- Posting block: `{outdir}/{p['id']}_DESCRIPTION.md`"]
+        fell = degrade.read(root, p["id"])
+        if fell:
+            L.append("- **Fell back** (the cut shipped without these):")
+            L += [f"  - {n}" for n in fell]
+        L += ["- **Verdict:** _pending_", ""]
     L += ["---", "", f"{len(shown)} cuts. Delivery targets: {', '.join(targets)}.", ""]
     path = os.path.join(root, "deliverables", f"REVIEW{sfx}.md")
-    open(path, "w").write("\n".join(L))
+    open(path, "w", encoding="utf-8").write("\n".join(L))
     return path

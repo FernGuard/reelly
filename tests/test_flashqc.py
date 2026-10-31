@@ -28,3 +28,14 @@ def test_steady_and_slow_changes_pass(tmp_path):
 def test_two_beat_flashes_a_second_pass(tmp_path):
     p = _clip(tmp_path, "beat.mp4", "if(lt(mod(T,0.5),0.05),235,40)")     # 2 Hz accents
     assert flashqc.gate(p)[1] == "PASS"
+
+
+def test_unreadable_files_fail_closed(tmp_path):
+    import pytest
+    with pytest.raises(RuntimeError):
+        flashqc.gate(str(tmp_path / "missing.mp4"))
+    bad = tmp_path / "bad.mp4"
+    bad.write_bytes(b"\0" * 4096)
+    with pytest.raises(RuntimeError):
+        flashqc.gate(str(bad))
+

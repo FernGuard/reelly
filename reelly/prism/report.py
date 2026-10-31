@@ -85,6 +85,6 @@ def write(out_dir, slug, data):
     os.makedirs(out_dir, exist_ok=True)
     json_p = os.path.join(out_dir, f"{slug}.json")
     md_p = os.path.join(out_dir, f"{slug}.md")
-    json.dump(data, open(json_p, "w"), indent=2)
-    open(md_p, "w").write(_render_md(data))
+    json.dump(data, open(json_p, "w", encoding="utf-8"), indent=2)
+    open(md_p, "w", encoding="utf-8").write(_render_md(data))
     return json_p, md_p

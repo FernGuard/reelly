@@ -52,7 +52,7 @@ HOST_UNIFORMS = {
     "all": ["uniform vec2 u_res;", "uniform float u_t;", "uniform float u_t0;",
             # the control track (reelly/control.py; effects/lib/control.glsl)
             "uniform vec2 u_beat;", "uniform float u_onsets[16];",
-            "uniform sampler2D u_ctrl;", "uniform float u_ctrl_n;",
+            "uniform sampler2D u_ctrl;", "uniform float u_ctrl_n;", "uniform float u_ctrl_rate;",
             # real impacts: (t, x, y, strength), x/y in picture uv (control.events)
             "uniform vec4 u_events[8];"],
     "backdrop": ["uniform sampler2D u_bg;", "uniform sampler2D u_from;",
@@ -342,7 +342,7 @@ if (FR) {{
         gl.uniform1i(u('u_txt'), 0); gl.uniform1i(u('u_blur'), 1);
         draw(ms); res(1);
       }};
-      img.onerror = function(){{ res(0); }};
+      img.onerror = function(){{ window.__reellyError = 'frame image ' + i + ' failed to load'; res(0); }};
       img.src = FR[i];
     }});
   }};
@@ -355,7 +355,7 @@ function texFrom(src, unit, name){{
   var img = new Image();
   img.onload = function(){{ gl.activeTexture(gl.TEXTURE0 + unit); upload(img);
     gl.uniform1i(u(name), unit); done(); }};
-  img.onerror = function(){{ done(); }};
+  img.onerror = function(){{ window.__reellyError = name + ' image failed to load'; done(); }};
   img.src = src;
 }}
 if (ctrl) texFrom(ctrl, 2, 'u_ctrl');
@@ -565,6 +565,8 @@ def ambient_html(fx, w, h, accent_hex=None, pic=(0, 0, 0, 0), clear=(0, 0), pops
 _GRAB = """(async function(ms){
   var d = window.__reellyDraw(ms); if (d && d.then) { await d; }
   var c = document.querySelector('canvas'); var gl = c.getContext('webgl');
+  if (gl.isContextLost()) return 'ERR:NO_WEBGL_CONTEXT (context lost)';
+  if (window.__reellyError) return 'ERR:' + window.__reellyError;
   var px = new Uint8Array(c.width * c.height * 4);
   gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
   return await new Promise(function(res){ var f = new FileReader();
@@ -579,6 +581,8 @@ _GRAB = """(async function(ms){
 _GRAB_WS = """(async function(ms){
   var d = window.__reellyDraw(ms); if (d && d.then) { await d; }
   var c = document.querySelector('canvas'); var gl = c.getContext('webgl');
+  if (gl.isContextLost()) return 'ERR:NO_WEBGL_CONTEXT (context lost)';
+  if (window.__reellyError) return 'ERR:' + window.__reellyError;
   var px = new Uint8Array(c.width * c.height * 4);
   gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
   window.__reellyWs.send(px.buffer);
@@ -588,18 +592,30 @@ _GRAB_WS = """(async function(ms){
 
 async def _open_pipe(b):
     """A local binary WebSocket the page sends frames into: (queue, server),
-    or (None, None) when it cannot open (the base64 path is used)."""
+    or (None, None) when it cannot open (the base64 path is used). Only the
+    page holding the random path token is heard, and only its first
+    connection: no other local process can feed frames in."""
+    import secrets
+    server = None
     try:
         import websockets
         q = asyncio.Queue()
+        token = secrets.token_urlsafe(16)
+        taken = []
 
         async def handler(ws):
+            req = getattr(ws, "request", None)
+            path = getattr(req, "path", None) or getattr(ws, "path", "")
+            if path.strip("/") != token or taken:
+                await ws.close(1008)
+                return
+            taken.append(ws)
             async for msg in ws:
                 await q.put(msg)
-        server = await websockets.serve(handler, "127.0.0.1", 0, max_size=None)
+        server = await websockets.serve(handler, "127.0.0.1", 0, max_size=64 * 2 ** 20)
         port = list(server.sockets)[0].getsockname()[1]
         ok = await b._eval(f"""new Promise(function(res){{
-          var ws = new WebSocket('ws://127.0.0.1:{port}'); ws.binaryType = 'arraybuffer';
+          var ws = new WebSocket('ws://127.0.0.1:{port}/{token}'); ws.binaryType = 'arraybuffer';
           window.__reellyWs = ws; ws.onopen = function(){{ res(1); }};
           ws.onerror = function(){{ res(0); }}; setTimeout(function(){{ res(0); }}, 5000); }})""", True)
         if not ok:
@@ -607,6 +623,8 @@ async def _open_pipe(b):
             return None, None
         return q, server
     except Exception as e:   # noqa: BLE001 -- the slower path still works
+        if server is not None:
+            server.close()
         print(f"[fx   ] binary frame pipe unavailable ({e}); base64 frames")
         return None, None
 
@@ -626,19 +644,26 @@ def _write_tga(path, rgba_bottom_up, w, h):
 _RENDERER = [None]
 
 
+class GPUUnavailable(Exception):
+    """REELLY_GPU=gpu and Chrome came up on a software renderer: not retried
+    (a fresh browser lands on the same adapter) and not a RuntimeError, so
+    no fallback path swallows it."""
+
+
 async def _log_renderer(b):
-    """Log the WebGL renderer once per process; with REELLY_GPU=gpu a silent
+    """Log the WebGL renderer once per browser; with REELLY_GPU=gpu a silent
     fallback to a software renderer is an error, not a slow surprise."""
     if _RENDERER[0] is not None:
         return
     r = await b._eval("""(function(){ var g = document.createElement('canvas').getContext('webgl');
       if (!g) return 'no WebGL'; var d = g.getExtension('WEBGL_debug_renderer_info');
       return d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER); })()""")
-    _RENDERER[0] = r or "unknown"
-    print(f"[gpu  ] {_RENDERER[0]}")
-    if os.environ.get("REELLY_GPU", "").strip().lower() == "gpu" and \
-            ("swiftshader" in _RENDERER[0].lower() or "no webgl" in _RENDERER[0].lower()):
-        raise RuntimeError(f"REELLY_GPU=gpu but Chrome rendered with {_RENDERER[0]}")
+    r = r or "unknown"
+    print(f"[gpu  ] {r}")
+    if config.gpu_mode() == "gpu" and \
+            ("swiftshader" in r.lower() or "no webgl" in r.lower() or "software" in r.lower()):
+        raise GPUUnavailable(f"REELLY_GPU=gpu but Chrome rendered with {r}")
+    _RENDERER[0] = r
 
 
 async def _shoot_all(page, frames, w, h, out_dir, profile, writer=None):
@@ -663,10 +688,15 @@ async def _shoot_all(page, frames, w, h, out_dir, profile, writer=None):
         try:
             for n, t in frames:
                 if q is not None:
-                    await b._eval(_GRAB_WS % (t * 1000.0), True)
+                    r = await b._eval(_GRAB_WS % (t * 1000.0), True)
+                    if isinstance(r, str) and r.startswith("ERR:"):
+                        raise RuntimeError(f"shader page error: frame {n}: {r[4:]}")
                     raw = await asyncio.wait_for(q.get(), 30)
                 else:
-                    raw = base64.b64decode(await b._eval(_GRAB % (t * 1000.0), True) or "")
+                    r = await b._eval(_GRAB % (t * 1000.0), True) or ""
+                    if r.startswith("ERR:"):
+                        raise RuntimeError(f"shader page error: frame {n}: {r[4:]}")
+                    raw = base64.b64decode(r)
                 if len(raw) != w * h * 4:
                     raise RuntimeError(f"shaderfx: frame {n} read back {len(raw)} bytes")
                 if writer:
@@ -729,11 +759,20 @@ def _render_page(html_text, out_dir, w, h, dur, fps, windows=None):
     return render_frames(html_text, out_dir, w, h, dur, fps, windows=windows)
 
 
-def _link(src, dst):
-    try:
-        os.link(src, dst)
-    except OSError:
-        shutil.copyfile(src, dst)
+class _Linker:
+    """Hard-links many frames to one source. NTFS allows 1023 links per
+    file: when a link fails the frame is copied once and becomes the source
+    for the next ones (never thousands of full copies)."""
+
+    def __init__(self, src):
+        self.src = src
+
+    def put(self, dst):
+        try:
+            os.link(self.src, dst)
+        except OSError:
+            shutil.copyfile(self.src, dst)
+            self.src = dst
 
 
 def render_frames(html_text, out_dir, w, h, dur, fps, windows=None, writer=None,
@@ -746,18 +785,18 @@ def render_frames(html_text, out_dir, w, h, dur, fps, windows=None, writer=None,
     (default: TGA)."""
     os.makedirs(out_dir, exist_ok=True)
     page = os.path.join(out_dir, "fx.html")
-    with open(page, "w") as f:
+    with open(page, "w", encoding="utf-8") as f:
         f.write(html_text)
     n = max(1, int(round(dur * fps)))
     todo = [(i, i / fps) for i in range(n)]
     links = {}                                   # frame -> the frame it copies
     if windows is not None:
         todo = [(i, t) for i, t in todo if any(a - 1.0 / fps <= t <= b for a, b in windows)]
-        blank = _blank_tga(os.path.join(out_dir, "blank.tga"), w, h)
+        blank = _Linker(_blank_tga(os.path.join(out_dir, "blank.tga"), w, h))
         done = {i for i, _ in todo}
         for i in range(n):
             if i not in done:
-                _link(blank, os.path.join(out_dir, pattern % i))
+                blank.put(os.path.join(out_dir, pattern % i))
     if still is not None:
         first = None
         keep = []
@@ -786,9 +825,18 @@ def render_frames(html_text, out_dir, w, h, dur, fps, windows=None, writer=None,
                         print(f"[fx   ] {e}; retry {attempt} in a fresh browser")
                         from . import card
                         card.reset_shared()
+                        _RENDERER[0] = None
                         shutil.rmtree(profile, ignore_errors=True)
                         profile = tempfile.mkdtemp(prefix="reelly-chrome-")
                         time.sleep(1.0 * attempt)
+                        if attempt == 2 and _no_context(e) and config.gpu_mode() == "auto" \
+                                and "--use-angle=swiftshader" not in config.webgl_flags():
+                            # no hardware WebGL here (a VM, a GPU-less session):
+                            # the software GPU for the rest of the run
+                            print("[gpu  ] no hardware WebGL context; software GPU from now on")
+                            config.gpu_failed()
+                            _RENDERER[0] = None
+                            card.reset_shared()
                         try:
                             asyncio.run(_shoot_all(page, todo, w, h, out_dir, profile, writer))
                             break
@@ -802,8 +850,10 @@ def render_frames(html_text, out_dir, w, h, dur, fps, windows=None, writer=None,
     dt = time.time() - t0
     print(f"[fx   ] {len(todo)} of {n} frames {w}x{h} in {dt:.1f}s"
           f" ({len(todo) / max(dt, 1e-6):.0f} fps)")
+    linkers = {}
     for i, src in links.items():
-        _link(os.path.join(out_dir, pattern % src), os.path.join(out_dir, pattern % i))
+        lk = linkers.setdefault(src, _Linker(os.path.join(out_dir, pattern % src)))
+        lk.put(os.path.join(out_dir, pattern % i))
     made = sum(1 for i in range(n) if os.path.exists(os.path.join(out_dir, pattern % i)))
     if made < n:
         raise RuntimeError(f"shaderfx: only {made}/{n} frames rendered")
@@ -857,20 +907,44 @@ def render_finish(fx, frames_dir, n, fps, out_dir, pic, clear):
     first = Image.open(os.path.join(frames_dir, "s00000.jpg"))
     w, h = first.size
     frames = [Path(os.path.join(frames_dir, f"s{i:05d}.jpg")).resolve().as_uri() for i in range(n)]
+    return render_frames(finish_html(fx, frames, w, h, fps, pic, clear), out_dir, w, h,
+                         n / fps, fps), fps
+
+
+def finish_html(fx, frames, w, h, fps, pic, clear):
+    """The finish page over a cut's frames (file URIs, w x h each)."""
     U = uniforms(fx, brand_params(fx), host={"u_pic": pic, "u_clear": clear})
-    html = _page(fragment(load_preset(fx)["effect"]), w, h,
+    return _page(fragment(load_preset(fx)["effect"]), w, h,
                  {"u_res": (w, h), "u_t0": 0.0, **U}, frames=frames, fps=fps, blur_px=1)
-    return render_frames(html, out_dir, w, h, n / fps, fps), fps
+
+
+def upright(image, workdir):
+    """`image`, or an upright PNG copy in workdir when its EXIF says the
+    camera was rotated (phone portraits): sizes, depth and pixels then all
+    agree with how the photo is meant to be seen."""
+    from PIL import Image, ImageOps
+    with Image.open(image) as im:
+        if im.getexif().get(0x0112, 1) in (1, None):
+            return image
+        fixed = ImageOps.exif_transpose(im)
+        out = os.path.join(workdir, "upright.png")
+        fixed.save(out)
+        return out
 
 
 def render_parallax(fx, image, depth_png, out_dir, dur, fps=None, params=None):
     """A 2.5D camera move on a still (kind backdrop + depth) at 1080x1920
     (the preset's scale). Returns the frame pattern."""
+    w, h = _size(_render_opts(fx).get("scale", 1.0))
+    return render_frames(parallax_html(fx, image, depth_png, w, h, dur, params), out_dir, w, h,
+                         dur, fps or config.output_fps())
+
+
+def parallax_html(fx, image, depth_png, w, h, dur, params=None):
+    """The 2.5D camera-move page for a still and its depth map at w x h."""
     from PIL import Image
     iw, ih = Image.open(image).size
-    w, h = _size(_render_opts(fx).get("scale", 1.0))
     U = uniforms(fx, brand_params(fx), overrides=params or {},
-                 host={"u_dur": dur, "u_img": (iw, ih)})
-    html = _page(fragment(load_preset(fx)["effect"]), w, h, {"u_res": (w, h), "u_t0": 0.0, **U},
+                 host={"u_dur": min(max(dur, 0.5), 60.0), "u_img": (iw, ih)})
+    return _page(fragment(load_preset(fx)["effect"]), w, h, {"u_res": (w, h), "u_t0": 0.0, **U},
                  image, depth_png=depth_png, full=True, bloom=_render_opts(fx).get("bloom"))
-    return render_frames(html, out_dir, w, h, dur, fps or config.output_fps())

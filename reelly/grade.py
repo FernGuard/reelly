@@ -34,7 +34,7 @@ def _cache_path(video, params):
 def _cache_get(video, params):
     """Cached value or None. A corrupt or missing cache is never fatal."""
     try:
-        with open(_cache_path(video, params)) as f:
+        with open(_cache_path(video, params), encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return None
@@ -84,7 +84,7 @@ def _frame_stats_uncached(video, start, duration, n_samples=10):
             return None
         vals = {"YAVG": [], "YMIN": [], "YMAX": [], "SATAVG": []}
         depth = 8
-        for line in open(mpath):
+        for line in open(mpath, encoding="utf-8"):
             line = line.strip()
             if "signalstats.YBITDEPTH=" in line:
                 try:

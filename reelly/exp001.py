@@ -21,7 +21,7 @@ def build(project, tags=("", "gpt")):
         brain = "gpt" if tag == "gpt" else "gemini"
         # only cuts in the CURRENT plan file; stale renders from older plan
         # sets may still sit in the previews dir
-        plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+        plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
         for p in plans:
             f = f"{p['id']}.mp4"
             src = os.path.join(d, f)
@@ -35,7 +35,7 @@ def build(project, tags=("", "gpt")):
         shutil.copy2(e["src"], os.path.join(pool, blind))
         key.append({"blind": blind, "brain": e["brain"], "cut": e["cut"]})
     keyfile = os.path.join(root, "qc", "sample-exp-key.json")
-    json.dump(key, open(keyfile, "w"), indent=1)
+    json.dump(key, open(keyfile, "w", encoding="utf-8"), indent=1)
     print(f"{len(key)} blind clips -> {pool}")
     print(f"sealed key -> {keyfile} (do not open before verdicts)")
 
@@ -43,7 +43,7 @@ def build(project, tags=("", "gpt")):
 def score(project, verdicts):
     """Unseal the key and score. verdicts: {\"clip_01\": (\"KEEP\", \"why\"), ...}"""
     root = direct.resolve_project(project)
-    key = json.load(open(os.path.join(root, "qc", "sample-exp-key.json")))
+    key = json.load(open(os.path.join(root, "qc", "sample-exp-key.json"), encoding="utf-8"))
     by = {}
     rows = []
     for k in key:

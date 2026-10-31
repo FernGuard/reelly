@@ -91,7 +91,7 @@ vec2 parallax(vec2 base, vec2 c, float p){
 void main(){
   vec2 uv = gl_FragCoord.xy / u_res;
   float fa = u_res.x / u_res.y, ia = u_img.x / u_img.y;
-  float p = u_t / u_dur;
+  float p = clamp(u_t / u_dur, 0.0, 1.0);                       // holds at the end
   p = p * p * (3.0 - 2.0 * p);                                   // eased
   vec2 c = uv - 0.5;
   vec3 col;

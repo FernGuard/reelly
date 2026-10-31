@@ -52,7 +52,7 @@ def _fetch_url(url, work_root):
     info_p = os.path.join(root, "source.info.json")
     if os.path.exists(video_p) and os.path.exists(info_p):
         print(f"[skip] download (cached: {os.path.basename(video_p)})")
-        return video_p, root, url, json.load(open(info_p))
+        return video_p, root, url, json.load(open(info_p, encoding="utf-8"))
 
     print(f"[run ] yt-dlp {url} ...")
     subprocess.run(["yt-dlp", "-f", "mp4/best", "--merge-output-format", "mp4",
@@ -64,5 +64,5 @@ def _fetch_url(url, work_root):
                       if f.startswith("source.") and not f.endswith((".json", ".part"))]
         if candidates:
             os.rename(os.path.join(root, candidates[0]), video_p)
-    meta = json.load(open(info_p)) if os.path.exists(info_p) else {}
+    meta = json.load(open(info_p, encoding="utf-8")) if os.path.exists(info_p) else {}
     return video_p, root, url, meta

@@ -200,7 +200,7 @@ def needs_rerun(out_json):
     if not os.path.exists(out_json):
         return False
     try:
-        art = json.load(open(out_json))
+        art = json.load(open(out_json, encoding="utf-8"))
     except (ValueError, OSError):
         return False
     if art.get("status") == "ok":
@@ -279,7 +279,7 @@ def run(video, out_json):
               f"(local, $0, {device}) ...")
         ann = _annotation(_infer(pipe, wav, device))
     artifact = _artifact_from(_turns_from(ann))
-    json.dump(artifact, open(out_json, "w"), indent=1)
+    json.dump(artifact, open(out_json, "w", encoding="utf-8"), indent=1)
     _sync_voices(out_json, artifact)
     _report(artifact)
     return artifact
@@ -368,7 +368,7 @@ def run_windows(video, windows, out_json=None):
         "mode": "windows", "windows": [[round(s, 2), round(e, 2)] for s, e in windows],
         "note": "voice identity is only verified INSIDE these windows"})
     if out_json:
-        json.dump(artifact, open(out_json, "w"), indent=1)
+        json.dump(artifact, open(out_json, "w", encoding="utf-8"), indent=1)
         _sync_voices(out_json, artifact)
     _report(artifact)
     return artifact

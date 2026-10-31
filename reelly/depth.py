@@ -5,23 +5,17 @@ Base/Large/Giant weights are CC-BY-NC-4.0, not usable for marketing).
 Runs through ONNX Runtime on the CPU (onnx-community/depth-anything-V2-small,
 model.onnx, ~94 MB): one still takes a few seconds, no PyTorch needed.
 
-REELLY_DEPTH_MODEL = path to model.onnx (else the usual locations).
+Install the model with `reelly models fetch depth` (or REELLY_DEPTH_MODEL).
 """
 import os
 
-CANDIDATES = (
-    r"C:\Patolli\tools\models\depth-anything-v2-small\model.onnx",
-    os.path.expanduser("~/.reelly/models/depth-anything-v2-small/model.onnx"),
-)
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
 
 def find_model():
-    p = os.environ.get("REELLY_DEPTH_MODEL", "").strip()
-    if p and os.path.exists(p):
-        return p
-    return next((c for c in CANDIDATES if os.path.exists(c)), None)
+    from . import models
+    return models.path("depth")
 
 
 def estimate(image_path, out_png, short_side=518):
@@ -32,7 +26,8 @@ def estimate(image_path, out_png, short_side=518):
     from PIL import Image
     model = find_model()
     if not model:
-        raise FileNotFoundError("Depth Anything V2 Small (model.onnx) not installed")
+        from . import models
+        raise FileNotFoundError(models.missing_message("depth"))
     im = Image.open(image_path).convert("RGB")
     w, h = im.size
     s = short_side / min(w, h)

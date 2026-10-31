@@ -99,7 +99,7 @@ def main():
     if not manifests:
         print("Reelly: no manifest found under", MANIFEST_GLOB)
         return
-    man = json.load(open(manifests[-1]))
+    man = json.load(open(manifests[-1], encoding="utf-8"))
     base = os.path.dirname(manifests[-1])
     print("Reelly: importing", man["project"], "from", manifests[-1])
 

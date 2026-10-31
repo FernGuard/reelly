@@ -96,3 +96,20 @@ def test_petals_linger_only_into_free_time(monkeypatch):
     assert finalize._linger(16.8, 20.0, 16.9) == 0.05                  # content ends
     monkeypatch.setenv("REELLY_TEXT_EXIT", "fade")
     assert finalize._linger(7.2, 10.0, 16.9) == 0.0                    # no petals, no linger
+
+
+def test_blocklock_holds_only_after_the_last_block_locks(monkeypatch):
+    # the still frame is rendered once at `settle` and reused for the hold:
+    # taken any earlier, a block would hang mid-fall for the whole hold
+    monkeypatch.setenv("REELLY_TEXT_MOTION", "blocklock")
+    words = "one two three four five six seven eight nine ten".split()
+    lines = [words[:5], words[5:]]
+    html, settle, _, _ = gputext.page(" ".join(words), 60, 856, 300, 6.0, "headline", 0,
+                                      lines, True, True, None, "#FCFCFB", "#a87cf0")
+    P = json.loads(re.search(r"var P = (\{.*?\});\n", html, re.S).group(1))
+    last_land = max(P["rank"]) * P["stagger"] * 1.5 + P["block_fall"]
+    assert settle >= last_land + 0.45
+    monkeypatch.setenv("REELLY_TEXT_MOTION", "rise")
+    _, rise_settle, _, _ = gputext.page(" ".join(words), 60, 856, 300, 6.0, "headline", 0,
+                                        lines, True, True, None, "#FCFCFB", "#a87cf0")
+    assert rise_settle < settle

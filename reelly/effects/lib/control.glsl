@@ -1,4 +1,4 @@
-// Control track readers (host uniforms u_beat, u_onsets, u_ctrl, u_ctrl_n).
+// Control track readers (host uniforms u_beat, u_onsets, u_ctrl, u_ctrl_n, u_ctrl_rate).
 // Original Reelly code (MIT, same as the repository).
 float beatPhase(float t){ return u_beat.y > 0.0 ? fract((t - u_beat.x) / u_beat.y) : 0.0; }
 // 1.0 on each beat, decaying over the beat (k = sharpness)
@@ -8,7 +8,7 @@ float beatPulse(float t, float k){
 // cut-audio loudness at time t, 0..1 (0 when there is no track)
 float energy(float t){
   if (u_ctrl_n < 1.0) return 0.0;
-  return texture2D(u_ctrl, vec2(clamp((t * 60.0 + 0.5) / u_ctrl_n, 0.0, 1.0), 0.5)).r;
+  return texture2D(u_ctrl, vec2(clamp((t * u_ctrl_rate + 0.5) / u_ctrl_n, 0.0, 1.0), 0.5)).r;
 }
 // seconds since the latest onset at or before t (large when none)
 float sinceOnset(float t){

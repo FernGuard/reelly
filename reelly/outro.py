@@ -215,7 +215,8 @@ def _kinetic_cta(plan, product, workdir, len_s, starts_at=None):
                   if starts_at is not None else None))
         return scrim, (pattern, int(1920 * CTA_Y_FRAC) - pad)
     except Exception as e:   # noqa: BLE001 -- static card instead
-        print(f"[outro] kinetic CTA failed ({e}); static card instead")
+        from . import degrade
+        degrade.note("end card", f"kinetic CTA failed ({e}); static card")
         return None
 
 
@@ -258,7 +259,8 @@ def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at, content_video=No
               + (f", light ring with the pop at {pop:.2f}s" if pop is not None else ""))
         return seq
     except Exception as e:   # noqa: BLE001 -- the still backdrop instead
-        print(f"[outro] shader backdrop failed ({e}); still backdrop instead")
+        from . import degrade
+        degrade.note("end card", f"shader backdrop '{fx}' failed ({e}); still backdrop")
         return None
 
 
@@ -291,7 +293,8 @@ def card_png(plan, product, workdir):
         return _typeset_card(cta or "edited with Reelly", dst)
     except Exception as e:   # noqa: BLE001
         dst = os.path.join(workdir, f"{plan.get('id', 'cut')}_outro_card.png")
-        print(f"[outro] card render degraded to typeset fallback ({e})")
+        from . import degrade
+        degrade.note("end card", f"card render failed ({e}); typeset fallback")
         return _typeset_card((plan.get("cta") or "").strip() or "Reelly",
                              dst)
 
@@ -328,7 +331,7 @@ def build_segment(backdrop, card, len_s, dst, fps=None, seq=None, backdrop_seq=N
 
 def _concat_copy(a, b, dst, workdir):
     lst = os.path.join(workdir, os.path.basename(dst) + ".concat.txt")
-    with open(lst, "w") as f:
+    with open(lst, "w", encoding="utf-8") as f:
         f.write(f"file '{a}'\nfile '{b}'\n")
     r = subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat",
                         "-safe", "0", "-i", lst, "-c", "copy", dst],
@@ -372,6 +375,12 @@ def append(content_video, backdrop_source, plan, product, workdir):
     card = kin[0] if kin else card_png(plan, product, workdir)
     fx_seq = (_shader_backdrop(bp, plan, workdir, len_s, content_d, content_video)
               if kin else None)
+    if not kin:
+        from . import shaderfx
+        if shaderfx.active():
+            # an opaque kit end card would hide a living backdrop anyway
+            print(f"[outro] end-card effect '{shaderfx.active()}' not used: "
+                  "the brand's own end card is shown as designed")
     seg = build_segment(bp, card, len_s,
                         os.path.join(workdir, "outro_seg.mp4"),
                         seq=kin[1] if kin else None, backdrop_seq=fx_seq)
@@ -401,17 +410,17 @@ def record_verdict(root, cut_id, entry):
     os.makedirs(qc, exist_ok=True)
     p = os.path.join(qc, "ending_check.json")
     try:
-        data = json.load(open(p))
+        data = json.load(open(p, encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
     data[cut_id] = entry
-    json.dump(data, open(p, "w"), indent=1)
+    json.dump(data, open(p, "w", encoding="utf-8"), indent=1)
     return p
 
 
 def load_verdicts(root):
     p = os.path.join(root, "qc", "ending_check.json")
     try:
-        return json.load(open(p))
+        return json.load(open(p, encoding="utf-8"))
     except (OSError, ValueError):
         return {}

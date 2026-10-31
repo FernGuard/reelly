@@ -33,6 +33,25 @@ def test_guard_allows_text_that_peeks_around(tmp_path):
     assert np.asarray(Image.open(pat % 3))[300:400].max() == 255  # the person stays over the text
 
 
+def test_the_mask_stays_inside_the_text_chosen_for_it(tmp_path):
+    # person everywhere: outside the allowed text box (and its window) the
+    # raw cut must not replace the effects; captions always stay on top
+    pat = str(tmp_path / "m%05d.png")
+    for i in range(10):
+        m = np.zeros((960, 540), np.uint8)
+        m[300:310, :] = 255                            # a sliver over the hook box
+        m[600:900, :] = 255                            # the person's body, below
+        Image.fromarray(m, "L").save(pat % i)
+    hook = (0.0, 0.2, 0.0, 600.0, 1080.0, 800.0)       # rows 300-400, frames 0-6
+    cue = (0.0, 0.3, 0.0, 1500.0, 1080.0, 1700.0)      # rows 750-850, a caption
+    (_, _, is_behind), = behind.guard(pat, 10, 30, [hook], on_top=[cue])
+    assert is_behind
+    f3, f8 = np.asarray(Image.open(pat % 3)), np.asarray(Image.open(pat % 8))
+    assert f3[300:310].max() == 255                    # in front of the hook
+    assert f3[600:750].max() == 0 and f3[750:850].max() == 0   # body, caption: untouched
+    assert f8.max() == 0                               # after the hook's window: nothing
+
+
 def test_only_where_the_brand_asks_and_faces_matter(monkeypatch):
     from reelly import brandkit
     monkeypatch.delenv("REELLY_TEXT_BEHIND", raising=False)

@@ -419,11 +419,27 @@ def main(argv=None):
         import os
         import shutil
         import tempfile
-        from . import config, depth, shaderfx
+        from . import config, depth, models, shaderfx
+        if not 0.5 <= args.dur <= 60.0:
+            raise SystemExit("parallax: --dur must be between 0.5 and 60 seconds")
+        if not os.path.isfile(args.image):
+            raise SystemExit(f"parallax: no image at {args.image}")
         out = args.out or os.path.splitext(args.image)[0] + "_parallax.mp4"
         dpng = args.depth or os.path.splitext(out)[0] + "_depth.png"
+        work = tempfile.mkdtemp(prefix="reelly-parallax-")
+        # a phone photo stores "rotate me" in EXIF: render it the right way up
+        image = shaderfx.upright(args.image, work)
         if not args.depth:
-            depth.estimate(args.image, dpng)
+            try:
+                import onnxruntime  # noqa: F401
+            except ImportError:
+                shutil.rmtree(work, ignore_errors=True)
+                raise SystemExit("parallax: depth estimation needs onnxruntime: "
+                                 "uv sync --extra depth (or pass --depth DEPTH.png)")
+            if not models.path("depth"):
+                shutil.rmtree(work, ignore_errors=True)
+                raise SystemExit("parallax: " + models.missing_message("depth"))
+            depth.estimate(image, dpng)
             print(f"[depth] {dpng} (Depth Anything V2 Small, Apache-2.0)")
         params = {}
         if args.move == "dolly":
@@ -432,9 +448,8 @@ def main(argv=None):
             cx, cy = (float(v) for v in args.center.split(","))
             params["u_center"] = [cx, cy]
         params["u_fit"] = 0.0 if args.fit == "cover" else 1.0
-        work = tempfile.mkdtemp(prefix="reelly-parallax-")
         try:
-            pat = shaderfx.render_parallax("parallax-still", args.image, dpng,
+            pat = shaderfx.render_parallax("parallax-still", image, dpng,
                                            os.path.join(work, "f"), args.dur, params=params)
             subprocess.run([config.FFMPEG, "-y", "-v", "error", "-framerate",
                             str(config.output_fps()), "-i", pat, "-pix_fmt", "yuv420p",
@@ -524,7 +539,7 @@ def main(argv=None):
             direct.run(args.project, max_cuts=args.max_cuts, brain=args.brain, tag=args.tag)
         else:
             print(f"[cut  ] using existing plans ({plans_p}); --replan to redo them")
-        _plans = _json.load(open(plans_p))
+        _plans = _json.load(open(plans_p, encoding="utf-8"))
         # Music beds depend ONLY on the plan, so queue them at FAL now: they
         # download while finalize encodes segments instead of each cut sitting
         # through the 10-13s queue+poll wait mid-chain. Same path finalize's
@@ -672,7 +687,7 @@ def main(argv=None):
     elif args.cmd == "motion":
         import json as _json
         from . import motion
-        copy_override = _json.load(open(args.copy)) if args.copy else None
+        copy_override = _json.load(open(args.copy, encoding="utf-8")) if args.copy else None
         message = args.message
         if not message and copy_override:
             fallback = copy_override.get("caption") or copy_override.get("hook")

@@ -326,7 +326,7 @@ def _render_png(workdir, name, body, size=None):
     w, h = size or FRAME
     os.makedirs(workdir, exist_ok=True)
     hp = os.path.join(workdir, name + ".html")
-    open(hp, "w").write(_head().replace("WPX", str(w)).replace("HPX", str(h))
+    open(hp, "w", encoding="utf-8").write(_head().replace("WPX", str(w)).replace("HPX", str(h))
                         .replace("BODY", body))
     dst = os.path.join(workdir, name + ".png")
     subprocess.run([CHROME, "--headless", "--disable-gpu", "--hide-scrollbars",
@@ -707,7 +707,7 @@ def autoplan(project, kicker=None, label=None, meme=True, src_dir=None,
     # tagged A/B runs got graphics planned against the wrong plans. The spec
     # file itself stays untagged: judge and apply read that one path.
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
     src_dir = src_dir or os.path.join(root, "deliverables", f"final{sfx}")
     name = os.path.basename(root)
     label = label or name.replace("as-", "").replace("ascap-", "").replace("-", " ").title()
@@ -717,7 +717,7 @@ def autoplan(project, kicker=None, label=None, meme=True, src_dir=None,
     spec_path = os.path.join(root, "edl", "overlay_specs.json")
     specs = {}
     if cut_id and os.path.exists(spec_path):
-        specs = json.load(open(spec_path))
+        specs = json.load(open(spec_path, encoding="utf-8"))
     # measured payoff anchors: plans written since 2026-08-03 carry one from
     # plan time; legacy plans get theirs measured here, against the same
     # analysis artifacts, so the card window below is footage-true either way
@@ -861,7 +861,7 @@ def autoplan(project, kicker=None, label=None, meme=True, src_dir=None,
                        "anchor": o.get("anchor")}
                       for o in p.get("overlay_lines") or []],
         }
-    json.dump(specs, open(spec_path, "w"), indent=1)
+    json.dump(specs, open(spec_path, "w", encoding="utf-8"), indent=1)
     out = spec_path
     total = sum(len(v) for k, v in specs.items() if k != "_meta")
     print(f"[autoplan] {len(specs)} cuts, {total} marks placed from frame content -> {out}")
@@ -878,7 +878,7 @@ def apply(project, src_dir=None, cut_id=None, suffix="_gfx", tag=None):
     from . import timing
     root = direct.resolve_project(project)
     spec_path = os.path.join(root, "edl", "overlay_specs.json")
-    specs = json.load(open(spec_path))
+    specs = json.load(open(spec_path, encoding="utf-8"))
     sfx = f"_{tag}" if tag else ""
     src_dir = src_dir or os.path.join(root, "deliverables", f"final{sfx}")
     workdir = os.path.join(root, "deliverables", "_gfx")

@@ -84,7 +84,7 @@ def hold(pool, label=""):
     fh, t0, noted = None, time.monotonic(), 0.0
     while fh is None:
         for i in range(n):
-            f = open(os.path.join(SLOTS_DIR, f"{pool}.{i}"), "a+")
+            f = open(os.path.join(SLOTS_DIR, f"{pool}.{i}"), "a+", encoding="utf-8")
             try:
                 _try_lock(f)
                 fh = f

@@ -2,6 +2,7 @@
 the three layers built on it (end card, ambient, text)."""
 import json
 import os
+import sys
 
 import pytest
 
@@ -101,10 +102,18 @@ def test_gpu_tier(monkeypatch):
     assert "--use-angle=swiftshader" in config.webgl_flags()
     monkeypatch.setenv("REELLY_GPU", "gpu")
     flags = config.webgl_flags()
-    assert "--use-angle=d3d11" in flags and "--force_high_performance_gpu" in flags
+    want = {"nt": "--use-angle=d3d11"}.get(os.name) or (
+        "--use-angle=metal" if sys.platform == "darwin" else "--use-angle=gl")
+    assert want in flags and "--use-gl=angle" in flags
+    assert ("--force_high_performance_gpu" in flags) == (os.name == "nt")
     assert "--disable-gpu" in card._Browser("p").gpu_flags   # DOM text keeps no GPU
     assert card._Browser("p", webgl=True).shared and not card._Browser("p").shared
     assert card._Browser("p", webgl=True).gpu_flags == flags
+    monkeypatch.setenv("REELLY_GPU", "auto")
+    monkeypatch.setattr(config, "_GPU_FAILED", [False])
+    assert config.webgl_flags() == flags                     # auto: the hardware first
+    config.gpu_failed()
+    assert "--use-angle=swiftshader" in config.webgl_flags()  # then the software GPU
 
 
 # ------------------------------------------------------------- the layers
@@ -168,16 +177,47 @@ def test_pop_times_follow_the_beat_grid():
 
 
 def test_ambient_pass_is_skipped_or_falls_back(monkeypatch, tmp_path):
-    from reelly import finalize, kinetic
-    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": None)
+    from reelly import degrade, finalize, kinetic
+    monkeypatch.setattr(shaderfx, "active_list", lambda kind="outro": [])
     assert finalize._ambient_pass("raw.mp4", "a.mp4", {}, 10.0, str(tmp_path), None) == "raw.mp4"
-    monkeypatch.setattr(shaderfx, "active", lambda kind="outro": "smoke-ambient")
+    monkeypatch.setattr(shaderfx, "active_list", lambda kind="outro": ["smoke-ambient", "embers-ambient"])
     monkeypatch.setattr(kinetic, "enabled", lambda: True)
-    def boom(*a, **k):
-        raise RuntimeError("no WebGL")
-    monkeypatch.setattr(shaderfx, "render_ambient", boom)
-    assert finalize._ambient_pass("raw.mp4", "a.mp4", {"reframe": 1.0}, 10.0,
-                                  str(tmp_path), None) == "raw.mp4"
+    calls, cmds = [], []
+
+    def render(name, out_dir, *a, **k):
+        calls.append(name)
+        if name == "smoke-ambient":
+            raise RuntimeError("no WebGL")
+        return os.path.join(out_dir, "f%05d.tga"), 30
+    monkeypatch.setattr(shaderfx, "render_ambient", render)
+    monkeypatch.setattr(finalize.subprocess, "run", lambda cmd, **k: cmds.append(cmd))
+    degrade.begin()
+    plan = {"reframe": 1.0, "_ctrl": {"events": []}}
+    out = finalize._ambient_pass("raw.mp4", "a.mp4", plan, 10.0, str(tmp_path), None)
+    # one layer failed, the other still plays: its sequence is input 1
+    assert calls == ["smoke-ambient", "embers-ambient"] and out == "a.mp4"
+    graph = cmds[-1][cmds[-1].index("-filter_complex") + 1]
+    assert "[1:v]scale" in graph and "[2:v]" not in graph
+    assert any("smoke-ambient" in n for n in degrade.collect())
+    # every layer failed: the raw cut ships, and the fallback is recorded
+    monkeypatch.setattr(shaderfx, "render_ambient", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    degrade.begin()
+    assert finalize._ambient_pass("raw.mp4", "a.mp4", plan, 10.0, str(tmp_path), None) == "raw.mp4"
+    assert len(degrade.collect()) == 2                      # one note per layer
+
+
+def test_effects_never_cover_a_face(monkeypatch):
+    from reelly import finalize, layout
+    # follow-the-faces crop: the content fills the frame, no brand space
+    assert finalize._protected({"reframe": 1.0}, None, follow=True) is None
+    # split facecam: camera (top) + screen are one protected block from y=0
+    plan = {"composition": {"cam_h": 768}, "reframe": 1.0}
+    (x0, y0, x1, y1), _ = finalize._protected(plan, "split")
+    _, scr_y, out_h = layout._split_geometry(plan["composition"])
+    assert y1 == 1.0 and y0 == pytest.approx(1 - (scr_y + out_h) / layout.FRAME_H)
+    # gameplay letterbox: the 16:9 picture band only
+    (_, g0, _, g1), _ = finalize._protected({"reframe": 1.0}, None)
+    assert 0 < g0 < g1 < 1
 
 
 def test_aura_page_reads_the_text_frames_and_a_blurred_copy():

@@ -205,7 +205,7 @@ uniform sampler2D u_atlas; uniform float u_pass; uniform float u_spread;
 uniform vec3 u_fill; uniform vec3 u_hotc; uniform float u_dis;
 varying vec2 v_uv; varying float v_a; varying float v_blur; varying float v_hot;
 varying float v_flash; varying vec2 v_scr;
-float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float h21(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), u.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), u.x), u.y); }
 void main(){
@@ -253,7 +253,7 @@ precision highp float;
 uniform vec2 u_res; uniform float u_t; uniform float u_d0; uniform float u_dd;
 uniform vec4 u_wd[40]; uniform float u_nw; uniform float u_size;
 uniform vec3 u_c1; uniform vec3 u_c2; uniform float u_life;
-float h(float x){ return fract(sin(x * 78.233) * 43758.5453); }
+float h(float x){ x = fract(x * 0.1031); x *= x + 33.33; x *= x + x; return fract(x); }
 void main(){
   vec2 px = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y);     // canvas px, y down
   vec4 acc = vec4(0.0);
@@ -391,7 +391,7 @@ window.__reellyDraw = function(ms){{
       // each word drops in like a falling block, lands, bounces once, locks
       // stacking order: bottom line first, so a falling word only ever
       // crosses empty space, never text that already landed
-      var t0 = P.rank[i] * P.stagger * 1.5, fall = 0.34, land = t0 + fall;
+      var t0 = P.rank[i] * P.stagger * 1.5, fall = P.block_fall, land = t0 + fall;
       var f = clamp((t - t0) / fall);
       a = clamp(f * 4); dy = -(1 - easeIn(f)) * 1.5 * P.size;
       if (t >= land){{ var k2 = t - land;
@@ -477,6 +477,15 @@ img.src = P.atlas;
 </script></body></html>"""
 
 
+BLOCK_FALL, BLOCK_LOCK = 0.34, 0.5   # the JS fall, then landing flash/bounce decay
+
+
+def blocklock_settle(n_words, stagger):
+    """When the last block has landed and stopped flashing (stagger as
+    kinetic.timeline returned it; the JS staggers blocks by 1.5x)."""
+    return max(0, n_words - 1) * stagger * 1.5 + BLOCK_FALL + BLOCK_LOCK
+
+
 def _rgb01(hex_):
     h = hex_.lstrip("#")
     return [int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
@@ -499,6 +508,10 @@ def page(text, size, width, height, dur, role, hot_index, lines, enter, leave, p
     sheet, place = atlas(text, size, role)
     glyphs, anchors, _ = layout(text, size, width - 2 * kinetic.PAD, role, lines, kinetic.PAD)
     settle, exit_t, stagger = kinetic.timeline(len(words), dur, hot_index, enter, leave, pop_t)
+    if enter and motion() == "blocklock":
+        # blocks land later than rise words (1.5x stagger + the fall) and
+        # flash after landing: the held frame must come after all of that
+        settle = min(max(settle, blocklock_settle(len(words), stagger)), exit_t)
     b = io.BytesIO()
     sheet.save(b, "PNG")
     off, aura_p, W, H = 0, None, width, height
@@ -544,6 +557,7 @@ def page(text, size, width, height, dur, role, hot_index, lines, enter, leave, p
     for k, i in enumerate(order):
         rank[i] = k
     params = {"origin": off, "aura": aura_p, "motion": motion(), "rank": rank,
+              "block_fall": BLOCK_FALL,
               "exit_style": "petals" if petals else "fade", **petals_p,"verts": vertex_data(glyphs, anchors, place, hot_index if hot_index is not None else -1),
               "atlas": "data:image/png;base64," + base64.b64encode(b.getvalue()).decode(),
               "spread": SPREAD, "size": size, "fill": _rgb01(fill_hex), "hotc": _rgb01(hot_hex),

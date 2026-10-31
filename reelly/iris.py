@@ -14,7 +14,7 @@ video is hard-linked under a unique name so parallel checks never share a
 results folder, and the folder is removed after reading. IRIS states it
 does not certify compliance: this is a detector, the owner signs off.
 
-REELLY_IRIS = path to IrisApp.exe (else the usual tool locations).
+REELLY_IRIS = path to IrisApp (else <REELLY_HOME>/tools/iris/, else PATH).
 """
 import json
 import os
@@ -22,19 +22,16 @@ import shutil
 import subprocess
 import uuid
 
-CANDIDATES = (
-    r"C:\Patolli\tools\iris\iris-1.1.0-windows-app\IrisApp.exe",
-    os.path.expanduser("~/.reelly/tools/iris/IrisApp.exe"),
-)
-
-
 def find():
+    """IrisApp: REELLY_IRIS, then <REELLY_HOME>/tools/iris/, then PATH."""
+    from . import config
     p = os.environ.get("REELLY_IRIS", "").strip()
     if p and os.path.exists(p):
         return p
-    for c in CANDIDATES:
-        if os.path.exists(c):
-            return c
+    exe = "IrisApp.exe" if os.name == "nt" else "IrisApp"
+    c = os.path.join(config.HOME, "tools", "iris", exe)
+    if os.path.exists(c):
+        return c
     return shutil.which("IrisApp") or None
 
 

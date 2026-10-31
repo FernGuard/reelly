@@ -9,9 +9,27 @@ import tempfile
 
 _TEST_HOME = tempfile.mkdtemp(prefix="reelly-test-home-")
 os.environ["REELLY_HOME"] = os.path.join(_TEST_HOME, ".reelly")
-for _var in ("REELLY_BRANDKIT", "REELLY_BRAND", "REELLY_ALLOW_PAID",
-             "REELLY_PROJECTS"):
+# no setting from the machine leaks in: every REELLY_* behaviour the
+# developer or the worker has set (fps, effects, GPU tier, profile,
+# motion...) is dropped; tests that need one set it themselves. Only the
+# "where is this tool" paths (and the worker's golden-frame demand) stay.
+_WHERE = ("REELLY_CHROME", "REELLY_IRIS", "REELLY_DEPTH_MODEL", "REELLY_SEGMENTER",
+          "REELLY_GOLDEN")
+for _var in [v for v in os.environ if v.startswith("REELLY_") and v not in _WHERE]:
     os.environ.pop(_var, None)
+os.environ["REELLY_HOME"] = os.path.join(_TEST_HOME, ".reelly")
 # no real mediapipe probe (a child process per run) unless a test asks for one:
 # face tests stub the detectors, and the suite must not depend on a GPU session
 os.environ.setdefault("REELLY_FACE", "off")
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _fresh_render_state():
+    """Per-thread render state never leaks from one test into the next."""
+    yield
+    from reelly import degrade, shaderfx
+    shaderfx.set_profile(None)
+    degrade.collect()

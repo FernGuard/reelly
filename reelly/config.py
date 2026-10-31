@@ -119,7 +119,7 @@ def load_user_config():
     if not os.path.exists(path):
         return {}
     try:
-        data = json.load(open(path))
+        data = json.load(open(path, encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (ValueError, OSError):
         return {}
@@ -216,8 +216,9 @@ def paid_allowed():
 
 
 def paid_blocked(name):
-    """True when `name` bills per call and this run has not opted in."""
-    return name in PAID_PROVIDERS and not paid_allowed()
+    """True when `name` bills per call and this run has not opted in (or
+    the run is local-only: no provider at all)."""
+    return name in PAID_PROVIDERS and (not paid_allowed() or local_only())
 
 
 def get_key(name):
@@ -352,21 +353,50 @@ def final_encode_args():
     return list(_FINAL_ENCODE_ARGS)
 
 
+def local_only():
+    """REELLY_LOCAL_ONLY=1 (or `reelly --local-only`): nothing leaves the
+    machine. No subscription CLI (Codex, Claude), no paid provider, no
+    vision check; every step uses its local path or is skipped."""
+    return os.environ.get("REELLY_LOCAL_ONLY", "").strip().lower() in ("1", "on", "yes", "true")
+
+
+def gpu_mode():
+    """REELLY_GPU = auto | gpu | software (anything else: auto)."""
+    m = os.environ.get("REELLY_GPU", "auto").strip().lower()
+    return m if m in ("auto", "gpu", "software") else "auto"
+
+
+# auto mode drops to the software GPU for the rest of the run after the
+# hardware path could not give a WebGL context (a VM, a GPU-less session)
+_GPU_FAILED = [False]
+
+
+def gpu_failed():
+    """auto mode: the hardware GPU did not work; use the software GPU now."""
+    _GPU_FAILED[0] = True
+
+
 def webgl_flags():
     """Chrome flags for WebGL effect pages. REELLY_GPU = auto | gpu | software.
 
-    Measured on the Windows worker (2026-10-30, running as SYSTEM): D3D11
-    reaches real hardware, but Chrome takes the Intel iGPU unless asked for
-    the high-performance one; with it, the RTX 5090 drew + read back a full
+    Hardware path per OS through ANGLE: Direct3D 11 on Windows, Metal on
+    macOS, OpenGL on Linux. Measured on the Windows worker (2026-10-30,
+    running as SYSTEM): Chrome takes the Intel iGPU unless asked for the
+    high-performance one; with it, the RTX 5090 drew + read back a full
     1080x1920 smoke frame at 635 fps (SwiftShader 23.5, Intel 165). auto =
-    that GPU on Windows, the deterministic software GPU elsewhere."""
-    mode = os.environ.get("REELLY_GPU", "auto").strip().lower()
+    the hardware GPU, falling back to the software GPU (SwiftShader, the
+    same pixels on every machine) when it gives no WebGL context."""
     software = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
-    gpu = ["--use-angle=d3d11", "--use-gl=angle", "--ignore-gpu-blocklist",
-           "--force_high_performance_gpu"]
-    if mode == "software" or (mode == "auto" and os.name != "nt"):
+    mode = gpu_mode()
+    if mode == "software" or (mode == "auto" and _GPU_FAILED[0]):
         return software
-    return gpu
+    if os.name == "nt":
+        backend = ["--use-angle=d3d11", "--force_high_performance_gpu"]
+    elif sys.platform == "darwin":
+        backend = ["--use-angle=metal"]
+    else:
+        backend = ["--use-angle=gl"]
+    return [*backend, "--use-gl=angle", "--ignore-gpu-blocklist"]
 
 
 def _videotoolbox_works():
@@ -540,7 +570,7 @@ def write_user_config(data, path=None):
     path = path or USER_CFG
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
         fh.write("\n")
     os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)

@@ -69,14 +69,32 @@ def test_level_mix_reaches_target_and_limits_peaks(tmp_path):
                     "[1]adelay=3000|3000[h];[0][h]amix=inputs=2:normalize=0",
                     "-ar", "48000", src], check=True)
     before = audio_post.integrated_loudness(src)
-    out = audio_post.level_mix(src, target=-14.0, peak_db=-2.0)
+    out = audio_post.level_mix(src)                     # the production settings
     after = audio_post.integrated_loudness(out)
     assert out != src and before < -18
     assert abs(after - (-14.0)) <= 0.5
     tp = audio_post.true_peak(out)
-    assert tp is None or tp <= -1.0
+    assert tp is not None and tp <= -3.5                 # limited at -4.5, AAC headroom
 
 
 def test_level_mix_leaves_a_mix_on_target_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(audio_post, "integrated_loudness", lambda p: -14.2)
     assert audio_post.level_mix("x.wav") == "x.wav"
+
+
+def test_a_cached_bed_follows_the_brand_track(brand, tmp_path, monkeypatch):
+    # a bed cached before the brand's soundtrack existed must not keep
+    # shipping once the track is configured (and its stated bpm applies)
+    monkeypatch.setattr(audio_post, "_fal", lambda *a, **k: pytest.fail("no generation"))
+    monkeypatch.setattr(audio_post, "wait_for", lambda p: None)
+    out = tmp_path / "c_music.mp3"
+    out.write_bytes(b"old generated bed")
+    audio_post._mark_source(str(out), "bed")
+    plan = {"id": "c", "title": "combo", "duration_s": 3}
+    got = audio_post.music(plan, str(out))
+    assert got == str(out) and out.read_bytes() != b"old generated bed"
+    assert audio_post._source_of(str(out)).startswith("brand:battle:battle.wav:")
+    size = out.stat().st_size
+    assert audio_post.music(plan, str(out)) == str(out) and out.stat().st_size == size  # reused
+    assert audio_post.music({**plan, "music": "story"}, str(out)) == str(out)
+    assert audio_post._source_of(str(out)).startswith("brand:story:")        # the plan's pick

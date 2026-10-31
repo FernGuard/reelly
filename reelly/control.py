@@ -14,6 +14,7 @@ sinceOnset); nothing here knows which effect will listen.
 """
 import base64
 import io
+import os
 import subprocess
 
 from . import config
@@ -35,17 +36,32 @@ def energy(path, dur, fps=FPS):
     percentile = 1). Empty list for silent or missing audio."""
     import numpy as np
     x, sr = _mono(path)
+    fps = energy_rate(dur, fps)
     n = int(round(dur * fps))
     if len(x) < sr // 4 or n < 1:
         return []
     hop = sr / fps
-    rms = np.array([np.sqrt(np.mean(x[int(i * hop):int((i + 1) * hop)] ** 2) + 1e-12)
-                    for i in range(n)])
+    # the audio routinely ends a frame or two before the picture (AAC
+    # padding): pad with silence so no slice is empty (mean of [] is NaN)
+    need = int(np.ceil(n * hop)) + 1
+    if len(x) < need:
+        x = np.concatenate([x, np.zeros(need - len(x), np.float32)])
+    rms = np.array([np.sqrt(np.mean(x[int(i * hop):max(int(i * hop) + 1, int((i + 1) * hop))] ** 2)
+                            + 1e-12) for i in range(n)])
     rms = np.convolve(rms, np.ones(5) / 5, mode="same")          # ~80 ms smoothing
     hi = np.percentile(rms, 95)
     if hi <= 1e-6:
         return []
     return [float(v) for v in np.clip(rms / hi, 0.0, 1.0)]
+
+
+MAX_CTRL_TEXELS = 4096   # u_ctrl is one row: stay under every GPU's texture limit
+
+
+def energy_rate(dur, fps=FPS):
+    """Samples per second of the energy track: one per output frame, fewer
+    on long cuts so the row fits in MAX_CTRL_TEXELS."""
+    return min(float(fps), MAX_CTRL_TEXELS / max(dur, 1e-3))
 
 
 def onsets(path, dur, limit=MAX_ONSETS):
@@ -78,6 +94,7 @@ def track(plan, audio_path, dur):
             "pops": finalize._pop_times(plan),
             "onsets": onsets(audio_path, dur) if audio_path else [],
             "energy": energy(audio_path, dur) if audio_path else [],
+            "energy_rate": energy_rate(dur),
             "fps": FPS}
 
 
@@ -98,7 +115,7 @@ def host_uniforms(ctrl, t_offset=0.0):
     at t_offset in content time (an end card after the content: dur)."""
     if not ctrl:
         return {"u_beat": [0.0, 0.0], "u_onsets": [-1.0] * MAX_ONSETS, "u_ctrl_n": 0.0,
-                "u_events": [-1.0, 0.0, 0.0, 0.0] * MAX_EVENTS}
+                "u_ctrl_rate": float(FPS), "u_events": [-1.0, 0.0, 0.0, 0.0] * MAX_EVENTS}
     b0, per = ctrl["beats"]
     on = [o - t_offset for o in ctrl["onsets"] if o - t_offset >= 0][:MAX_ONSETS]
     ev = []
@@ -109,6 +126,7 @@ def host_uniforms(ctrl, t_offset=0.0):
     return {"u_beat": [b0 - t_offset, per],
             "u_onsets": on + [-1.0] * (MAX_ONSETS - len(on)),
             "u_ctrl_n": float(len(ctrl["energy"])) if t_offset == 0 else 0.0,
+            "u_ctrl_rate": float(ctrl.get("energy_rate", FPS)),
             "u_events": ev}
 
 
@@ -285,23 +303,29 @@ def verify_events(video, candidates, pic, workdir, project="", cache=None):
     key = ",".join(f"{e['t']:.3f}" for e in candidates)
     if cache and os.path.exists(cache):
         try:
-            c = json.load(open(cache))
+            c = json.load(open(cache, encoding="utf-8"))
             if c.get("key") == key:
                 return c["events"]
         except (OSError, ValueError, KeyError):
             pass
-    from . import direct
+    from . import degrade, direct
+    # unverified candidates put marks on meteor trails and HUD flicker: with
+    # no vision check there are no marks (and frames never leave the machine
+    # when vision is off or the run is local-only)
+    if config.local_only() or os.environ.get("REELLY_SIGHT", "").strip().lower() == "off":
+        degrade.note("impacts", "vision check off (local-only); no impact marks")
+        return []
     tool = direct.resolve_brain("auto")
     if tool != "codex":
-        print("        impacts: no vision brain signed in; unverified candidates")
-        return candidates
+        degrade.note("impacts", "no vision check signed in (Codex); no impact marks")
+        return []
     sheets = [_sheet(video, e["t"], pic, os.path.join(workdir, f"impact_{i}.jpg"))
               for i, e in enumerate(candidates)]
     prompt = VERIFY_PROMPT.format(cols="A-" + chr(64 + GRID[0]), rows=GRID[1])
     reply = direct._ask_cli("codex", prompt, project, "impact check", images=sheets)
     if not isinstance(reply, dict) or not isinstance(reply.get("moments"), list):
-        print("        impacts: the vision check gave no answer; unverified candidates")
-        return candidates
+        degrade.note("impacts", "the vision check gave no answer; no impact marks")
+        return []
     out = []
     for m in reply["moments"]:
         try:
@@ -321,7 +345,7 @@ def verify_events(video, candidates, pic, workdir, project="", cache=None):
           + "; ".join(f"{e['t']}s {e.get('what', '')}" for e in out))
     if cache:
         try:
-            json.dump({"key": key, "events": out}, open(cache, "w"), indent=1)
+            json.dump({"key": key, "events": out}, open(cache, "w", encoding="utf-8"), indent=1)
         except OSError:
             pass
     return out

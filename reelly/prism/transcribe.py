@@ -20,7 +20,7 @@ def transcribe(wav, out_json=None):
 
     res = mlx_whisper.transcribe(wav, path_or_hf_repo=config.WHISPER_MODEL, word_timestamps=True)
     if out_json:
-        json.dump(res, open(out_json, "w"))
+        json.dump(res, open(out_json, "w", encoding="utf-8"))
     return res
 
 
@@ -32,5 +32,5 @@ def text_of(result):
 
 def load_cached(out_json):
     if out_json and os.path.exists(out_json):
-        return json.load(open(out_json))
+        return json.load(open(out_json, encoding="utf-8"))
     return None

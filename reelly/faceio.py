@@ -141,7 +141,7 @@ def _cache_path(video):
 def cache_get(video, key):
     """Cached value for (video, key), or None. Never raises."""
     try:
-        with open(_cache_path(video)) as f:
+        with open(_cache_path(video), encoding="utf-8") as f:
             return json.load(f).get(key)
     except (OSError, ValueError):
         return None
@@ -154,7 +154,7 @@ def cache_put(video, key, value):
             path = _cache_path(video)
             os.makedirs(CACHE_DIR, exist_ok=True)
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 data = {}

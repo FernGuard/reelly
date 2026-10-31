@@ -326,7 +326,7 @@ def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
             subprocess.run(args, check=True)
             parts.append(p)
         lst = os.path.join(td, "list.txt")
-        open(lst, "w").write("\n".join(f"file '{p}'" for p in parts))
+        open(lst, "w", encoding="utf-8").write("\n".join(f"file '{p}'" for p in parts))
         subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat",
                         "-safe", "0", "-i", lst, "-c", "copy", dst], check=True)
 
@@ -414,7 +414,7 @@ def _facecam_source(root):
 def render(project, cut_id=None, tag=None):
     root = direct.resolve_project(project)
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     video = direct._source_video(root)
     facecam = _facecam_source(root)

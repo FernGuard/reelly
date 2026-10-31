@@ -47,7 +47,7 @@ def run(project, tag=None, product="video", account=None, variants=None,
     wanted = accounts.variants_for(root, profile, variants)
     targets = products.delivery_targets(root, targets_for)
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
     src = os.path.join(root, "deliverables", f"final{sfx}")
     out = os.path.join(root, "deliverables", f"delivery{sfx}")
 
@@ -98,7 +98,7 @@ def run(project, tag=None, product="video", account=None, variants=None,
             ". Re-run `reelly cut`/`finalize` with these variants first; "
             "a partial delivery set must not look complete.")
 
-    json.dump(mapping, open(os.path.join(out, "mapping.json"), "w"), indent=1)
+    json.dump(mapping, open(os.path.join(out, "mapping.json"), "w", encoding="utf-8"), indent=1)
     L = [f"# Delivery: {os.path.basename(root)}", "",
          f"Account **{profile['name']}** | variants: {', '.join(wanted)} | "
          f"targets: {', '.join(targets)}", "",
@@ -114,6 +114,6 @@ def run(project, tag=None, product="video", account=None, variants=None,
         L.append("")
     L += ["Provenance: `mapping.json` links every delivered file to its plan "
           "in `edl/cut_plans%s.json`." % sfx, ""]
-    open(os.path.join(out, "DELIVERY.md"), "w").write("\n".join(L))
+    open(os.path.join(out, "DELIVERY.md"), "w", encoding="utf-8").write("\n".join(L))
     print(f"[deliver] {len(keeps)} shipped, {len(kills)} killed -> {out}")
     return mapping
