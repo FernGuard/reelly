@@ -45,7 +45,21 @@ jobs:
         run: choco install ffmpeg -y --no-progress
 
       - name: Install
-        run: uv sync
+        run: uv sync --extra depth
+
+      # the optional models (pinned, checksum-verified), cached between runs,
+      # so the depth and person-mask tests run instead of skipping
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/reelly-models
+          key: reelly-models-${{ hashFiles('reelly/models.py') }}
+
+      - name: Models
+        shell: bash
+        run: |
+          REELLY_HOME="$RUNNER_TEMP/reelly-models" uv run reelly models fetch all
+          echo "REELLY_DEPTH_MODEL=$RUNNER_TEMP/reelly-models/models/depth-anything-v2-small/model.onnx" >> "$GITHUB_ENV"
+          echo "REELLY_SEGMENTER=$RUNNER_TEMP/reelly-models/models/selfie-segmenter/selfie_segmenter.tflite" >> "$GITHUB_ENV"
 
       - name: Setup report
         run: uv run reelly setup
