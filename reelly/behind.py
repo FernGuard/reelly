@@ -141,7 +141,7 @@ def apply(burned, raw, mask_pattern, mask_fps, dst):
 MAX_COVER = 0.25         # a layer the person covers more than this stays on top
 
 
-def guard(mask_pattern, n, fps, boxes, max_cover=MAX_COVER, on_top=()):
+def guard(mask_pattern, n, fps, boxes, max_cover=MAX_COVER, on_top=(), grow=(0, 0, 0, 0.0)):
     """Readability first. For each text layer box (t0, t1, x0, y0, x1, y1 in
     the 1080x1920 frame): the share of it the person covers over its window;
     a layer covered more than `max_cover` keeps its text ON TOP. The mask is
@@ -149,6 +149,10 @@ def guard(mask_pattern, n, fps, boxes, max_cover=MAX_COVER, on_top=()):
     cleared inside every `on_top` box (captions: always readable), so the
     subject only ever steps in front of the text chosen for it and nothing
     else in the frame (effects, plates, end tag) is replaced by the raw cut.
+    grow = (top px, side px, bottom px, extra seconds): how far the text's
+    motion reaches beyond its layout box (a block-lock drop from above, the
+    aura, petals drifting after the line), so the subject's edge never cuts
+    a hard seam through moving type. Coverage is measured on the box itself.
     Rewrites the mask frames in place. Returns [(box, cover, behind?)]."""
     import numpy as np
     from PIL import Image
@@ -172,7 +176,9 @@ def guard(mask_pattern, n, fps, boxes, max_cover=MAX_COVER, on_top=()):
         cover = float(np.mean(covers)) if covers else 0.0
         behind = cover <= max_cover
         if behind:
-            allow.append((i0, i1, bx))
+            gt, gs, gb, gl = grow
+            t0, t1, x0, y0, x1, y1 = b
+            allow.append(frame_box((t0, t1 + gl, x0 - gs, y0 - gt, x1 + gs, y1 + gb))[0:3])
         out.append((tuple(b), round(cover, 3), behind))
     block = [frame_box(b) for b in on_top]
     for i in range(n):

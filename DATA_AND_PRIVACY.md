@@ -34,12 +34,16 @@ command can send and to whom.
 | `models fetch` | a download request | Hugging Face, Google (model files) |
 
 The Codex and Claude CLIs run under your own accounts and their terms; Reelly
-starts them, passes the prompt and any images, and reads the reply. Nothing is
-sent anywhere else.
+starts them, passes the prompt and any images, and reads the reply. Two smaller
+requests carry no content: card and overlay pages load a web font from Google
+Fonts when the brand has no font files of its own, and model libraries check
+the Hugging Face Hub for cached models.
 
 **`--local-only`** (or `REELLY_LOCAL_ONLY=1`) turns all of it off: no CLI, no
-provider, no vision check, no model download. A local vision endpoint you run
-yourself (`REELLY_VISION_URL`) is still used. Each step then takes its local
+provider, no vision check, no model download, no web font, and the Hugging Face
+Hub is set offline (cached models only). A vision endpoint you run yourself
+(`REELLY_VISION_URL`) is still used when it is on this machine or your local
+network (loopback, a private address or a `.local` name). Each step then takes its local
 path or is skipped, and `REVIEW.md` lists what fell back. `REELLY_SIGHT=off`
 turns off only the vision pass and the impact check.
 

@@ -15,6 +15,7 @@ import tempfile
 import threading
 
 from . import audio_post, audiotail, captions, config, direct, face, media, products, speech, timing
+from .shaderfx import GPUUnavailable
 from .preview import _cut_segments, _facecam_source, _se, run_parallel
 
 
@@ -110,6 +111,8 @@ def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None,
                 enter=t0 > 0.0, hot_reason=hot_reason, label=name,
                 beat=kinetic.local_beat(beats, t0), linger=linger)
             return _Seq(pattern), -pad
+        except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+            raise
         except Exception as e:  # noqa: BLE001 -- static fallback, never break the burn
             from . import degrade
             degrade.note(f"text '{name}'", f"kinetic text failed ({e}); static text")
@@ -383,6 +386,8 @@ def _finish_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
                         dst], check=True)
         print(f"        finish '{fx}': around the picture, {n} frames")
         return dst
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
     except Exception as e:   # noqa: BLE001 -- the cut ships without the finish
         from . import degrade
         degrade.note("finish", f"'{fx}' failed ({e}); no finish")
@@ -408,8 +413,13 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
         pic, clear = prot                                     # uv, y up
         pops = _pop_times(plan)
         ctrl = plan.get("_ctrl")
-        if ctrl is not None and "events" not in ctrl and not shaderfx.content_flag("events"):
-            ctrl["events"] = []                 # not a content type with game hits
+        uses_events = any("u_events" in shaderfx.load_effect(shaderfx.load_preset(l)["effect"])[1]
+                          for l in layers)
+        if ctrl is not None and "events" not in ctrl and \
+                (not shaderfx.content_flag("events") or not uses_events):
+            # not a content type with hits, or no layer draws them: no
+            # detection, no vision check, nothing uploaded
+            ctrl["events"] = []
         if ctrl is not None and "events" not in ctrl:
             from . import control
             try:
@@ -429,6 +439,8 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
                 seq, fx_fps = shaderfx.render_ambient(
                     name, os.path.join(workdir, f"fx_ambient{i}"), dur, pic, clear, pops,
                     ctrl=plan.get("_ctrl"))
+            except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+                raise
             except Exception as e:   # noqa: BLE001 -- the other layers still play
                 from . import degrade
                 degrade.note("ambient", f"'{name}' failed ({e}); layer skipped")
@@ -450,6 +462,8 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
               f"{len(c.get('onsets', []))} onset(s), energy {'on' if c.get('energy') else 'off'}, "
               f"impacts at {[e['t'] for e in c.get('events', [])]}")
         return dst
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
     except Exception as e:   # noqa: BLE001 -- the cut ships without the layer
         from . import degrade
         degrade.note("ambient", f"'{fx}' failed ({e}); no ambient layers")
@@ -634,12 +648,13 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
         from . import degrade
         _fx.set_content_type(None)
         _fx.set_content_type(_fx.content_type(p, follow=follow))
+        degrade.write(root, p["id"], [])          # a fresh record for this run
         degrade.begin()
         try:
             return _finalize_cut(p)
         finally:
             _fx.set_content_type(None)
-            degrade.write(root, p["id"], degrade.collect())
+            degrade.append(root, p["id"], degrade.collect())
 
     def _finalize_cut(p):
         from . import outro as outro_mod
@@ -738,7 +753,13 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                                 for r in _judge._text_layers(p, words, with_x=True)]
                         boxes = [b for b, label in rows if not label.startswith("cue@")]
                         cues = [b for b, label in rows if label.startswith("cue@")]
-                        dec = _behind.guard(mpat, mn, mfps, boxes, on_top=cues)
+                        from . import gputext as _gt, shaderfx as _sfx
+                        # how far moving type reaches past its layout box
+                        side = max(_gt.PETAL_MARGIN, _sfx.TEXT_OFF)
+                        top = 160 if _gt.motion() == "blocklock" else side
+                        linger = _gt.PETAL_LINGER if _gt.exit_style() == "petals" else 0.0
+                        dec = _behind.guard(mpat, mn, mfps, boxes, on_top=cues,
+                                            grow=(top, side, side, linger + 0.1))
                         vid = _behind.apply(vid, raw, mpat, mfps, os.path.join(td, "behind.mp4"))
                         print("        text behind the subject: "
                               + ", ".join(f"{'behind' if b else 'on top'} (covered {c:.0%})"

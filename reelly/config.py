@@ -473,6 +473,33 @@ def _bin_ok(path):
     return bool(path) and (os.path.isfile(path) or shutil.which(path))
 
 
+def _gpu_check(have_chrome):
+    """Render one tiny WebGL frame and report the renderer Chrome really used."""
+    if not have_chrome:
+        return {"id": "GPU effects", "status": "missing",
+                "detail": "needs Chrome: kinetic text and every effect render in it"}
+    import tempfile
+    try:
+        from . import shaderfx
+        shaderfx._RENDERER[0] = None
+        html = shaderfx._page("precision highp float;\nvoid main(){ gl_FragColor = vec4(1.0); }",
+                              16, 16, {"u_res": (16, 16)})
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory(prefix="reelly-setup-") as td, \
+                contextlib.redirect_stdout(io.StringIO()):     # keep --json clean
+            shaderfx.render_frames(html, td, 16, 16, 1 / 30, 30)
+        r = shaderfx._RENDERER[0] or "unknown"
+        soft = "swiftshader" in r.lower()
+        return {"id": "GPU effects", "status": "ok" if not soft else "skip",
+                "detail": (f"{r} (REELLY_GPU={gpu_mode()})" if not soft else
+                           f"software renderer ({r}): effects work, slower; "
+                           f"REELLY_GPU={gpu_mode()}")}
+    except Exception as e:   # noqa: BLE001 -- setup must always print
+        return {"id": "GPU effects", "status": "missing",
+                "detail": f"WebGL test render failed ({str(e)[:120]})"}
+
+
 def doctor(as_json=False):
     """Print a machine check. Returns process exit code. Never prints secrets."""
     checks = []
@@ -538,15 +565,7 @@ def doctor(as_json=False):
                        "detail": "ON: no CLI, provider, vision or download call leaves this machine"})
 
     # effects and safety: what the look and the gates need
-    checks.append({
-        "id": "GPU effects",
-        "status": "ok" if ch and _bin_ok(ch) else "missing",
-        "detail": (f"REELLY_GPU={gpu_mode()}: " + (
-            "Direct3D 11" if os.name == "nt" else "Metal" if sys.platform == "darwin"
-            else "OpenGL") + " through Chrome, software GPU if there is none"
-            if ch and _bin_ok(ch) else
-            "needs Chrome: kinetic text and every effect render in it"),
-    })
+    checks.append(_gpu_check(ch and _bin_ok(ch)))
     try:
         import onnxruntime  # noqa: F401
         ort = True
@@ -575,7 +594,7 @@ def doctor(as_json=False):
         from . import brandkit as _bk
         bname = _bk.brand_name()
         if bname:
-            errs, warns = _bk.check(_bk.brand(bname))
+            errs, warns = _bk.validate(bname)
             checks.append({
                 "id": f"brand: {bname}",
                 "status": "ok" if not errs else "missing",

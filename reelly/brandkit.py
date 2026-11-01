@@ -294,7 +294,8 @@ MOVED = {"fps": "video.fps", "reframe": "video.reframe", "profile": "video.conte
          "fx": "effects (+ text.motion / text.exit / text.petal_color / "
                "text.behind_subject)",
          "outro_fx": "effects.endcard", "ambient_fx": "effects.ambient",
-         "text_fx": "effects.text", "copy.clip_len": "video.clip_len"}
+         "text_fx": "effects.text", "finish_fx": "effects.finish",
+         "copy.clip_len": "video.clip_len"}
 
 
 def section(name):
@@ -350,6 +351,8 @@ def check(data):
         v = data.get(sec)
         if v is None:
             continue
+        if sec == "music" and isinstance(v, dict) and "tracks" not in v:
+            continue                    # the flat map {key: file} is still read as tracks
         if not isinstance(v, dict):
             err.append(f'"{sec}" must be an object')
             continue
@@ -368,7 +371,8 @@ def check(data):
              (isinstance(r, (int, float)) and 1.0 <= r <= 2.0)
         if not ok:
             err.append('"video.reframe" must be "full_width" or a zoom from 1.0 to 2.0')
-    if "content_type" in vid and vid["content_type"] not in shaderfx.content_types():
+    if "content_type" in vid and str(vid["content_type"]).strip().lower().replace("_", "-") \
+            not in shaderfx.content_types():
         err.append(f'"video.content_type" must be one of {shaderfx.content_types()}')
     if "clip_len" in vid and performance._parse_len(vid["clip_len"]) is None:
         err.append('"video.clip_len" must be [min, max] seconds, 5 <= min < max <= 180')
@@ -401,14 +405,48 @@ def check(data):
                         if p.startswith(placement + "/")]
                 err.append(f'"effects.{placement}": no preset "{name}" (have: {", ".join(have)})')
                 continue
+            if not isinstance(params, dict):
+                err.append(f'"effects.{placement}" {name}: "params" must be an object')
+                continue
             try:
                 shaderfx.uniforms(pid, params)
-            except shaderfx.EffectError as e2:
-                err.append(f'"effects.{placement}" {name}: {e2}')
+            except (shaderfx.EffectError, ValueError, TypeError, AttributeError) as e2:
+                err.append(f'"effects.{placement}" {name}: bad params ({e2})')
     music = data.get("music")
     if isinstance(music, dict) and "cleared" in music and not isinstance(music["cleared"], bool):
         err.append('"music.cleared" must be true or false')
     return err, warn
+
+
+def load_raw(name=None):
+    """(dict or None, error or None) straight from brand.json: a syntax error
+    is reported, never read as an empty brand."""
+    d = brand_dir(name)
+    p = os.path.join(d, "brand.json") if d else None
+    if not p or not os.path.exists(p):
+        return None, None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f), None
+    except ValueError as e:
+        return None, f"brand.json is not valid JSON ({e})"
+    except OSError as e:
+        return None, f"brand.json cannot be read ({e})"
+
+
+def validate(name=None):
+    """(errors, warnings) for a brand by name, including a broken file."""
+    data, err = load_raw(name)
+    if err:
+        return [err], []
+    if data is None:
+        return [], []
+    errs, warns = check(data)
+    d = brand_dir(name)
+    for role, fn in (data.get("fonts") or {}).items() if isinstance(data.get("fonts"), dict) else []:
+        if isinstance(fn, str) and os.path.basename(fn) == fn and not os.path.exists(os.path.join(d, fn)):
+            errs.append(f'font "{fn}" ({role}) is not in the brand folder')
+    return errs, warns
 
 
 def require_valid():
@@ -417,11 +455,7 @@ def require_valid():
     name = brand_name()
     if not name:
         return
-    d = brand_dir(name)
-    p = os.path.join(d, "brand.json")
-    if not os.path.exists(p):
-        return                         # brand() already warns about a missing kit
-    errs, warns = check(brand(name))
+    errs, warns = validate(name)
     for w in warns:
         print(f"[brand] {name}: {w}")
     if errs:
@@ -455,7 +489,7 @@ def migrate(data):
             return {**e, "preset": names.get(e.get("preset"), e.get("preset"))}
         return names.get(e, e)
     for placement, legacy, key in (("endcard", "outro_fx", "outro"), ("ambient", "ambient_fx", "ambient"),
-                                   ("text", "text_fx", "text"), ("finish", None, "finish")):
+                                   ("text", "text_fx", "text"), ("finish", "finish_fx", "finish")):
         v = fx.get(key)
         if v is None and legacy and old.get(legacy):
             v = old[legacy]                     # "smoke"

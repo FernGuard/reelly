@@ -129,3 +129,26 @@ def test_local_only_stops_every_outbound_path(monkeypatch, tmp_path):
     assert control.verify_events("v.mp4", [{"t": 1.0}], (0, 0, 1, 1), str(tmp_path), "c") == []
     with pytest.raises(SystemExit):
         models.fetch("depth")
+
+
+def test_local_only_keeps_the_vision_endpoint_on_this_network(monkeypatch):
+    from reelly import card, overlays, sight
+    monkeypatch.setenv("REELLY_LOCAL_ONLY", "1")
+    for url, ok in (("http://127.0.0.1:11435/v1", True), ("http://192.168.1.20:8080", True),
+                    ("http://studio.local:11434", True), ("https://api.example.com/v1", False)):
+        monkeypatch.setenv("REELLY_VISION_URL", url)
+        assert (sight.resolve_backend() == "local") is ok, url
+    assert card._font_link() == "" and "fonts.googleapis" not in overlays._head()
+
+
+def test_a_broken_brand_file_stops_the_run(tmp_path, monkeypatch):
+    d = tmp_path / "kit" / "brands" / "g"
+    d.mkdir(parents=True)
+    (d / "brand.json").write_text('{"schema": 1, "effects": {"endcard": "smoke",}}')
+    monkeypatch.setenv("REELLY_BRANDKIT", str(tmp_path / "kit"))
+    monkeypatch.setenv("REELLY_BRAND", "g")
+    with pytest.raises(SystemExit) as e:
+        brandkit.require_valid()
+    assert "not valid JSON" in str(e.value)
+    (d / "brand.json").write_text(json.dumps({"schema": 1, "fonts": {"headline": "Missing.ttf"}}))
+    assert any("Missing.ttf" in x for x in brandkit.validate("g")[0])

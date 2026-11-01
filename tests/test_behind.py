@@ -88,3 +88,18 @@ def test_guided_filter_snaps_a_soft_mask_to_the_image_edge():
     # the step between the two pixels either side of the image edge
     assert row[32] - row[31] > 3 * (before[32] - before[31])
     assert row[28] < before[28] and row[36] > before[36]      # pushed apart around it
+
+
+def test_moving_type_gets_room_beyond_its_box(tmp_path):
+    # a block-lock drop starts above the box and petals drift after the line:
+    # the subject must stay in front there too, not behind a hard seam
+    pat = str(tmp_path / "m%05d.png")
+    for i in range(20):
+        m = np.zeros((960, 540), np.uint8)
+        m[250:310, :] = 255                            # above the box, and in it
+        Image.fromarray(m, "L").save(pat % i)
+    hook = (0.0, 0.3, 0.0, 600.0, 1080.0, 800.0)       # rows 300-400, frames 0-9
+    behind.guard(pat, 20, 30, [hook], grow=(120, 70, 70, 0.3))
+    f5, f15 = np.asarray(Image.open(pat % 5)), np.asarray(Image.open(pat % 15))
+    assert f5[250:300].max() == 255                    # the drop zone above the box
+    assert f15[300:310].max() == 255                   # the linger after the line

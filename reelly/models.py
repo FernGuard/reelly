@@ -1,7 +1,7 @@
 """Optional local models: where they live, and `reelly models fetch`.
 
 Each model is downloaded once from its publisher, pinned to a version and
-checked against a SHA-256 before it is used, into <REELLY_HOME>/models/.
+checked against a SHA-256 before it is installed into <REELLY_HOME>/models/.
 An environment variable can point at a copy elsewhere. Nothing here is
 bundled with Reelly; each model keeps its own licence (THIRD_PARTY_NOTICES).
 """

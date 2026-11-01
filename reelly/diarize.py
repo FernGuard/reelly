@@ -65,6 +65,15 @@ def _pyannote_version():
         return "unknown"
 
 
+def _load_error(e):
+    if config.local_only():
+        return (f"could not load {MODEL} from the local cache ({e}). Under "
+                f"--local-only nothing is downloaded: run once without it to "
+                f"fetch the model.")
+    return (f"could not load {MODEL} ({e}). Most often the model terms have "
+            f"not been accepted for this token.\n{SETUP_HELP}")
+
+
 def _pipeline():
     """The diarization pipeline, or a RuntimeError that says exactly what to fix."""
     try:
@@ -73,7 +82,11 @@ def _pipeline():
         raise RuntimeError(
             f"pyannote.audio is not installed ({e}).\n{SETUP_HELP}") from e
     tok = token()
-    if not tok:
+    if not tok and config.local_only():
+        # local-only: the Hub is offline, so only an already-downloaded model
+        # loads (no token needed for the cache)
+        tok = None
+    elif not tok:
         raise RuntimeError(
             f"no HuggingFace token found for the {MODEL} download.\n{SETUP_HELP}")
     # pyannote.audio renamed the kwarg (use_auth_token -> token) in v4. Support
@@ -92,13 +105,9 @@ def _pipeline():
                 f"({e}). This is a reelly compatibility bug, not a setup "
                 f"problem -- the token and model terms are fine.") from e
         except Exception as e:
-            raise RuntimeError(
-                f"could not load {MODEL} ({e}). Most often the model terms have "
-                f"not been accepted for this token.\n{SETUP_HELP}") from e
+            raise RuntimeError(_load_error(e)) from e
     except Exception as e:
-        raise RuntimeError(
-            f"could not load {MODEL} ({e}). Most often the model terms have "
-            f"not been accepted for this token.\n{SETUP_HELP}") from e
+        raise RuntimeError(_load_error(e)) from e
     if pipe is None:
         raise RuntimeError(
             f"HuggingFace returned no pipeline for {MODEL}: the model terms "

@@ -60,7 +60,7 @@ and safety checks on every file, all without a paid call.
   active brand first.
 - `reelly config`, `reelly models [fetch]`, `reelly --version`, and the
   global `--local-only` switch (nothing leaves the machine).
-- `reelly setup` now checks the GPU path, models, IRIS and the active brand.
+- `reelly setup` now test-renders on the GPU and reports the renderer, and checks models, IRIS and the active brand.
 - Windows support for tests and renders; UTF-8 everywhere.
 
 ### Changed

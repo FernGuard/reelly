@@ -16,7 +16,7 @@ On/off settings accept `1/on/yes/true` and `0/off/no/false`.
 | `REELLY_BRAND` | text | `` | The brand to use (same as --brand NAME); else the kit's default_brand. |
 | `REELLY_BRANDKIT` | path | `<REELLY_HOME>/brandkit` | The brand kit folder. |
 | `REELLY_ALLOW_PAID` | flag | `off` | Allow paid API providers for this run (same as --allow-paid). |
-| `REELLY_LOCAL_ONLY` | flag | `off` | Nothing leaves the machine: no Codex/Claude CLI, no provider, no vision check, no model download (same as --local-only). |
+| `REELLY_LOCAL_ONLY` | flag | `off` | Nothing leaves the machine: no Codex/Claude CLI, no provider, no vision check, no download, no web font (same as --local-only). |
 | `REELLY_CLIP_LEN` | text | `20-28` | Target clip length in seconds, e.g. 25-30 (same as --length); else the brand's video.clip_len. |
 | `REELLY_FPS` | choice | `30` | Output frame rate (24, 25, 30, 50, 60); else the brand's video.fps. |
 | `REELLY_CONTENT_TYPE` | choice | `auto` | gameplay | talking-head | podcast | screen-demo; else the brand's video.content_type, else a guess from the framing. |

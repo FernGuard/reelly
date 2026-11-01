@@ -631,8 +631,8 @@ _RENDERER = [None]
 
 class GPUUnavailable(Exception):
     """REELLY_GPU=gpu and Chrome came up on a software renderer: not retried
-    (a fresh browser lands on the same adapter) and not a RuntimeError, so
-    no fallback path swallows it."""
+    (a fresh browser lands on the same adapter), and every effect fallback
+    re-raises it, so the run fails instead of shipping a degraded cut."""
 
 
 async def _log_renderer(b):
@@ -652,6 +652,20 @@ async def _log_renderer(b):
 
 
 async def _shoot_all(page, frames, w, h, out_dir, profile, writer=None):
+    """Render `frames` in one browser tab. A dropped browser connection or a
+    stalled frame becomes a RuntimeError, so render_frames retries it in a
+    fresh browser like any other start race."""
+    try:
+        return await _shoot_tab(page, frames, w, h, out_dir, profile, writer)
+    except (asyncio.TimeoutError, ConnectionError, EOFError) as e:
+        raise RuntimeError(f"browser connection lost ({type(e).__name__}: {e})") from e
+    except Exception as e:   # noqa: BLE001 -- websockets' ConnectionClosed, without importing it
+        if type(e).__name__.startswith("ConnectionClosed"):
+            raise RuntimeError(f"browser connection lost ({e})") from e
+        raise
+
+
+async def _shoot_tab(page, frames, w, h, out_dir, profile, writer=None):
     from . import card
     async with card._Browser(profile, webgl=True) as b:
         await b("Emulation.setDeviceMetricsOverride",

@@ -480,3 +480,34 @@ def test_depth_estimate_on_a_real_model(tmp_path):
     d = Image.open(out)
     assert d.size == (640, 360) and d.mode == "L"
     assert d.getextrema()[1] > d.getextrema()[0]          # a real depth range
+
+
+def test_impacts_are_found_only_when_a_layer_draws_them(monkeypatch, tmp_path):
+    # smoke + embers never draw impacts: no detection, no vision upload, no
+    # "impacts fell back" note on every cut of a fresh install
+    from reelly import control, degrade, finalize, kinetic
+    monkeypatch.setattr(shaderfx, "active_list", lambda kind="endcard": ["ambient/smoke", "ambient/embers"])
+    monkeypatch.setattr(kinetic, "enabled", lambda: True)
+    monkeypatch.setattr(control, "events", lambda *a, **k: pytest.fail("no detection"))
+    monkeypatch.setattr(shaderfx, "render_ambient",
+                        lambda name, out_dir, *a, **k: (os.path.join(out_dir, "f%05d.tga"), 30))
+    monkeypatch.setattr(finalize.subprocess, "run", lambda *a, **k: None)
+    degrade.begin()
+    plan = {"reframe": 1.0, "_ctrl": {"beats": [0, 0], "onsets": [], "energy": []}}
+    finalize._ambient_pass("raw.mp4", "a.mp4", plan, 10.0, str(tmp_path), None)
+    assert plan["_ctrl"]["events"] == [] and degrade.collect() == []
+
+
+def test_forced_gpu_fails_instead_of_degrading(monkeypatch, tmp_path):
+    # REELLY_GPU=gpu on a software renderer must stop the run, not ship a
+    # cut without its effects
+    from reelly import finalize, kinetic
+    monkeypatch.setattr(shaderfx, "active_list", lambda kind="endcard": ["ambient/smoke"])
+    monkeypatch.setattr(kinetic, "enabled", lambda: True)
+
+    def no_gpu(*a, **k):
+        raise shaderfx.GPUUnavailable("REELLY_GPU=gpu but Chrome rendered with SwiftShader")
+    monkeypatch.setattr(shaderfx, "render_ambient", no_gpu)
+    with pytest.raises(shaderfx.GPUUnavailable):
+        finalize._ambient_pass("raw.mp4", "a.mp4", {"reframe": 1.0, "_ctrl": {"events": []}},
+                               10.0, str(tmp_path), None)

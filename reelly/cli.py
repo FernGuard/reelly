@@ -49,11 +49,17 @@ class _CutGfx:
         self.futs.append((plan["id"], self.pool.submit(self._one, plan["id"])))
 
     def _one(self, cid):
-        from . import overlays
-        if self.autoplan_needed:
-            overlays.autoplan(self.project, product=self.product, cut_id=cid,
-                              tag=self.tag)
-        overlays.apply(self.project, cut_id=cid, tag=self.tag)
+        from . import degrade, direct, overlays
+        degrade.begin()                  # this thread's fallbacks land on the cut too
+        try:
+            if self.autoplan_needed:
+                overlays.autoplan(self.project, product=self.product, cut_id=cid,
+                                  tag=self.tag)
+            overlays.apply(self.project, cut_id=cid, tag=self.tag)
+        finally:
+            notes = degrade.collect()
+            if notes:
+                degrade.append(direct.resolve_project(self.project), cid, notes)
 
     def finish(self):
         """Barrier: wait for every queued gfx job; raise like apply() did."""
@@ -105,6 +111,12 @@ def _global_flags(argv):
 
 def main(argv=None):
     argv = _global_flags(list(sys.argv[1:] if argv is None else argv))
+    from . import config as _config
+    if _config.local_only():
+        # model libraries (mlx-whisper, parakeet, pyannote) use only what is
+        # already cached: no Hugging Face Hub request, not even a version check
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     from . import __version__
     ap = argparse.ArgumentParser(prog="reelly")
     ap.add_argument("--version", action="version", version=f"reelly {__version__}")
@@ -514,9 +526,11 @@ def main(argv=None):
         p = os.path.join(d, "brand.json") if d else None
         if not p or not os.path.exists(p):
             raise SystemExit(f"brand {args.brand_cmd}: no brand.json for {name or '(no active brand)'}")
-        data = _json.load(open(p, encoding="utf-8"))
+        data, perr = brandkit.load_raw(name)
+        if perr:
+            raise SystemExit(f"brand {args.brand_cmd} {name}: {perr}")
         if args.brand_cmd == "check":
-            errs, warns = brandkit.check(data)
+            errs, warns = brandkit.validate(name)
             for w in warns:
                 print(f"  warning: {w}")
             for e in errs:

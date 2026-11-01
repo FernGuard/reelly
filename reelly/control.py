@@ -312,8 +312,11 @@ def verify_events(video, candidates, pic, workdir, project="", cache=None):
     # unverified candidates put marks on meteor trails and HUD flicker: with
     # no vision check there are no marks (and frames never leave the machine
     # when vision is off or the run is local-only)
-    if config.local_only() or os.environ.get("REELLY_SIGHT", "").strip().lower() == "off":
-        degrade.note("impacts", "vision check off (local-only); no impact marks")
+    if config.local_only():
+        degrade.note("impacts", "--local-only: no vision check, no impact marks")
+        return []
+    if os.environ.get("REELLY_SIGHT", "").strip().lower() == "off":
+        degrade.note("impacts", "REELLY_SIGHT=off: no vision check, no impact marks")
         return []
     tool = direct.resolve_brain("auto")
     if tool != "codex":

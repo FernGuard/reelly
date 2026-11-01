@@ -32,6 +32,7 @@ import os
 import subprocess
 
 from . import config
+from .shaderfx import GPUUnavailable
 
 OUTRO_S = 2.8            # the designed outro length (2.5-3.0s band)
 TAIL_BREATH_S = 0.6      # natural breath the CONTENT ends on after the payoff
@@ -214,6 +215,8 @@ def _kinetic_cta(plan, product, workdir, len_s, starts_at=None):
             beat=(kinetic.local_beat(plan.get("_beats"), starts_at)
                   if starts_at is not None else None))
         return scrim, (pattern, int(1920 * CTA_Y_FRAC) - pad)
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
     except Exception as e:   # noqa: BLE001 -- static card instead
         from . import degrade
         degrade.note("end card", f"kinetic CTA failed ({e}); static card")
@@ -258,6 +261,8 @@ def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at, content_video=No
         print(f"[outro] {plan.get('id', '?')}: shader backdrop '{fx}'"
               + (f", light ring with the pop at {pop:.2f}s" if pop is not None else ""))
         return seq
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
     except Exception as e:   # noqa: BLE001 -- the still backdrop instead
         from . import degrade
         degrade.note("end card", f"shader backdrop '{fx}' failed ({e}); still backdrop")

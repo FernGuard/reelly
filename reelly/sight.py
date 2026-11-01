@@ -79,6 +79,23 @@ def step_for(duration):
     return 5.0
 
 
+def _private(url):
+    """Is the vision endpoint on this machine or the local network (loopback,
+    a private address, or a .local name)? Under --local-only nothing else is."""
+    import ipaddress
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "") if url else ""
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private
+
+
 def resolve_backend():
     """'codex' | 'local' | None for this run. auto: codex when signed in,
     else the local endpoint when configured."""
@@ -86,7 +103,7 @@ def resolve_backend():
     if mode in ("off", "0", "no"):
         return None
     if config.local_only():             # your own endpoint only, never a cloud CLI
-        return "local" if mode in ("auto", "local") and _local_url() else None
+        return "local" if mode in ("auto", "local") and _private(_local_url()) else None
     if mode == "codex":
         return "codex" if _codex_ready() else None
     if mode == "local":

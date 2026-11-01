@@ -98,3 +98,15 @@ def test_a_cached_bed_follows_the_brand_track(brand, tmp_path, monkeypatch):
     assert audio_post.music(plan, str(out)) == str(out) and out.stat().st_size == size  # reused
     assert audio_post.music({**plan, "music": "story"}, str(out)) == str(out)
     assert audio_post._source_of(str(out)).startswith("brand:story:")        # the plan's pick
+
+
+def test_the_cut_pipelines_prefetch_checks_the_cached_source_too(brand, tmp_path, monkeypatch):
+    # `reelly cut` prefetches every plan's music before finalize: a bed cached
+    # before the brand track existed must be rebuilt there as well
+    monkeypatch.setattr(audio_post, "_fal", lambda *a, **k: pytest.fail("no generation"))
+    out = tmp_path / "p_music.mp3"
+    out.write_bytes(b"legacy bed, no sidecar")
+    plan = {"id": "p", "title": "combo", "duration_s": 3}
+    fut = audio_post.prefetch_music(plan, str(out))
+    assert fut.result() == str(out) and out.read_bytes() != b"legacy bed, no sidecar"
+    assert audio_post._source_of(str(out)).startswith("brand:battle:")

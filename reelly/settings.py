@@ -30,7 +30,7 @@ SETTINGS = [
      "Allow paid API providers for this run (same as --allow-paid)."),
     ("REELLY_LOCAL_ONLY", "Run", "flag", "off", "public",
      "Nothing leaves the machine: no Codex/Claude CLI, no provider, no vision "
-     "check, no model download (same as --local-only)."),
+     "check, no download, no web font (same as --local-only)."),
     ("REELLY_CLIP_LEN", "Run", "text", "20-28", "public",
      "Target clip length in seconds, e.g. 25-30 (same as --length); else the "
      "brand's video.clip_len."),

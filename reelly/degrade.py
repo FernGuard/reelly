@@ -12,6 +12,7 @@ import os
 import threading
 
 _CUT = threading.local()
+_FILE_LOCK = threading.Lock()   # finalize and the overlay thread both add to a cut
 
 
 def begin():
@@ -39,9 +40,19 @@ def write(root, cut_id, notes):
     d = os.path.join(root, "qc", "degraded")
     os.makedirs(d, exist_ok=True)
     p = os.path.join(d, f"{cut_id}.json")
-    with open(p, "w", encoding="utf-8") as f:
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(notes, f, indent=1)
+    os.replace(tmp, p)
     return p
+
+
+def append(root, cut_id, notes):
+    """Add notes to a cut's record (the overlay pass runs on its own thread,
+    after finalize opened the record)."""
+    with _FILE_LOCK:
+        have = read(root, cut_id) or []
+        write(root, cut_id, have + [n for n in notes if n not in have])
 
 
 def read(root, cut_id):

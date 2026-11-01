@@ -44,6 +44,7 @@ import shutil
 import subprocess
 
 from . import config
+from .shaderfx import GPUUnavailable
 
 STAGGER = 0.07          # s between word entrances
 ENTER = 0.46            # s for one word to arrive
@@ -329,6 +330,8 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
             print(f"        kinetic {label or kind}: GPU text + '{tfx}' in one pass, "
                   f"{n} frames in {_time.time() - t0:.1f}s")
             return pat, W, H, PAD + off
+        except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+            raise
         except Exception as e:   # noqa: BLE001 -- the two-step path below
             print(f"        kinetic {label or kind}: fused GPU text failed ({e}); two-step")
     if gputext.enabled():
@@ -343,6 +346,8 @@ def render_line(text, out_dir, dur, size, width, role="headline", hot=None,
             gpu = True
             print(f"        kinetic {label or kind}: GPU text, {n} frames in "
                   f"{_time.time() - t0:.1f}s")
+        except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+            raise
         except Exception as e:   # noqa: BLE001 -- the DOM renderer is the fallback
             from . import degrade
             degrade.note(f"text '{label or kind}'", f"GPU text failed ({e}); browser text "
@@ -386,6 +391,8 @@ def _aura(out_dir, n, cw, ch, fps, pop, enter, label):
         print(f"        kinetic {label}: '{fx}' aura"
               + (f", flare with the pop at {pop:.2f}s" if pop is not None else ""))
         return pat, cw + 2 * off, ch + 2 * off, PAD + off
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
     except Exception as e:   # noqa: BLE001 -- plain kinetic frames instead
         from . import degrade
         degrade.note(f"text '{label}'", f"aura '{fx}' failed ({e}); plain text")

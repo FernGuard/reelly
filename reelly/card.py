@@ -367,7 +367,7 @@ def _html(plan, total, logo_uri, head_size, sub_size, bg_uri=None, pal=None,
           f'<div class="ph" style="background-image:url(file://{bg_uri})"></div></div>'
           f'<div class="mscrim"></div></div>' if bg_uri else "")
     return f"""<!doctype html><html><head><meta charset="utf-8">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600;700&display=swap" rel="stylesheet">
+{_font_link()}
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 html,body{{width:{W}px;height:{H}px;overflow:hidden;background:{pal['ink']};
@@ -532,6 +532,15 @@ def _free_port():
 # back to back sometimes caught the GPU still releasing the last one (no
 # WebGL context / page never ready on a Windows render machine) and cost ~1-2 s each.
 _SHARED = {}
+
+
+def _font_link():
+    """The card's web font, or nothing under --local-only (no font CDN request;
+    the system sans-serif stands in)."""
+    if config.local_only():
+        return ""
+    return ('<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:'
+            'wght@600;700&display=swap" rel="stylesheet">')
 
 
 def _shared_gpu_chrome(flags):

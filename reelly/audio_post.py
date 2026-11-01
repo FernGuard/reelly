@@ -396,7 +396,7 @@ def prefetch_music(plan, out_mp3, project=""):
         fut = _PREFETCH.get(out_mp3)
         if fut is not None and not (fut.done() and fut.exception()):
             return fut
-        if os.path.exists(out_mp3):
+        if os.path.exists(out_mp3) and _cached_ok(plan, out_mp3):
             fut = concurrent.futures.Future()
             fut.set_result(out_mp3)
             _PREFETCH[out_mp3] = fut
@@ -431,19 +431,29 @@ def music(plan, out_mp3, project=""):
             with _PREFETCH_LOCK:
                 if _PREFETCH.get(out_mp3) is fut:
                     del _PREFETCH[out_mp3]
-    if os.path.exists(out_mp3):
-        want = _brand_source(plan)
-        have = _source_of(out_mp3)
-        # the cached bed is reused only while it still comes from what the
-        # cut would pick now: adding or changing the brand's track (or the
-        # plan's "music") rebuilds it, and its stated bpm stays true
-        if want == have or (want is None and have in (None, "bed")):
-            if want:
-                _warn_uncleared(plan)
-            return out_mp3
-        print(f"         music: the cached bed is from {have or 'an older run'}; rebuilding")
-        os.remove(out_mp3)
+    if os.path.exists(out_mp3) and _cached_ok(plan, out_mp3):
+        return out_mp3
     return _music_generate(plan, out_mp3, project)
+
+
+def _cached_ok(plan, out_mp3):
+    """May the cached bed be reused? Only while it still comes from what the
+    cut would pick now: adding or changing the brand's track (or the plan's
+    "music") rebuilds it, so its stated bpm and its rights stay true. A stale
+    bed is removed (and False returned)."""
+    want = _brand_source(plan)
+    have = _source_of(out_mp3)
+    if want == have or (want is None and have in (None, "bed")):
+        if want:
+            _warn_uncleared(plan)
+        return True
+    print(f"         music: the cached bed is from {have or 'an older run'}; rebuilding")
+    for p in (out_mp3, out_mp3 + ".src.json"):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    return False
 
 
 def _brand_source(plan):
@@ -480,7 +490,7 @@ def _music_generate(plan, out_mp3, project=""):
     prefetch pool). Every fresh generation is registered back into the kit,
     so the library warms up organically -- no beds are pre-generated."""
     from . import brandkit
-    if os.path.exists(out_mp3):
+    if os.path.exists(out_mp3) and _cached_ok(plan, out_mp3):
         return out_mp3
     # The brand's OWN soundtrack first: on-brand, $0, and usable on business
     # accounts whose in-app music libraries are restricted.

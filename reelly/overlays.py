@@ -45,9 +45,11 @@ def _head():
     """The page head: with brand fonts in the kit, the brand's own files are
     served locally (no font CDN, works offline) and override every template's
     inline font; without them, exactly the historical HEAD."""
-    from . import brandkit
+    from . import brandkit, config
     css = brandkit.font_css()
     if not css:
+        if config.local_only():         # no font CDN request; system fonts
+            return re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "", HEAD)
         return HEAD
     return re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "",
                   HEAD).replace("</style>", css + "\n</style>")
