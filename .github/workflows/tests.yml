@@ -34,9 +34,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: ffmpeg (Linux)
+      - name: ffmpeg and EGL (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg libegl1 libgles2
       - name: ffmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
