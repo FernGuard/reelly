@@ -10,6 +10,7 @@ ffmpeg and ffprobe must be on your PATH (or set `FFMPEG` / `FFPROBE`).
 | What | Install | Check |
 |---|---|---|
 | ffmpeg / ffprobe | `brew install ffmpeg` · `sudo apt install ffmpeg` · `winget install Gyan.FFmpeg` | `ffmpeg -version` |
+| EGL (Linux only) | `sudo apt install libegl1 libgles2`: MediaPipe (face tracking, person masks) needs it | `reelly setup` |
 | uv | `curl -LsSf https://astral.sh/uv/install.sh \| sh` · Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` or `pip install uv` | `uv --version` |
 | tesseract (PRISM OCR only) | `brew install tesseract` · `sudo apt install tesseract-ocr` · `winget install UB-Mannheim.TesseractOCR` | `tesseract --version` |
 | Chrome | Google Chrome or Chromium, or `CHROME_PATH`: kinetic type, every effect and cards render in it | `uv run reelly setup` |

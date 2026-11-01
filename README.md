@@ -1,5 +1,7 @@
 # Reelly
 
+[![tests](https://github.com/FernGuard/reelly/actions/workflows/tests.yml/badge.svg)](https://github.com/FernGuard/reelly/actions/workflows/tests.yml)
+
 **Long recordings in. Finished vertical clips out.**
 
 ![A raw gameplay recording becomes a finished vertical clip](https://github.com/FernGuard/reelly/releases/download/v0.2.0/reelly-hero.webp)

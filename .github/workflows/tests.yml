@@ -1,0 +1,89 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      record_golden:
+        description: "Record golden frames for these runners (uploaded as artifacts)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: ffmpeg and EGL (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg libegl1 libgles2
+      - name: ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Install
+        run: uv sync --extra depth
+
+      # the optional models (pinned, checksum-verified), cached between runs,
+      # so the depth and person-mask tests run instead of skipping
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/reelly-models
+          key: reelly-models-${{ hashFiles('reelly/models.py') }}
+
+      - name: Models
+        shell: bash
+        run: |
+          REELLY_HOME="$RUNNER_TEMP/reelly-models" uv run reelly models fetch all
+          echo "REELLY_DEPTH_MODEL=$RUNNER_TEMP/reelly-models/models/depth-anything-v2-small/model.onnx" >> "$GITHUB_ENV"
+          echo "REELLY_SEGMENTER=$RUNNER_TEMP/reelly-models/models/selfie-segmenter/selfie_segmenter.tflite" >> "$GITHUB_ENV"
+
+      - name: Setup report
+        run: uv run reelly setup
+
+      - name: Tests
+        run: uv run --with pytest python -m pytest tests -q -rs -p no:cacheprovider
+
+      # A runner whose renderer has no golden references records its own, as
+      # an artifact to review and commit (renderer strings change with runner
+      # images; until then the golden test skips there).
+      - name: Golden frames for this runner
+        id: golden
+        shell: bash
+        run: |
+          out=$(uv run python -m reelly.golden 2>&1 | tail -15)
+          echo "$out"
+          if [ "${{ inputs.record_golden }}" = "true" ] || echo "$out" | grep -q "no references for this tier"; then
+            uv run python -m reelly.golden --update | tail -2
+            echo "recorded=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload golden frames
+        if: steps.golden.outputs.recorded == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-${{ matrix.os }}
+          path: tests/golden/

@@ -13,13 +13,12 @@
 
 - Transcription beyond Apple Silicon.
 - Text behind the subject and depth parallax on the GPU (both run on the CPU today).
-- Golden-frame references for more GPU tiers, recorded in CI.
+- Golden-frame references for more GPU tiers (CI records them for its runners).
 
 - Broader non-Apple transcription support.
 - Clearer command-level capability and cost preflight.
 - Reproducible evaluation fixtures using synthetic media.
 - Better optional-dependency grouping for PRISM, OCR, and diarization.
-- Continuous integration across supported operating systems.
 
 ## Later
 

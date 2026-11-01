@@ -370,6 +370,18 @@ def local_only():
     return env_bool("REELLY_LOCAL_ONLY")
 
 
+# renderers that draw on the CPU: Chrome's SwiftShader, Windows' WARP (the
+# "Microsoft Basic Render Driver" on GPU-less machines and CI), Mesa llvmpipe
+_SOFTWARE_RENDERERS = ("swiftshader", "basic render driver", "warp", "llvmpipe", "softpipe",
+                       "software")
+
+
+def is_software_renderer(name):
+    """Is this WebGL renderer string a CPU renderer (no real GPU)?"""
+    n = (name or "").lower()
+    return not n or "no webgl" in n or any(s in n for s in _SOFTWARE_RENDERERS)
+
+
 def gpu_mode():
     """REELLY_GPU = auto | gpu | software (anything else: auto)."""
     m = os.environ.get("REELLY_GPU", "auto").strip().lower()
@@ -490,7 +502,7 @@ def _gpu_check(have_chrome):
                 contextlib.redirect_stdout(io.StringIO()):     # keep --json clean
             shaderfx.render_frames(html, td, 16, 16, 1 / 30, 30)
         r = shaderfx._RENDERER[0] or "unknown"
-        soft = "swiftshader" in r.lower()
+        soft = is_software_renderer(r)
         return {"id": "GPU effects", "status": "ok" if not soft else "skip",
                 "detail": (f"{r} (REELLY_GPU={gpu_mode()})" if not soft else
                            f"software renderer ({r}): effects work, slower; "
