@@ -51,14 +51,24 @@ jobs:
         run: uv run reelly setup
 
       - name: Tests
-        run: uv run --with pytest python -m pytest tests -q -p no:cacheprovider
+        run: uv run --with pytest python -m pytest tests -q -rs -p no:cacheprovider
 
-      - name: Record golden frames
-        if: ${{ inputs.record_golden }}
-        run: uv run python -m reelly.golden --update
+      # A runner whose renderer has no golden references records its own, as
+      # an artifact to review and commit (renderer strings change with runner
+      # images; until then the golden test skips there).
+      - name: Golden frames for this runner
+        id: golden
+        shell: bash
+        run: |
+          out=$(uv run python -m reelly.golden 2>&1 | tail -15)
+          echo "$out"
+          if [ "${{ inputs.record_golden }}" = "true" ] || echo "$out" | grep -q "no references for this tier"; then
+            uv run python -m reelly.golden --update | tail -2
+            echo "recorded=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload golden frames
-        if: ${{ inputs.record_golden }}
+        if: steps.golden.outputs.recorded == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: golden-${{ matrix.os }}

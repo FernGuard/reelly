@@ -511,3 +511,13 @@ def test_forced_gpu_fails_instead_of_degrading(monkeypatch, tmp_path):
     with pytest.raises(shaderfx.GPUUnavailable):
         finalize._ambient_pass("raw.mp4", "a.mp4", {"reframe": 1.0, "_ctrl": {"events": []}},
                                10.0, str(tmp_path), None)
+
+
+def test_cpu_renderers_are_recognised():
+    for r in ("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)",
+              "ANGLE (Microsoft, Microsoft Basic Render Driver (0x0000008C) Direct3D11, D3D11)",
+              "llvmpipe (LLVM 17.0.6, 256 bits)", "no WebGL", ""):
+        assert config.is_software_renderer(r), r
+    for r in ("ANGLE (NVIDIA, NVIDIA GeForce RTX 5090 (0x00002B85) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+              "ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)"):
+        assert not config.is_software_renderer(r), r

@@ -646,7 +646,7 @@ async def _log_renderer(b):
     r = r or "unknown"
     print(f"[gpu  ] {r}")
     if config.gpu_mode() == "gpu" and \
-            ("swiftshader" in r.lower() or "no webgl" in r.lower() or "software" in r.lower()):
+            config.is_software_renderer(r):
         raise GPUUnavailable(f"REELLY_GPU=gpu but Chrome rendered with {r}")
     _RENDERER[0] = r
 
