@@ -5,7 +5,7 @@ All notable changes to Reelly. The format follows
 [semantic versioning](https://semver.org/) (before 1.0, a minor version may
 change behaviour; every such change is listed under "Upgrading").
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-11-01
 
 Reelly 0.2.0 turns a recording into clips that look designed, not assembled:
 type that moves to the music, effects that react to what happens in the cut,
