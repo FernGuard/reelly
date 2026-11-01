@@ -457,13 +457,34 @@ def active(kind="endcard"):
     return lst[0] if lst else None
 
 
+_TRY = {}   # preset id -> params tried for one preview (`reelly fx preview --set`)
+
+
 def brand_params(pid):
-    """The brand kit's parameter overrides for a preset."""
+    """The brand kit's parameter overrides for a preset (plus any values a
+    preview is trying out)."""
     p = load_preset(pid)
+    out = {}
     for bid, params in _brand_entries(p["placement"]):
         if bid == pid:
-            return params
-    return {}
+            out = dict(params)
+            break
+    return {**out, **_TRY.get(pid, {})}
+
+
+def resolve(name, placement=None):
+    """A preset id from "placement/name" or a bare name ("embers"); a bare
+    name used by several placements ("smoke") needs the placement."""
+    if "/" in name:
+        load_preset(name)
+        return name
+    hits = [p for p in presets() if p.split("/", 1)[1] == name
+            and (placement is None or p.startswith(placement + "/"))]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise EffectError(f"no preset {name!r} (have: {', '.join(presets())})")
+    raise EffectError(f"{name!r} is in several placements; say which: {', '.join(hits)}")
 
 
 def _rgb01(hex_):

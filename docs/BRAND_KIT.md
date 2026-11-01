@@ -110,7 +110,8 @@ placement off.
 | `text` | `smoke` | around kinetic text |
 | `finish` | `folk-print` (experimental) | a print finish over the space around the picture |
 
-Every preset and parameter is described in [EFFECTS.md](EFFECTS.md).
+Every preset and parameter is described in [EFFECTS.md](EFFECTS.md);
+`reelly fx preview NAME --brand mybrand` shows one in your colours first.
 
 ### music and sfx
 

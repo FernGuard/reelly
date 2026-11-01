@@ -409,6 +409,15 @@ def main(argv=None):
     bm.add_argument("name", nargs="?", help="brand name (default: the active brand)")
     bm.add_argument("--write", action="store_true",
                     help="write it (keeps brand.json.bak); default: print the result")
+    fxp = sub.add_parser("fx", help="effect presets: list them, or preview one as an MP4")
+    fxs = fxp.add_subparsers(dest="fx_cmd", required=True)
+    fxs.add_parser("list", help="every preset by placement, with its tunable parameters")
+    fv = fxs.add_parser("preview", help="render a preset over a neutral stand-in cut")
+    fv.add_argument("name", help="preset: embers, ambient/smoke, endcard/smoke, ...")
+    fv.add_argument("--out", help="MP4 path (default fx-<placement>-<name>.mp4)")
+    fv.add_argument("--seconds", type=float, default=4.0, help="length, 1 to 15 (default 4)")
+    fv.add_argument("--set", action="append", default=[], metavar="u_name=value",
+                    help="try a parameter value (repeatable); numbers or JSON lists")
     cf = sub.add_parser("config", help="every REELLY_* setting and its value in effect")
     cf.add_argument("--all", action="store_true", help="include advanced settings")
     md = sub.add_parser("models", help="optional local models: status, or `fetch NAME`")
@@ -499,6 +508,25 @@ def main(argv=None):
             raise SystemExit("hooks: no signed-in subscription brain (codex) and paid "
                              "brains are off; nothing to write with")
         hooks.rewrite(direct.resolve_project(args.project), brain, cut_id=args.cut)
+        return
+    if args.cmd == "fx":
+        import json as _json
+        from . import fxpreview, shaderfx
+        if args.fx_cmd == "list":
+            print(fxpreview.listing())
+            return
+        params = {}
+        for kv in args.set:
+            k, _, v = kv.partition("=")
+            try:
+                params[k.strip()] = _json.loads(v)
+            except ValueError:
+                params[k.strip()] = v.strip()              # a #RRGGBB colour
+        try:
+            out = fxpreview.preview(args.name, args.out, args.seconds, params or None)
+        except shaderfx.EffectError as e:
+            raise SystemExit(f"fx preview: {e}")
+        print(f"[fx] preview: {out}")
         return
     if args.cmd == "config":
         from . import settings
