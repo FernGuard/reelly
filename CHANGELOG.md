@@ -5,6 +5,18 @@ All notable changes to Reelly. The format follows
 [semantic versioning](https://semver.org/) (before 1.0, a minor version may
 change behaviour; every such change is listed under "Upgrading").
 
+## [Unreleased]
+
+### Added
+- Continuous integration: the full suite, golden frames included, runs on
+  Linux, macOS and Windows for every push and pull request. A runner whose
+  renderer has no golden references records them as an artifact.
+
+### Fixed
+- Windows' WARP ("Microsoft Basic Render Driver") and Mesa llvmpipe count as
+  CPU renderers: `reelly setup` says so, and `REELLY_GPU=gpu` refuses them.
+- Linux setup documents EGL (`libegl1 libgles2`), which MediaPipe needs.
+
 ## [0.2.0] - 2026-11-01
 
 Reelly 0.2.0 turns a recording into clips that look designed, not assembled:

@@ -31,7 +31,8 @@ New effects are a `.glsl` file plus a preset (see [docs/EFFECTS.md](docs/EFFECTS
 Add a case to `reelly/golden.py`, record references with
 `python -m reelly.golden --update` on your machine, and say which renderer
 tier you recorded in the pull request. A change that alters an existing
-effect's look must update its references in the same pull request.
+effect's look must update its references in the same pull request. CI checks
+the Linux, macOS and Windows runners' references on every pull request.
 
 If you change a setting, keep `reelly/settings.py` current and regenerate
 `docs/SETTINGS.md` (`python -m reelly.settings --markdown > docs/SETTINGS.md`).
