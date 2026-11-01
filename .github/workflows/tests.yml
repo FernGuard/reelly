@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      record_golden:
+        description: "Record golden frames for these runners (uploaded as artifacts)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+      - name: ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Install
+        run: uv sync
+
+      - name: Setup report
+        run: uv run reelly setup
+
+      - name: Tests
+        run: uv run --with pytest python -m pytest tests -q -p no:cacheprovider
+
+      - name: Record golden frames
+        if: ${{ inputs.record_golden }}
+        run: uv run python -m reelly.golden --update
+
+      - name: Upload golden frames
+        if: ${{ inputs.record_golden }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-${{ matrix.os }}
+          path: tests/golden/
