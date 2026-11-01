@@ -62,7 +62,7 @@ def beat(stage):
         json.dump({"cmd": _current["cmd"], "project": _current["project"],
                    "pid": os.getpid(), "started": _current["started"],
                    "beat": time.time(), "stage": str(stage)[:160]},
-                  open(_current["path"], "w"))
+                  open(_current["path"], "w", encoding="utf-8"))
     except OSError:
         pass
 
@@ -98,7 +98,7 @@ def report():
     for fn in (sorted(os.listdir(RUNS_DIR)) if os.path.isdir(RUNS_DIR) else []):
         p = os.path.join(RUNS_DIR, fn)
         try:
-            r = json.load(open(p))
+            r = json.load(open(p, encoding="utf-8"))
         except (ValueError, OSError):
             continue
         alive = _pid_alive(r.get("pid"))

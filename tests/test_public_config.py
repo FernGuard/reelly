@@ -8,6 +8,14 @@ import pytest
 from reelly import config
 
 
+@pytest.fixture(autouse=True)
+def _paid_calls_on(monkeypatch):
+    """These tests exercise the paid-provider paths (mocked, nothing bills).
+    Reelly is zero-paid by default, so they opt in the way a real run must."""
+    monkeypatch.setenv("REELLY_ALLOW_PAID", "1")
+
+
+
 SECRET = "sk-test-do-not-commit-this-value-xyz"
 
 
@@ -67,6 +75,7 @@ def test_doctor_never_prints_secrets(monkeypatch, tmp_path, capsys):
     assert "sk-test" not in out
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; Windows uses ACLs")
 def test_write_user_config_is_owner_only(tmp_path):
     path = tmp_path / "config.json"
     config.write_user_config({"openai_api_key": "x"}, path=str(path))

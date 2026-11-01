@@ -8,6 +8,13 @@ Resolution order for each provider:
 
 `reelly setup` prints what is missing and where to get it. It never prints
 key values.
+
+ZERO-PAID BY DEFAULT: providers that bill per call (Gemini, OpenAI, FAL,
+Anthropic) are OFF unless the run opts in with `--allow-paid` or
+REELLY_ALLOW_PAID=1. With paid calls off, get_key() returns None for those
+providers even when a key is present, so every paid path takes the same
+"no key" branch it always had. Subscription CLIs (codex, claude) and local
+tools are not paid providers and stay on.
 """
 import json
 import os
@@ -15,7 +22,10 @@ import shutil
 import stat
 import sys
 
-HOME = os.path.expanduser("~/.reelly")
+# REELLY_HOME moves Reelly's per-machine folder (config, kit, caches, runs)
+# without touching the OS home: on Windows, Chrome and other tools break when
+# USERPROFILE is redirected, so isolation must not rely on that.
+HOME = os.path.expanduser(os.environ.get("REELLY_HOME") or "~/.reelly")
 USER_CFG = os.path.join(HOME, "config.json")
 
 # --- binaries ---------------------------------------------------------------
@@ -109,7 +119,7 @@ def load_user_config():
     if not os.path.exists(path):
         return {}
     try:
-        data = json.load(open(path))
+        data = json.load(open(path, encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (ValueError, OSError):
         return {}
@@ -119,6 +129,10 @@ DEFAULT_PROJECTS = _default_projects()
 WHISPER_MODEL = "mlx-community/whisper-medium.en-mlx"
 GEMINI_MODEL = "gemini-3.5-flash"  # 2.5-flash retired by Google 2026-07-09
 CLAUDE_MODEL = "claude-sonnet-5"
+# Model for the subscription Codex brain (`--brain codex`). The CLI default can
+# name a model the installed CLI is too old for, so Reelly passes one it knows
+# works with a ChatGPT sign-in. Override with REELLY_CODEX_MODEL.
+CODEX_MODEL = "gpt-5.6-sol"
 PRISM_WORK = os.path.join(HOME, "prism")
 
 # Honor a system CA bundle when present (corporate SSL interception).
@@ -135,15 +149,15 @@ PROVIDERS = {
         "label": "Gemini",
         "used_for": "visual review, occupancy, QC, sizzle survey",
         "url": "https://aistudio.google.com/apikey",
-        "required": True,
+        "required": False,
     },
     "openai": {
         "env": ("OPENAI_API_KEY",),
         "config": ("openai_api_key",),
         "label": "OpenAI",
-        "used_for": "editor brain (default --brain gpt)",
+        "used_for": "editor brain (--brain gpt)",
         "url": "https://platform.openai.com/api-keys",
-        "required": True,
+        "required": False,
     },
     "fal-ai": {
         "env": ("FAL_KEY", "FAL_API_KEY"),
@@ -151,7 +165,7 @@ PROVIDERS = {
         "label": "FAL",
         "used_for": "music beds, SFX, motion / image-to-video",
         "url": "https://fal.ai/dashboard/keys",
-        "required": True,
+        "required": False,
     },
     "anthropic": {
         "env": ("ANTHROPIC_API_KEY",),
@@ -172,14 +186,49 @@ PROVIDERS = {
 }
 
 
+# Providers that bill per call. Everything else (Hugging Face model downloads,
+# subscription CLIs, local tools) costs nothing per run.
+PAID_PROVIDERS = frozenset({"google-genai", "openai", "fal-ai", "anthropic"})
+
+
 class MissingKeyError(RuntimeError):
     """A cloud provider key was requested but the user has not supplied one."""
 
 
+class PaidDisabledError(MissingKeyError):
+    """A paid provider was requested while paid calls are off (the default).
+
+    Subclasses MissingKeyError so every caller that already degrades on a
+    missing key degrades the same way here."""
+
+
+def paid_allowed():
+    """True only when this run opted in to per-call billing.
+
+    REELLY_ALLOW_PAID=1 (what `--allow-paid` sets) or "allow_paid": true in
+    ~/.reelly/config.json. Read at call time so tests and the CLI can flip it."""
+    env = os.environ.get("REELLY_ALLOW_PAID", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    return load_user_config().get("allow_paid") is True
+
+
+def paid_blocked(name):
+    """True when `name` bills per call and this run has not opted in (or
+    the run is local-only: no provider at all)."""
+    return name in PAID_PROVIDERS and (not paid_allowed() or local_only())
+
+
 def get_key(name):
-    """Return the key for `name`, or None. Never prints the value."""
+    """Return the key for `name`, or None. Never prints the value.
+
+    Paid providers return None while paid calls are off, whatever is set."""
     spec = PROVIDERS.get(name)
     if spec is None:
+        return None
+    if paid_blocked(name) or local_only():
         return None
     for var in spec["env"]:
         val = os.environ.get(var, "").strip()
@@ -198,6 +247,27 @@ def get_key(name):
 
 def have_key(name):
     return bool(get_key(name))
+
+
+def _key_present_ignoring_gate(name):
+    """Whether a key is configured at all (setup's report only; the value is
+    never returned or printed)."""
+    spec = PROVIDERS.get(name) or {}
+    if any(os.environ.get(v, "").strip() for v in spec.get("env", ())):
+        return True
+    cfg = load_user_config()
+    nested = cfg.get("keys") if isinstance(cfg.get("keys"), dict) else {}
+    return any(str(cfg.get(k) or nested.get(k) or "").strip()
+               for k in spec.get("config", ())) or bool(nested.get(name))
+
+
+def paid_disabled_message(name):
+    label = PROVIDERS.get(name, {}).get("label", name)
+    used = PROVIDERS.get(name, {}).get("used_for", "")
+    return (f"{label} ({name}) bills per call and paid calls are off: Reelly "
+            f"runs zero-paid by default. Re-run with --allow-paid (or "
+            f"REELLY_ALLOW_PAID=1) to let this run bill your own key."
+            + (f"\nUsed for: {used}" if used else ""))
 
 
 def missing_key_message(name):
@@ -221,8 +291,11 @@ def missing_key_message(name):
 def provider_key(name):
     """API key for a cloud provider. Never stored in this repo.
 
-    Raises MissingKeyError with the exact env var and signup URL when absent.
+    Raises PaidDisabledError while paid calls are off, MissingKeyError with
+    the exact env var and signup URL when the key is absent.
     """
+    if paid_blocked(name):
+        raise PaidDisabledError(paid_disabled_message(name))
     key = get_key(name)
     if not key:
         raise MissingKeyError(missing_key_message(name))
@@ -238,8 +311,102 @@ def provider_key(name):
 # this.
 _HW_ENCODE = None  # None = not probed yet; True/False after the one-time probe
 
-_SW_INTERMEDIATE_ARGS = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
+# crf 16 (was 21): every social cut is re-encoded at least twice after this
+# (text burn, gfx pass), and each lossy generation compounds. The raw is a
+# throwaway file, so spending bits here costs disk, not quality.
+_SW_INTERMEDIATE_ARGS = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "16"]
 _HW_INTERMEDIATE_ARGS = ["-c:v", "h264_videotoolbox", "-b:v", "10M", "-allow_sw", "1"]
+
+
+OUTPUT_FPS_ALLOWED = (24, 25, 30, 50, 60)
+
+
+def output_fps():
+    """Frame rate of the social deliverables: REELLY_FPS, then the brand
+    kit's video.fps, then 30. A game captured at 60 and shipped at 30 loses every
+    other frame, which reads as choppy on fast play (falling blocks, hits);
+    60 keeps it as smooth as it was recorded. TikTok, Reels and Shorts all
+    accept 60."""
+    v = os.environ.get("REELLY_FPS", "").strip() or None
+    if v is None:
+        try:
+            from . import brandkit
+            v = brandkit.video("fps")
+        except Exception:   # noqa: BLE001 -- no kit, no override
+            v = None
+    try:
+        f = int(float(v))
+    except (TypeError, ValueError):
+        return 30
+    return f if f in OUTPUT_FPS_ALLOWED else 30
+
+
+# The encodes a viewer actually sees (text burn, outro segment, gfx pass).
+# One setting for all three so the outro still concatenates with -c copy.
+# Was veryfast/crf 20: the platforms re-encode every upload, and a richer
+# upload survives their pass with more detail (fine HUD text, block edges).
+_FINAL_ENCODE_ARGS = ["-c:v", "libx264", "-preset", "medium", "-crf", "17",
+                      "-pix_fmt", "yuv420p"]
+
+
+def final_encode_args():
+    return list(_FINAL_ENCODE_ARGS)
+
+
+_ON, _OFF = ("1", "on", "yes", "true"), ("0", "off", "no", "false")
+
+
+def env_bool(name, default=False):
+    """One parser for every on/off setting: 1/on/yes/true and 0/off/no/false
+    (any case); unset or anything else = default."""
+    v = os.environ.get(name, "").strip().lower()
+    return True if v in _ON else False if v in _OFF else default
+
+
+def local_only():
+    """REELLY_LOCAL_ONLY=1 (or `reelly --local-only`): nothing leaves the
+    machine. No subscription CLI (Codex, Claude), no paid provider, no
+    vision check; every step uses its local path or is skipped."""
+    return env_bool("REELLY_LOCAL_ONLY")
+
+
+def gpu_mode():
+    """REELLY_GPU = auto | gpu | software (anything else: auto)."""
+    m = os.environ.get("REELLY_GPU", "auto").strip().lower()
+    return m if m in ("auto", "gpu", "software") else "auto"
+
+
+# auto mode drops to the software GPU for the rest of the run after the
+# hardware path could not give a WebGL context (a VM, a GPU-less session)
+_GPU_FAILED = [False]
+
+
+def gpu_failed():
+    """auto mode: the hardware GPU did not work; use the software GPU now."""
+    _GPU_FAILED[0] = True
+
+
+def webgl_flags():
+    """Chrome flags for WebGL effect pages. REELLY_GPU = auto | gpu | software.
+
+    Hardware path per OS through ANGLE: Direct3D 11 on Windows, Metal on
+    macOS, OpenGL on Linux. Measured on the Windows worker (2026-10-30,
+    running as SYSTEM): Chrome takes the Intel iGPU unless asked for the
+    high-performance one; with it, an RTX 5090 drew + read back a full
+    1080x1920 smoke frame at 635 fps (SwiftShader 23.5, Intel 165). auto =
+    the hardware GPU, falling back to the software GPU (SwiftShader, the
+    same pixels on every machine) when it gives no WebGL context."""
+    software = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
+    mode = gpu_mode()
+    if mode == "software" or (mode == "auto" and _GPU_FAILED[0]):
+        return software
+    if os.name == "nt":
+        backend = ["--use-angle=d3d11", "--force_high_performance_gpu"]
+    elif sys.platform == "darwin":
+        backend = ["--use-angle=metal"]
+    else:
+        backend = ["--use-angle=gl"]
+    return [*backend, "--use-gl=angle", "--ignore-gpu-blocklist"]
 
 
 def _videotoolbox_works():
@@ -306,6 +473,33 @@ def _bin_ok(path):
     return bool(path) and (os.path.isfile(path) or shutil.which(path))
 
 
+def _gpu_check(have_chrome):
+    """Render one tiny WebGL frame and report the renderer Chrome really used."""
+    if not have_chrome:
+        return {"id": "GPU effects", "status": "missing",
+                "detail": "needs Chrome: kinetic text and every effect render in it"}
+    import tempfile
+    try:
+        from . import shaderfx
+        shaderfx._RENDERER[0] = None
+        html = shaderfx._page("precision highp float;\nvoid main(){ gl_FragColor = vec4(1.0); }",
+                              16, 16, {"u_res": (16, 16)})
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory(prefix="reelly-setup-") as td, \
+                contextlib.redirect_stdout(io.StringIO()):     # keep --json clean
+            shaderfx.render_frames(html, td, 16, 16, 1 / 30, 30)
+        r = shaderfx._RENDERER[0] or "unknown"
+        soft = "swiftshader" in r.lower()
+        return {"id": "GPU effects", "status": "ok" if not soft else "skip",
+                "detail": (f"{r} (REELLY_GPU={gpu_mode()})" if not soft else
+                           f"software renderer ({r}): effects work, slower; "
+                           f"REELLY_GPU={gpu_mode()}")}
+    except Exception as e:   # noqa: BLE001 -- setup must always print
+        return {"id": "GPU effects", "status": "missing",
+                "detail": f"WebGL test render failed ({str(e)[:120]})"}
+
+
 def doctor(as_json=False):
     """Print a machine check. Returns process exit code. Never prints secrets."""
     checks = []
@@ -332,19 +526,98 @@ def doctor(as_json=False):
         "id": "chrome",
         "status": "ok" if ch and _bin_ok(ch) else "missing",
         "detail": (ch if ch and _bin_ok(ch)
-                   else "not found (needed for overlay cards). Install Chrome or set CHROME_PATH"),
+                   else "not found (needed for kinetic text, effects and cards). "
+                        "Install Chrome or set CHROME_PATH"),
     })
 
+    try:
+        from . import face as _face
+        fd_ok = _face.mediapipe_usable()
+    except Exception:   # noqa: BLE001 -- mediapipe not installed / broken
+        fd_ok = False
+    checks.append({
+        "id": "face detection",
+        "status": "ok" if fd_ok else "skip",
+        "detail": ("mediapipe runs in this session" if fd_ok else
+                   "unavailable in this session (no GPU service, e.g. over "
+                   "ssh, or mediapipe missing): renders continue without "
+                   "face tracking"),
+    })
+    paid_on = paid_allowed()
+    checks.append({
+        "id": "paid calls",
+        "status": "ok",
+        "detail": ("ON for this run (--allow-paid / REELLY_ALLOW_PAID): paid "
+                   "providers below may bill your keys" if paid_on else
+                   "OFF (default): no provider below bills; pass --allow-paid "
+                   "to opt in for one run"),
+    })
+    for tool in ("codex", "claude"):
+        found = shutil.which(tool)
+        checks.append({
+            "id": f"{tool} CLI", "status": "ok" if found else "skip",
+            "detail": (f"{found} (subscription editor brain, --brain {tool})"
+                       if found else f"optional: subscription editor brain "
+                                     f"(--brain {tool})"),
+        })
+    if local_only():
+        checks.append({"id": "local-only", "status": "ok",
+                       "detail": "ON: no CLI, provider, vision or download call leaves this machine"})
+
+    # effects and safety: what the look and the gates need
+    checks.append(_gpu_check(ch and _bin_ok(ch)))
+    try:
+        import onnxruntime  # noqa: F401
+        ort = True
+    except ImportError:
+        ort = False
+    from . import models as _models, iris as _iris
+    for key, path, what in _models.status():
+        need_ort = key == "depth" and not ort
+        checks.append({
+            "id": f"model: {key}",
+            "status": "ok" if path and not need_ort else "skip",
+            "detail": (path if path and not need_ort else
+                       f"optional, {what}: reelly models fetch {key}"
+                       + (" and uv sync --extra depth" if need_ort else "")),
+        })
+    app = _iris.find()
+    checks.append({
+        "id": "EA IRIS",
+        "status": "ok" if app else "skip",
+        "detail": (f"{app} (photosensitivity gate)" if app else
+                   "optional: the flash gate always runs; IRIS adds red-flash and "
+                   "pattern checks (Windows build: github.com/electronicarts/IRIS, "
+                   "then REELLY_IRIS or <REELLY_HOME>/tools/iris/)"),
+    })
+    try:
+        from . import brandkit as _bk
+        bname = _bk.brand_name()
+        if bname:
+            errs, warns = _bk.validate(bname)
+            checks.append({
+                "id": f"brand: {bname}",
+                "status": "ok" if not errs else "missing",
+                "detail": ("brand.json is valid" + (f" ({len(warns)} warning(s))" if warns else "")
+                           if not errs else f"{len(errs)} error(s): reelly brand check {bname}"),
+            })
+    except Exception:   # noqa: BLE001 -- setup must always print
+        pass
+
     for name, spec in PROVIDERS.items():
-        present = have_key(name)
-        if present:
+        present = have_key(name) if not paid_blocked(name) else bool(
+            _key_present_ignoring_gate(name))
+        if present and paid_blocked(name):
+            status, detail = "skip", (f"key present, idle while paid calls "
+                                      f"are off; {spec['used_for']}")
+        elif present:
             status, detail = "ok", spec["used_for"]
         elif spec["required"]:
             status = "missing"
-            detail = (f"MISSING — {spec['used_for']}. Get a key at {spec['url']} "
+            detail = (f"MISSING: {spec['used_for']}. Get a key at {spec['url']} "
                       f"then: export {spec['env'][0]}=your-key")
         else:
-            status, detail = "skip", f"optional — {spec['used_for']}"
+            status, detail = "skip", f"optional: {spec['used_for']}"
         checks.append({"id": spec["env"][0], "status": status, "detail": detail})
 
     if as_json:
@@ -358,12 +631,9 @@ def doctor(as_json=False):
             mark = {"ok": "ok     ", "missing": "MISSING", "skip": "skip   "}[c["status"]]
             print(f"  {c['id']:<{width}}  {mark}  {c['detail']}")
         print()
-        print("Required keys (create them, then export — do not commit them):")
-        for name, spec in PROVIDERS.items():
-            if spec["required"]:
-                print(f"  {spec['env'][0]:<22} {spec['url']}")
+        print("No key is required: Reelly runs zero-paid by default.")
         print()
-        print("Optional keys:")
+        print("Optional keys (paid ones bill only with --allow-paid):")
         for name, spec in PROVIDERS.items():
             if not spec["required"]:
                 print(f"  {spec['env'][0]:<22} {spec['url']}")
@@ -381,7 +651,7 @@ def write_user_config(data, path=None):
     path = path or USER_CFG
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
         fh.write("\n")
     os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)

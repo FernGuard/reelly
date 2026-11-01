@@ -29,7 +29,7 @@ def delivery_targets(project_root, cli_for=None):
         targets = [t.strip() for t in cli_for.split(",") if t.strip()]
     else:
         p = os.path.join(project_root, "delivery.json")
-        targets = (json.load(open(p)).get("targets", DEFAULT_TARGETS)
+        targets = (json.load(open(p, encoding="utf-8")).get("targets", DEFAULT_TARGETS)
                    if os.path.exists(p) else DEFAULT_TARGETS)
     bad = [t for t in targets if t not in PLATFORMS]
     if bad:
@@ -68,7 +68,7 @@ def _load_product_overrides():
     if not os.path.exists(p):
         return
     try:
-        data = json.load(open(p))
+        data = json.load(open(p, encoding="utf-8"))
         for key, override in (data or {}).items():
             merged = dict(PRODUCTS.get(key, {}))
             merged.update(override or {})
@@ -86,7 +86,7 @@ def brand_logo(product_key):
     if not os.path.exists(cfg):
         return None
     try:
-        logos = json.load(open(cfg)).get("logos") or {}
+        logos = json.load(open(cfg, encoding="utf-8")).get("logos") or {}
     except (ValueError, OSError):
         return None
     key = ALIASES.get(product_key, product_key)
@@ -164,5 +164,5 @@ def description_md(product_key, plan, path, targets=None, account=None,
     lines += ["## Clip facts", "",
               f"- Duration: {plan['duration_s']}s | format {plan.get('format', '?')}",
               f"- Says: {plan.get('transcript', '')[:200]}", ""]
-    open(path, "w").write("\n".join(lines))
+    open(path, "w", encoding="utf-8").write("\n".join(lines))
     return path

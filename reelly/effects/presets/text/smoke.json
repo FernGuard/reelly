@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "effect": "smoke_aura",
+  "description": "A smoky glow around kinetic text that flares when the hot word pops.",
+  "params": {},
+  "render": {
+    "blur_px": 12,
+    "text_off": 44
+  },
+  "lite": {
+    "render": {
+      "blur_px": 12,
+      "text_off": 44,
+      "scale": 0.25
+    }
+  }
+}

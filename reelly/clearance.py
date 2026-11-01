@@ -129,7 +129,7 @@ def write_guest_blocks(root, sents):
     json.dump({"note": "SUSPECTED third-party content windows from transcript "
                        "ownership cues; heuristic, human-editable. Blocks are "
                        "excluded from planning until removed.",
-               "blocks": blocks}, open(path, "w"), indent=1)
+               "blocks": blocks}, open(path, "w", encoding="utf-8"), indent=1)
     if blocks:
         print(f"[clear] {len(blocks)} SUSPECTED third-party window(s) -> "
               f"guest_blocks.json (excluded from planning; delete a block "
@@ -146,7 +146,7 @@ def _load_json(root, name):
     if not os.path.exists(p):
         return None
     try:
-        return json.load(open(p))
+        return json.load(open(p, encoding="utf-8"))
     except (ValueError, OSError):
         print(f"[clear] WARNING: unreadable {name}; treating as absent")
         return None
@@ -173,7 +173,7 @@ def sync_voices(analysis_dir, turns_artifact):
     existing = {}
     if os.path.exists(path):
         try:
-            existing = json.load(open(path)) or {}
+            existing = json.load(open(path, encoding="utf-8")) or {}
         except (ValueError, OSError):
             print("[clear] WARNING: unreadable voices.json; rebuilding defaults")
     by_id = {sp.get("id"): sp for sp in existing.get("speakers", [])
@@ -183,7 +183,7 @@ def sync_voices(analysis_dir, turns_artifact):
                                "by": None, "on": None})
     ordered = [by_id[k] for k in sorted(by_id)]
     json.dump({"note": VOICES_NOTE, "speakers": ordered},
-              open(path, "w"), indent=1)
+              open(path, "w", encoding="utf-8"), indent=1)
     uncleared = [sp["id"] for sp in ordered if not sp.get("cleared", False)]
     if uncleared:
         print(f"[clear] voices.json: {len(uncleared)} speaker(s) NOT cleared "
@@ -227,7 +227,7 @@ def mark_cleared(root, speaker, cleared, by=None, note=None):
     if note:
         entry["note"] = note
     data["speakers"].sort(key=lambda sp: sp.get("id") or "")
-    json.dump(data, open(path, "w"), indent=1)
+    json.dump(data, open(path, "w", encoding="utf-8"), indent=1)
     state = "CLEARED" if cleared else "NOT cleared (blocked)"
     print(f"[clear] {speaker}: {state}"
           + (f" by {entry['by']}" if entry["by"] else "")

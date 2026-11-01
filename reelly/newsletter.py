@@ -48,7 +48,7 @@ def run(project, tag=None, product="video"):
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     text = " ".join(w["t"] for w in words)[:24000]
     tp = os.path.join(root, "analysis", "topics.json")
-    topics = json.load(open(tp)) if os.path.exists(tp) else []
+    topics = json.load(open(tp, encoding="utf-8")) if os.path.exists(tp) else []
     tmap = "\n".join(f"- {c['text'][:100]}" for c in topics[:25])
     p = PRODUCTS[product]
     link_line = f"Built live with {p['name']}: {link(product, 'substack')}"
@@ -72,7 +72,7 @@ def run(project, tag=None, product="video"):
     out = os.path.join(root, "deliverables", "substack")
     os.makedirs(out, exist_ok=True)
     path = os.path.join(out, "NEWSLETTER.md")
-    open(path, "w").write("\n".join([
+    open(path, "w", encoding="utf-8").write("\n".join([
         f"# {title}", "", f"*{d.get('subtitle', '')}*", "", body, "",
         "---", "DRAFT by Reelly; human review required before publishing.", ""]))
     print(f"[note ] -> {path} ('{title}')")

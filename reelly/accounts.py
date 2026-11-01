@@ -36,7 +36,7 @@ def registry():
     p = os.path.join(config.HOME, "accounts.json")
     if os.path.exists(p):
         try:
-            for name, prof in json.load(open(p)).items():
+            for name, prof in json.load(open(p, encoding="utf-8")).items():
                 merged = reg.get(name, {})
                 merged.update(prof or {})
                 reg[name] = merged
@@ -60,7 +60,7 @@ def _delivery_json(project_root):
     p = os.path.join(project_root, "delivery.json")
     if os.path.exists(p):
         try:
-            return json.load(open(p)) or {}
+            return json.load(open(p, encoding="utf-8")) or {}
         except (ValueError, OSError):
             pass
     return {}

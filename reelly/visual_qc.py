@@ -170,7 +170,7 @@ def review(project_root, tag=None, model=None):
     if not os.path.exists(plans_p):
         print("[vqc  ] no cut plans, skipping")
         return {}
-    plans = {p["id"]: p for p in json.load(open(plans_p))}
+    plans = {p["id"]: p for p in json.load(open(plans_p, encoding="utf-8"))}
     words = speech.words_from(os.path.join(project_root, "analysis", "words.json"))
     fin = os.path.join(project_root, "deliverables", f"final{sfx}")
     if not os.path.isdir(fin):

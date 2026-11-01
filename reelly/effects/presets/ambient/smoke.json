@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "effect": "smoke_ambient",
+  "description": "A smoke veil in the space around the picture, swelling on pops and building into the end.",
+  "params": {
+    "u_level": 0.45
+  },
+  "render": {
+    "scale": 0.25,
+    "fps": 30
+  },
+  "lite": {
+    "render": {
+      "scale": 0.25,
+      "fps": 30
+    }
+  }
+}

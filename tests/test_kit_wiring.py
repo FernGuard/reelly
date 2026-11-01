@@ -18,6 +18,14 @@ from PIL import Image
 from reelly import audio_post, brandkit, captions, overlays
 
 
+@pytest.fixture(autouse=True)
+def _paid_calls_on(monkeypatch):
+    """These tests exercise the paid-provider paths (mocked, nothing bills).
+    Reelly is zero-paid by default, so they opt in the way a real run must."""
+    monkeypatch.setenv("REELLY_ALLOW_PAID", "1")
+
+
+
 # --------------------------------------------------------------- fixtures
 
 @pytest.fixture
@@ -125,7 +133,7 @@ def test_kit_endcard_accessor_gates(kit, monkeypatch):
 
 
 def test_composite_skips_chrome_for_kitcard_events(kit, monkeypatch, tmp_path):
-    """_composite must feed the kit PNG straight to ffmpeg — no HTML, no
+    """_composite must feed the kit PNG straight to ffmpeg -- no HTML, no
     Chrome subprocess for a kitcard event."""
     ran = {}
 
@@ -166,7 +174,8 @@ def test_register_bed_then_find_bed_roundtrip(music_kit, tmp_path):
     src = tmp_path / "bed.mp3"
     src.write_bytes(b"lofi-bytes")
     dst = brandkit.register_bed(str(src), "lofi", 42.5)
-    assert dst and os.path.exists(dst) and "/music/lofi/" in dst
+    assert dst and os.path.exists(dst) and \
+        os.path.join("music", "lofi") + os.sep in dst
     man = brandkit.music_manifest()
     assert man["beds"][0]["genre"] == "lofi"
     assert man["beds"][0]["duration_s"] == 42.5

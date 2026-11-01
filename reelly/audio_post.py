@@ -106,7 +106,7 @@ def _job_key(endpoint, payload, project):
 
 def _pending_load():
     try:
-        with open(_PENDING) as fh:
+        with open(_PENDING, encoding="utf-8") as fh:
             return json.load(fh)
     except Exception:
         return {}
@@ -115,7 +115,7 @@ def _pending_load():
 def _pending_save(reg):
     os.makedirs(config.HOME, exist_ok=True)
     tmp = _PENDING + ".tmp"
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(reg, fh)
     os.replace(tmp, _PENDING)
 
@@ -233,7 +233,7 @@ def _log_wait(endpoint, service, project, seconds):
     there was no data to rank them against the instrumented stages."""
     try:
         os.makedirs(config.HOME, exist_ok=True)
-        with open(os.path.join(config.HOME, "fal_timings.jsonl"), "a") as f:
+        with open(os.path.join(config.HOME, "fal_timings.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps({"ts": time.time(), "endpoint": endpoint,
                                 "service": service, "project": project,
                                 "seconds": round(seconds, 1)}) + "\n")
@@ -289,8 +289,52 @@ def _download(url, path):
     return path
 
 
+def _brand_sound(kind, key):
+    """A brand's own audio file: brands/<b>/<kind>/<file> for `key` in the
+    brand.json "<kind>" map (music tracks, sfx), or None."""
+    from . import brandkit
+    spec = brandkit.brand().get(kind)
+    if not isinstance(spec, dict) or not brandkit.brand_dir():
+        return None
+    files = spec.get("tracks", spec) if kind == "music" else spec
+    fn = files.get(key) if isinstance(files, dict) else None
+    if not isinstance(fn, str) or os.path.basename(fn) != fn:
+        return None
+    p = os.path.join(brandkit.brand_dir(), kind, fn)
+    return p if os.path.exists(p) else None
+
+
+def brand_track(plan):
+    """(path, key) of the brand's own music for this cut, or (None, None).
+
+    brand.json "music": {"tracks": {key: file}, "match": {key: [words]},
+    "default": key, "cleared": true|false}. The plan's "music" key wins;
+    else the first key whose words appear in what the cut is about (title,
+    hook, lines, the planner's reasons); else "default"."""
+    from . import brandkit
+    spec = brandkit.brand().get("music")
+    if not isinstance(spec, dict):
+        return None, None
+    key = plan.get("music") if isinstance(plan.get("music"), str) else None
+    if not key:
+        text = " ".join([str(plan.get("title", "")), str((plan.get("hook") or {}).get("text", ""))]
+                        + [str(o.get("text", "")) for o in plan.get("overlay_lines") or []]
+                        + [str(b) for b in plan.get("because") or []]).lower()
+        for k, words in (spec.get("match") or {}).items():
+            if any(str(w).lower() in text for w in words or []):
+                key = k
+                break
+    key = key or spec.get("default")
+    path = _brand_sound("music", key) if key else None
+    return (path, key) if path else (None, None)
+
+
 def sfx(name, project=""):
-    """Cached generated SFX (whoosh/riser/impact); costs cents once, ever."""
+    """Cached generated SFX (whoosh/riser/impact); costs cents once, ever.
+    A brand's own sound for `name` (brand.json "sfx") wins."""
+    own = _brand_sound("sfx", name)
+    if own:
+        return own
     os.makedirs(SFX_DIR, exist_ok=True)
     p = os.path.join(SFX_DIR, f"{name}.mp3")
     # lock the check-then-generate: two parallel cuts must not both pay for
@@ -298,6 +342,10 @@ def sfx(name, project=""):
     with _SFX_LOCK:
         if os.path.exists(p):
             return p
+        if config.paid_blocked("fal-ai"):
+            print(f"         sfx '{name}': not cached and paid calls are off; "
+                  f"skipped (drop a file at {p} to use one)")
+            return None
         prompt, dur = SFX_SPECS[name]
         # /v2: the base endpoint defaults to a retired ElevenLabs model (probed)
         url = _fal("fal-ai/elevenlabs/sound-effects/v2",
@@ -324,7 +372,7 @@ def pick_bed(plan):
 
 
 # Music prefetch: the bed depends ONLY on the cut plan, so it can be queued at
-# FAL the moment plans exist and download while segments encode — instead of
+# FAL the moment plans exist and download while segments encode -- instead of
 # each finalize worker sitting through the 10-13s queue+poll wait mid-chain.
 # Registry maps out_mp3 path -> Future; check-then-act on (registry, file) is
 # under _PREFETCH_LOCK so a prefetch and a later music() call can never both
@@ -348,7 +396,7 @@ def prefetch_music(plan, out_mp3, project=""):
         fut = _PREFETCH.get(out_mp3)
         if fut is not None and not (fut.done() and fut.exception()):
             return fut
-        if os.path.exists(out_mp3):
+        if os.path.exists(out_mp3) and _cached_ok(plan, out_mp3):
             fut = concurrent.futures.Future()
             fut.set_result(out_mp3)
             _PREFETCH[out_mp3] = fut
@@ -378,14 +426,62 @@ def music(plan, out_mp3, project=""):
     if fut is not None:
         try:
             return fut.result()
-        except Exception as e:  # noqa: BLE001 — prefetch failed; retry inline
+        except Exception as e:  # noqa: BLE001 -- prefetch failed; retry inline
             print(f"         music prefetch failed ({e}); regenerating inline")
             with _PREFETCH_LOCK:
                 if _PREFETCH.get(out_mp3) is fut:
                     del _PREFETCH[out_mp3]
-    if os.path.exists(out_mp3):
+    if os.path.exists(out_mp3) and _cached_ok(plan, out_mp3):
         return out_mp3
     return _music_generate(plan, out_mp3, project)
+
+
+def _cached_ok(plan, out_mp3):
+    """May the cached bed be reused? Only while it still comes from what the
+    cut would pick now: adding or changing the brand's track (or the plan's
+    "music") rebuilds it, so its stated bpm and its rights stay true. A stale
+    bed is removed (and False returned)."""
+    want = _brand_source(plan)
+    have = _source_of(out_mp3)
+    if want == have or (want is None and have in (None, "bed")):
+        if want:
+            _warn_uncleared(plan)
+        return True
+    print(f"         music: the cached bed is from {have or 'an older run'}; rebuilding")
+    for p in (out_mp3, out_mp3 + ".src.json"):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    return False
+
+
+def _brand_source(plan):
+    """What the brand track for this cut is right now (key, file, mtime),
+    or None when the cut takes a generated or kit bed."""
+    track, key = brand_track(plan)
+    if not track:
+        return None
+    return f"brand:{key}:{os.path.basename(track)}:{int(os.path.getmtime(track))}"
+
+
+def _source_of(out_mp3):
+    try:
+        return json.load(open(out_mp3 + ".src.json", encoding="utf-8")).get("source")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _mark_source(out_mp3, source):
+    with open(out_mp3 + ".src.json", "w", encoding="utf-8") as f:
+        json.dump({"source": source}, f)
+
+
+def _warn_uncleared(plan):
+    from . import brandkit
+    if (brandkit.brand().get("music") or {}).get("cleared") is not True:
+        print(f"         music for {plan.get('id', '?')}: the brand track is NOT marked "
+              "cleared for marketing in brand.json; confirm the rights before posting")
 
 
 def _music_generate(plan, out_mp3, project=""):
@@ -394,7 +490,21 @@ def _music_generate(plan, out_mp3, project=""):
     prefetch pool). Every fresh generation is registered back into the kit,
     so the library warms up organically -- no beds are pre-generated."""
     from . import brandkit
-    if os.path.exists(out_mp3):
+    if os.path.exists(out_mp3) and _cached_ok(plan, out_mp3):
+        return out_mp3
+    # The brand's OWN soundtrack first: on-brand, $0, and usable on business
+    # accounts whose in-app music libraries are restricted.
+    track, key = brand_track(plan)
+    if track:
+        cleared = (brandkit.brand().get("music") or {}).get("cleared") is True
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", track, "-vn",
+                        "-c:a", "libmp3lame", "-b:a", "256k", out_mp3], check=True)
+        print(f"         music: brand track '{key}' ({os.path.basename(track)}, $0)"
+              + ("" if cleared else " -- NOT marked cleared for marketing in brand.json; "
+                 "confirm the rights before posting"))
+        _mark_source(out_mp3, _brand_source(plan))
+        with _LEDGER_LOCK:
+            ledger.add("brand-music", f"music {plan['id']} ({key})", 0.0, project)
         return out_mp3
     dur = max(10, int(plan["duration_s"]) + 2)
     bed = pick_bed(plan)
@@ -408,10 +518,15 @@ def _music_generate(plan, out_mp3, project=""):
         shutil.copyfile(kit_bed, out_mp3)
         print(f"         music: {bed} bed from kit ($0): "
               f"{os.path.basename(kit_bed)}")
+        _mark_source(out_mp3, "bed")
         with _LEDGER_LOCK:
             ledger.add("brandkit-music", f"music {plan['id']} ({bed}, kit)",
                        0.0, project)
         return out_mp3
+    if config.paid_blocked("fal-ai"):
+        print(f"         music: no {bed} bed in the kit and paid calls are off; "
+              f"this mix ships without a generated bed")
+        return None
     about = (plan.get("title") or "").strip()
     prompt = (f"Instrumental {BEDS[bed]}. "
               f"Scores a short vertical video about: {about}. "
@@ -422,6 +537,7 @@ def _music_generate(plan, out_mp3, project=""):
                {"prompt": prompt, "music_length_ms": min(dur, 300) * 1000},
                EST_MUSIC, f"music {plan['id']}", project)
     _download(url, out_mp3)
+    _mark_source(out_mp3, "bed")
     # Grow the library: the bed this cut just paid for serves every future
     # cut with the same genre and a shorter-or-equal length.
     try:
@@ -429,7 +545,7 @@ def _music_generate(plan, out_mp3, project=""):
         if brandkit.register_bed(out_mp3, bed, real):
             print(f"         music: bed generated + registered into the kit "
                   f"library ({bed}, {real:.0f}s)")
-    except Exception:   # noqa: BLE001 — registration must never fail a render
+    except Exception:   # noqa: BLE001 -- registration must never fail a render
         pass
     return out_mp3
 
@@ -516,11 +632,38 @@ def sfx_events(plan):
     return events
 
 
+def track_bpm(path, key=None):
+    """The tempo a track STATES: brand.json music "bpm" {key or file: n},
+    else "<n>_bpm" / "<n>bpm" in the file name (Board_125_bpm.wav). None when
+    unstated. Stated beats detection: on a game soundtrack the detector
+    read 123 for a 125 bpm track (0.16 s adrift after 10 s) and 70 for 140."""
+    import re
+    from . import brandkit
+    spec = (brandkit.brand().get("music") or {}).get("bpm") or {}
+    name = os.path.basename(path or "")
+    for k in (key, name):
+        try:
+            if k and k in spec and 40 <= float(spec[k]) <= 240:
+                return float(spec[k])
+        except (TypeError, ValueError):
+            pass
+    m = re.search(r"(?<!\d)(\d{2,3})[ _-]?bpm", name, re.I)
+    return float(m.group(1)) if m and 40 <= int(m.group(1)) <= 240 else None
+
+
 def beat_offset(music_path, target_t):
     """Trim offset so a musical beat lands on target_t (S5: beat-aligned).
+    Returns seconds to trim from the bed's start; 0.0 when unsure."""
+    return beat_grid(music_path, target_t)[0]
 
-    Onset flux -> autocorrelation tempo (60-180 BPM) -> comb phase fit.
-    Returns seconds to trim from the bed's start; 0.0 when unsure.
+
+def beat_grid(music_path, target_t, bpm=None):
+    """(trim_offset, period): trim the bed by trim_offset and a beat lands on
+    target_t, then every `period` seconds after (and before) it.
+
+    Onset flux -> comb phase fit. The period is the stated tempo when there
+    is one (track_bpm), else an autocorrelation estimate (60-180 BPM).
+    (0.0, 0.0) when unsure: no grid, callers keep their own timing.
     """
     import numpy as np
     from scipy import signal
@@ -529,17 +672,20 @@ def beat_offset(music_path, target_t):
                        capture_output=True)
     x = np.frombuffer(r.stdout, dtype=np.float32)
     if len(x) < 22050 * 4:
-        return 0.0
+        return 0.0, 0.0
     _, _, Z = signal.stft(x, 22050, nperseg=1024, noverlap=512)
     mag = np.abs(Z)
     flux = np.maximum(mag[:, 1:] - mag[:, :-1], 0).sum(axis=0)
     hop = 512 / 22050
-    f0 = flux - flux.mean()
-    ac = np.correlate(f0, f0, "full")[len(f0) - 1:]
-    lo, hi = int((60 / 180) / hop), int((60 / 60) / hop)
-    if hi >= len(ac) or lo >= hi:
-        return 0.0
-    period = (lo + int(np.argmax(ac[lo:hi]))) * hop
+    if bpm:
+        period = 60.0 / float(bpm)
+    else:
+        f0 = flux - flux.mean()
+        ac = np.correlate(f0, f0, "full")[len(f0) - 1:]
+        lo, hi = int((60 / 180) / hop), int((60 / 60) / hop)
+        if hi >= len(ac) or lo >= hi:
+            return 0.0, 0.0
+        period = (lo + int(np.argmax(ac[lo:hi]))) * hop
     nb = max(1, int((len(flux) * hop) / period))
     best_phi, best_score = 0.0, -1.0
     for phi in np.arange(0.0, period, hop):
@@ -548,7 +694,7 @@ def beat_offset(music_path, target_t):
         score = float(flux[idx].sum())
         if score > best_score:
             best_score, best_phi = score, phi
-    return float((best_phi - target_t) % period)
+    return float((best_phi - target_t) % period), float(period)
 
 
 def final_mix(voice_wav, music_mp3, events, dur, out_wav, project="",
@@ -570,6 +716,8 @@ def final_mix(voice_wav, music_mp3, events, dur, out_wav, project="",
     sfx_paths = []
     for t, name, gain in events:
         p = sfx(name, project)
+        if not p:
+            continue
         inputs += ["-i", p]
         sfx_paths.append((t, gain))
     base = 2 if music_mp3 else 1
@@ -640,6 +788,44 @@ def true_peak(path):
 TP_SAFETY = 0.6
 
 
+def level_mix(src, target=-14.0, peak_db=-4.5, tolerance=0.4):
+    """A copy of the mix wav at `target` LUFS with its peaks LIMITED, not the
+    whole thing turned down (src itself when already within `tolerance`).
+
+    loudnorm stops short of target when a loud bed sits under hard transients
+    (linear mode will not cross its peak ceiling): -15.9 LUFS measured on a
+    game soundtrack mix. A limiter at -2 dB did not fix it: the AAC encode
+    then overshot by +1.7 dB, the true-peak guard limited the file again and
+    the shipped mp4 fell back to -15.8. Measured on three soundtrack mixes, a
+    fast limiter (2 ms attack) at -4.5 dB leaves room for the AAC overshoot,
+    and the gain is iterated against it until the levelled wav reads target
+    (the limiter eats part of each step, so one shot falls short)."""
+    i = integrated_loudness(src)
+    if i is None or abs(target - i) <= tolerance:
+        return src
+    out = src[:-4] + "_lev.wav" if src.endswith(".wav") else src + "_lev.wav"
+    lim = f"alimiter=limit={10 ** (peak_db / 20):.4f}:level=disabled:attack=2:release=60"
+    gain, after = target - i, None
+    for _ in range(4):
+        gain = max(-20.0, min(12.0, gain))
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src, "-af",
+                        f"volume={gain:.2f}dB,{lim}", "-ar", "48000", out], check=True)
+        after = integrated_loudness(out)
+        if after is None or abs(target - after) <= tolerance or gain >= 12.0:
+            break
+        gain += target - after
+    print(f"         mix levelled {i:.1f} -> "
+          f"{after if after is None else round(after, 1)} LUFS "
+          f"({gain:+.1f} dB, peaks limited at {peak_db} dB)")
+    if after is not None and after < target - 3.0:
+        # a near-silent mix cannot be lifted to target (the gain is capped):
+        # say so here; the judge's loudness gate fails the file
+        from . import degrade
+        degrade.note("loudness", f"the mix is nearly silent ({i:.1f} LUFS); "
+                     f"reached only {after:.1f} of {target:.0f} LUFS")
+    return out
+
+
 def enforce_true_peak(path, ceiling=None, margin=0.3, source_audio=None):
     """Guarantee a delivered file sits under the true-peak ceiling.
 
@@ -649,7 +835,7 @@ def enforce_true_peak(path, ceiling=None, margin=0.3, source_audio=None):
 
     Normalising the MIX is not enough: the AAC encode at mux time adds
     inter-sample overshoot, and on dense low-end content that was measured at
-    +3.6 dB — a mix correctly normalised to -2.0 dBFS arrived at +1.6 dBFS in
+    +3.6 dB -- a mix correctly normalised to -2.0 dBFS arrived at +1.6 dBFS in
     the mp4. Nothing upstream can predict that reliably, so the only honest fix
     is to measure what was actually written and correct it if it is over.
 
@@ -715,7 +901,7 @@ def enforce_loudness(path, lo=None, hi=None, target=None, source_audio=None):
 
     The window and its centre come from the judge (judge.LUFS_LO/LUFS_HI) so a
     freshly composited file is corrected to exactly the band the judge will
-    grade it against — the two cannot drift apart (the paid-for failure was
+    grade it against -- the two cannot drift apart (the paid-for failure was
     enforcement landing ~1 dB below the judge's window on quiet bases). The
     overlay pass mixes SFX in without re-normalising, which pushed two files to
     -12.3 LUFS against a -12.5 ceiling. Correcting loudness can break the

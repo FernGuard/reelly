@@ -68,6 +68,10 @@ uv run python -m reelly.brandkit
 
 This creates local files under `~/.reelly/brandkit/`, including `copy_bank.yaml`. Put private copy rules, banned names, fonts, music manifests, and generated end cards there. Do not move those files into the repository.
 
+### Brands
+
+One kit can hold several brands, each with its own `brand.json`, fonts, music and look. Everything about them is in [BRAND_KIT.md](BRAND_KIT.md).
+
 ## Verdicts and analytics
 
 `playbook/feedback/VERDICTS.md` is a public empty template. Store real human judgments and performance exports in a private project or data store. Use synthetic examples in tests and documentation.

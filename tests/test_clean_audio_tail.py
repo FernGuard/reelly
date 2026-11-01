@@ -273,10 +273,10 @@ def test_gate_is_wired_into_the_final_report():
     assert "clean_audio_tail(plan, path)" in src
 
 
-def test_loudness_sanity_remeasures_implausible_combined_reading(capsys):
-    """A sub--45 LUFS combined-graph reading triggers an audio-only re-measure
-    and the audio-only number wins (the -c copy concat under-read of
-    2026-08-03)."""
+def test_loudness_is_graded_on_the_audio_only_decode(capsys):
+    """The audio-only decode always grades loudness: the combined graph
+    under-reads some files (-66.8 for a -14 file, 2026-08-03; -22.4 for a
+    -16.4 music mix, 2026-10-28)."""
     from unittest import mock
     from reelly import judge
     combined = ("Integrated loudness:\n  I: -66.8 LUFS\n"
@@ -293,4 +293,3 @@ def test_loudness_sanity_remeasures_implausible_combined_reading(capsys):
         rows = judge.check_file("x.mp4", plan_dur=None)["results"]
     loud = [r for r in rows if r[0] == "loudness"][0]
     assert loud[1] == "PASS" and "-14.0" in loud[2]
-    assert "implausible" in capsys.readouterr().out

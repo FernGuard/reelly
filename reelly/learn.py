@@ -2,7 +2,7 @@
 
 Inputs: human verdicts (playbook/feedback/VERDICTS.md) and platform metrics
 (metrics.json fetched from analytics export in-session). Output: an evidence report
-plus a PLAYBOOK PROPOSAL file — never an automatic playbook edit; reviewer
+plus a PLAYBOOK PROPOSAL file -- never an automatic playbook edit; reviewer
 approves proposals before they merge (internal workflow autonomy rule).
 
 Outlier math is playbook R1: score = views / channel median. Above 10 is a
@@ -46,7 +46,7 @@ def parse_verdicts_full(path=None):
     rows, unparsed = [], []
     if not os.path.exists(path):
         return rows, unparsed
-    for n, line in enumerate(open(path), 1):
+    for n, line in enumerate(open(path, encoding="utf-8"), 1):
         text = line.strip()
         if not _DATED.match(text):
             continue
@@ -206,7 +206,7 @@ def _plan_evidence(root, clip_id, tag=None):
     p = os.path.join(root, "edl", f"cut_plans{sfx}.json")
     if not os.path.exists(p):
         return None
-    for plan in json.load(open(p)):
+    for plan in json.load(open(p, encoding="utf-8")):
         if plan["id"] == clip_id:
             return {"format": plan.get("format"), "hook": plan["hook"]["text"],
                     "duration": plan["duration_s"],
@@ -251,7 +251,7 @@ def run(project=None, metrics_path=None, tag=None):
                 f"Promoted without outlier evidence: structural constraints "
                 f"never produce outliers, so the score gate does not apply.")
     if metrics_path and os.path.exists(metrics_path):
-        metrics = json.load(open(metrics_path))
+        metrics = json.load(open(metrics_path, encoding="utf-8"))
         scored, median = outlier_scores(metrics)
         L += [f"## Outlier scores (R1; channel median {median:.0f} views)", ""]
         root = direct.resolve_project(project) if project else None
@@ -270,7 +270,7 @@ def run(project=None, metrics_path=None, tag=None):
 
     if proposals:
         pp = os.path.join(PROPOSALS, f"{today}-proposals.md")
-        open(pp, "w").write("\n".join(
+        open(pp, "w", encoding="utf-8").write("\n".join(
             [f"# Playbook proposals {today}", "",
              "Evidence-backed; HUMAN APPROVAL REQUIRED before any rule changes.",
              "", *proposals, ""]))
@@ -285,5 +285,5 @@ def run(project=None, metrics_path=None, tag=None):
     if project:
         root = direct.resolve_project(project)
         os.makedirs(os.path.join(root, "qc"), exist_ok=True)
-        open(os.path.join(root, "qc", f"learn_{today}.md"), "w").write(report + "\n")
+        open(os.path.join(root, "qc", f"learn_{today}.md"), "w", encoding="utf-8").write(report + "\n")
     return report

@@ -16,6 +16,7 @@ brackets(x, y, w, h, label, lx, ly, color) · raw(html).
 """
 import json
 import os
+import re
 import subprocess
 
 from . import config, direct
@@ -27,7 +28,9 @@ ACCENT = "#17cdff"      # brand accent (Blue Smoke), shared with placement.py
 # Platform-safe zone for 1080x1920 (TikTok/Reels/Shorts chrome consensus).
 # Floating text lives inside these bounds; only content-anchored marks may
 # enter the margins, never their labels. (G2)
-SAFE_TOP, SAFE_BOTTOM_Y, SAFE_RIGHT_X, SAFE_LEFT_X = 200, 1500, 940, 60
+from . import layout as _safe   # the ONE safe area (layout.UI_ZONES)
+SAFE_TOP, SAFE_BOTTOM_Y, SAFE_RIGHT_X, SAFE_LEFT_X = (
+    _safe.SAFE_TOP, _safe.SAFE_BOTTOM, _safe.SAFE_RIGHT, _safe.SAFE_LEFT)
 FADE = 0.22
 
 HEAD = """<!doctype html><html><head><meta charset="utf-8">
@@ -37,6 +40,20 @@ body {width:WPXpx; height:HPXpx; background:transparent; overflow:hidden; positi
 .marker {font-family:'Permanent Marker', cursive; color:#ffd60a;
          text-shadow:0 3px 14px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);}
 </style></head><body>BODY</body></html>"""
+
+def _head():
+    """The page head: with brand fonts in the kit, the brand's own files are
+    served locally (no font CDN, works offline) and override every template's
+    inline font; without them, exactly the historical HEAD."""
+    from . import brandkit, config
+    css = brandkit.font_css()
+    if not css:
+        if config.local_only():         # no font CDN request; system fonts
+            return re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "", HEAD)
+        return HEAD
+    return re.sub(r'<link href="https://fonts\.googleapis\.com[^>]*>', "",
+                  HEAD).replace("</style>", css + "\n</style>")
+
 
 # The vertical feeds are the default because that is what `cut` delivers, but
 # the page is not vertical-only: sizzle reels render the same templates at
@@ -162,6 +179,9 @@ def plan_pointers(video, words_tl, project="", frame_at=None,
     returns []."""
     from . import design, speech
     if not words_tl or frame_at is None:
+        return []
+    if config.paid_blocked("google-genai"):
+        print("[overlays] pointer marks skipped: they need a paid vision call")
         return []
     events, last_t = [], -1e9
     for cs, ce, wlist in speech.group_cue_words(words_tl):
@@ -308,10 +328,13 @@ def _render_png(workdir, name, body, size=None):
     w, h = size or FRAME
     os.makedirs(workdir, exist_ok=True)
     hp = os.path.join(workdir, name + ".html")
-    open(hp, "w").write(HEAD.replace("WPX", str(w)).replace("HPX", str(h))
+    open(hp, "w", encoding="utf-8").write(_head().replace("WPX", str(w)).replace("HPX", str(h))
                         .replace("BODY", body))
     dst = os.path.join(workdir, name + ".png")
     subprocess.run([CHROME, "--headless", "--disable-gpu", "--hide-scrollbars",
+                    # no OS keychain: from ssh/launchd it raises a dialog per launch
+                    "--use-mock-keychain", "--password-store=basic",
+                    "--disable-breakpad", "--disable-crash-reporter",
                     "--default-background-color=00000000", f"--window-size={w},{h}",
                     "--virtual-time-budget=6000", f"--screenshot={dst}", f"file://{hp}"],
                    check=True, capture_output=True)
@@ -324,7 +347,7 @@ def _src_duration(src):
     from . import media
     try:
         return float(media.probe(src)["format"]["duration"])
-    except Exception:   # noqa: BLE001 — no duration means no clamp, not a crash
+    except Exception:   # noqa: BLE001 -- no duration means no clamp, not a crash
         return None
 
 
@@ -452,16 +475,15 @@ def _composite(src, out, events, workdir, music=None, speech=False):
     else:
         amap = "0:a"
 
-    # veryfast/crf 20 matches the underlying deliverable (finalize._burn_pass
-    # encodes at veryfast/crf 20): encoding the gfx pass at medium/crf 18 was a
-    # quality inversion — it spent ~3s/cut polishing a stream whose source was
-    # already veryfast/crf 20-21, which no viewer can get back.
+    # Same encode as the underlying deliverable (finalize._burn_pass uses
+    # config.final_encode_args): a better setting here cannot recover detail
+    # the burn already lost, a worse one throws away what it kept.
     # -t pins the output to the SOURCE length: the looped-PNG inputs and any
     # SFX tail must never extend a deliverable past its plan (duration gate).
     tlim = ["-t", f"{dur:.3f}"] if dur else []
     subprocess.run([config.FFMPEG, "-y", "-v", "error"] + inputs +
                    ["-filter_complex", ";".join(f), "-map", "[vout]", "-map", amap,
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    *config.final_encode_args(),
                     "-c:a", "aac", "-b:a", "192k", "-shortest", *tlim, out],
                    check=True, capture_output=True)
     # This pass re-encoded the audio, so it can overshoot exactly like the mux
@@ -687,7 +709,7 @@ def autoplan(project, kicker=None, label=None, meme=True, src_dir=None,
     # tagged A/B runs got graphics planned against the wrong plans. The spec
     # file itself stays untagged: judge and apply read that one path.
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
     src_dir = src_dir or os.path.join(root, "deliverables", f"final{sfx}")
     name = os.path.basename(root)
     label = label or name.replace("as-", "").replace("ascap-", "").replace("-", " ").title()
@@ -697,7 +719,7 @@ def autoplan(project, kicker=None, label=None, meme=True, src_dir=None,
     spec_path = os.path.join(root, "edl", "overlay_specs.json")
     specs = {}
     if cut_id and os.path.exists(spec_path):
-        specs = json.load(open(spec_path))
+        specs = json.load(open(spec_path, encoding="utf-8"))
     # measured payoff anchors: plans written since 2026-08-03 carry one from
     # plan time; legacy plans get theirs measured here, against the same
     # analysis artifacts, so the card window below is footage-true either way
@@ -841,7 +863,7 @@ def autoplan(project, kicker=None, label=None, meme=True, src_dir=None,
                        "anchor": o.get("anchor")}
                       for o in p.get("overlay_lines") or []],
         }
-    json.dump(specs, open(spec_path, "w"), indent=1)
+    json.dump(specs, open(spec_path, "w", encoding="utf-8"), indent=1)
     out = spec_path
     total = sum(len(v) for k, v in specs.items() if k != "_meta")
     print(f"[autoplan] {len(specs)} cuts, {total} marks placed from frame content -> {out}")
@@ -858,7 +880,7 @@ def apply(project, src_dir=None, cut_id=None, suffix="_gfx", tag=None):
     from . import timing
     root = direct.resolve_project(project)
     spec_path = os.path.join(root, "edl", "overlay_specs.json")
-    specs = json.load(open(spec_path))
+    specs = json.load(open(spec_path, encoding="utf-8"))
     sfx = f"_{tag}" if tag else ""
     src_dir = src_dir or os.path.join(root, "deliverables", f"final{sfx}")
     workdir = os.path.join(root, "deliverables", "_gfx")

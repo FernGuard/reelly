@@ -3,7 +3,7 @@
 Samples frames via signalstats, measures mean luma / luma range / saturation,
 and emits a small eq correction for underexposure, flatness, and desaturation.
 Every axis is hard-capped (max ~8 percent) so the output reads "clean", not
-"graded" — no LUTs, no color shifts, no taste in code.
+"graded" -- no LUTs, no color shifts, no taste in code.
 
 Adapted from MIT-licensed browser-use/video-use helpers/grade.py.
 See THIRD_PARTY_NOTICES.md.
@@ -14,11 +14,11 @@ import os
 import subprocess
 import tempfile
 
-from . import config
+from . import config, media
 
 # signalstats decodes the sampled range every time; the result only depends
 # on (file identity, range, sample count), so it is cached on disk like
-# faceio's face cache — keyed by abspath|mtime|size, self-invalidating.
+# faceio's face cache -- keyed by abspath|mtime|size, self-invalidating.
 CACHE_DIR = os.path.join(config.HOME, "cache", "grade")
 
 
@@ -34,7 +34,7 @@ def _cache_path(video, params):
 def _cache_get(video, params):
     """Cached value or None. A corrupt or missing cache is never fatal."""
     try:
-        with open(_cache_path(video, params)) as f:
+        with open(_cache_path(video, params), encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return None
@@ -76,14 +76,15 @@ def _frame_stats_uncached(video, start, duration, n_samples=10):
         r = subprocess.run(
             [config.FFMPEG, "-y", "-hide_banner", "-nostats",
              "-ss", f"{start:.3f}", "-i", video, "-t", f"{duration:.3f}",
-             "-vf", f"fps={fps:.2f},signalstats,metadata=print:file={mpath}",
+             "-vf", f"fps={fps:.2f},signalstats,"
+                    f"metadata=print:file={media.filter_path(mpath)}",
              "-f", "null", "-"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if r.returncode != 0:
             return None
         vals = {"YAVG": [], "YMIN": [], "YMAX": [], "SATAVG": []}
         depth = 8
-        for line in open(mpath):
+        for line in open(mpath, encoding="utf-8"):
             line = line.strip()
             if "signalstats.YBITDEPTH=" in line:
                 try:

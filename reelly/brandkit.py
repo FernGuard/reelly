@@ -15,6 +15,14 @@ The kit moves the derivable work to BUILD TIME, once per machine:
     outros/<studio>.mov          brand outro clip for card.py concat (optional)
     fonts/<role>.ttf|.otf        brand type per role (caption, headline, ...)
     music/manifest.json          cleared music bed manifest (optional)
+    brands/<brand>/              one folder per brand (a studio, or each of
+      brand.json                 its games): {"name", "accent", "ink",
+      <font files>               "surface", "fonts": {role: file}}
+
+BRANDS: a run picks one with `--brand NAME` (REELLY_BRAND) or kit.json
+"default_brand". The active brand's fonts, accent, ink and surface win over
+the flat kit; anything a brand leaves out falls back to the flat kit, then to
+the built-in defaults. No brand active = exactly the pre-brand behaviour.
 
 EVERYTHING DEGRADES GRACEFULLY: a missing kit, a missing asset or a broken
 kit.json returns None/{}/defaults and the pipeline behaves exactly as it did
@@ -34,7 +42,7 @@ import re
 import threading
 
 KIT_VERSION = 1
-DEFAULT_KIT_DIR = "~/.reelly/brandkit"
+DEFAULT_KIT_DIR = None      # None -> <config.HOME>/brandkit
 
 # Copy contract defaults (memory: copy-rules-on-brand-fun-cta-short). The
 # copy_bank.yaml generated below carries these so a human can tune them per
@@ -53,15 +61,18 @@ FALLBACK_ACCENT = "#17CDFF"     # Blue Smoke, the pre-kit hardcoded accent
 
 
 def kit_dir():
-    """The kit root, resolved at call time so tests/env can redirect it."""
+    """The kit root, resolved at call time so tests/env can redirect it:
+    REELLY_BRANDKIT, else <Reelly home>/brandkit (REELLY_HOME aware)."""
+    from . import config
     return os.path.expanduser(os.environ.get("REELLY_BRANDKIT")
-                              or DEFAULT_KIT_DIR)
+                              or DEFAULT_KIT_DIR
+                              or os.path.join(config.HOME, "brandkit"))
 
 
 def _kit_json():
     p = os.path.join(kit_dir(), "kit.json")
     try:
-        with open(p) as f:
+        with open(p, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
@@ -115,10 +126,91 @@ def outro(studio):
     return p if os.path.exists(p) else None
 
 
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
+# A role a brand does not define borrows from the next one down.
+ROLE_FALLBACK = {"headline": ("headline", "caption"),
+                 "caption": ("caption",),
+                 "cta": ("cta", "caption"),
+                 "kicker": ("kicker", "caption")}
+
+
+def brand_name():
+    """The active brand for this run, or None. REELLY_BRAND wins (what the
+    CLI's --brand sets), then kit.json "default_brand"."""
+    name = (os.environ.get("REELLY_BRAND") or "").strip()
+    if not name:
+        name = str(_kit_json().get("default_brand") or "").strip()
+    if not name or not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in (".", ".."):
+        return None
+    return name
+
+
+def brand_dir(name=None):
+    name = name or brand_name()
+    return os.path.join(kit_dir(), "brands", name) if name else None
+
+
+def brand(name=None):
+    """The active brand's brand.json as a dict ({} when no brand is active or
+    its file is missing or broken). A named brand whose folder is missing is
+    reported once, loudly: rendering silently in the wrong type is the
+    failure this guards against."""
+    d = brand_dir(name)
+    if not d:
+        return {}
+    try:
+        with open(os.path.join(d, "brand.json"), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        if d not in _WARNED:
+            _WARNED.add(d)
+            print(f"[brand] WARNING: brand '{os.path.basename(d)}' has no "
+                  f"readable brand.json at {d}; using the flat kit")
+        return {}
+
+
+_WARNED = set()
+
+
+def _brand_color(key):
+    v = brand().get(key)
+    return v if isinstance(v, str) and _HEX.fullmatch(v) else None
+
+
+def ink():
+    """Text colour of the active brand, or None (callers keep their own)."""
+    return _brand_color("ink")
+
+
+def surface():
+    """Plate / backdrop colour of the active brand, or None."""
+    return _brand_color("surface")
+
+
+def _brand_font(role):
+    d = brand_dir()
+    if not d:
+        return None
+    fonts = brand().get("fonts")
+    fonts = fonts if isinstance(fonts, dict) else {}
+    for r in ROLE_FALLBACK.get(role, (role, "caption")):
+        fn = fonts.get(r)
+        if isinstance(fn, str) and fn and os.path.basename(fn) == fn:
+            p = os.path.join(d, fn)
+            if os.path.exists(p):
+                return p
+    return None
+
+
 def font(role="caption"):
     """Brand font file for a role, or None (caller falls back to its own
-    system-font list -- captions.FONTS today). Resolution order:
-    fonts/<role>.ttf|.otf, fonts/default.ttf|.otf, then any font in fonts/."""
+    system-font list -- captions.FONTS today). Resolution order: the active
+    brand's role (headline borrows caption), then fonts/<role>.ttf|.otf,
+    fonts/default.ttf|.otf, then any font in fonts/."""
+    bf = _brand_font(role)
+    if bf:
+        return bf
     d = os.path.join(kit_dir(), "fonts")
     for name in (role, "default"):
         for ext in (".ttf", ".otf", ".ttc"):
@@ -135,11 +227,387 @@ def font(role="caption"):
 
 
 def accent():
-    """The single brand accent for caption highlights: sampled from a
-    wordmark at kit-build time (kit.json), Blue Smoke when no kit exists."""
+    """The single brand accent: the active brand's, else the one sampled
+    from a wordmark at kit-build time (kit.json), Blue Smoke when no kit
+    exists."""
+    b = _brand_color("accent")
+    if b:
+        return b
     a = _kit_json().get("accent")
     return a if isinstance(a, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", a) \
         else FALLBACK_ACCENT
+
+
+def reframe():
+    """The active brand's framing for 16:9 footage in a 9:16 frame, or None.
+
+    brand.json "video": {"reframe": "full_width"} (or 1.0) shows the whole width of the
+    game, smaller; a number up to 2.0 zooms in and crops the sides. A game
+    whose screen must read whole (two boards, a HUD at both edges) sets
+    full_width; None leaves Reelly's own choice."""
+    v = video("reframe")
+    if isinstance(v, str) and v.strip().lower() in ("full_width", "full", "fit"):
+        return 1.0
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return max(1.0, min(2.0, f))
+
+
+def copy_brief():
+    """The active brand's copy brief (brand.json "copy"), {} without one.
+
+    Keys the editor brain uses: audience, promise, proof, voice (one line
+    each), cta (a fixed ask, used verbatim), cta_hot (its action word),
+    avoid (words and claims never to write). All brand data lives in the
+    user's kit, never in the repository."""
+    c = brand().get("copy")
+    return c if isinstance(c, dict) else {}
+
+
+# ---------------------------------------------------------------- schema 1
+# brand.json, version 1. Colours, fonts, copy, music and sfx keep their
+# places; how the video looks and moves is grouped:
+#   "schema": 1,
+#   "video":   {"fps": 30|60, "reframe": "full_width"|1.0-2.0,
+#               "content_type": "gameplay"|..., "clip_len": [min_s, max_s]},
+#   "text":    {"motion": "rise"|"blocklock", "exit": "fade"|"petals",
+#               "petal_color": "#RRGGBB", "behind_subject": false},
+#   "effects": {"endcard": "smoke", "ambient": ["smoke", {"preset": "embers",
+#               "params": {"u_density": 0.4}}], "text": "smoke", "finish": null}
+# `reelly brand check NAME` validates a kit; `reelly brand migrate NAME`
+# rewrites an older one.
+SCHEMA = 1
+TOP_KEYS = {"schema", "name", "accent", "ink", "surface", "fonts", "copy", "music", "sfx",
+            "video", "text", "effects", "source", "license", "notes"}
+SECTION_KEYS = {
+    "video": {"fps", "reframe", "content_type", "clip_len"},
+    "text": {"motion", "exit", "petal_color", "behind_subject"},
+    "effects": {"endcard", "ambient", "text", "finish"},
+    "copy": {"audience", "promise", "proof", "voice", "cta", "cta_hot", "avoid",
+             "approved_lines", "rejected_lines"},
+    "music": {"tracks", "match", "default", "cleared", "bpm", "source"},
+}
+# where keys from before schema 1 went (for clear errors and `migrate`)
+MOVED = {"fps": "video.fps", "reframe": "video.reframe", "profile": "video.content_type",
+         "fx": "effects (+ text.motion / text.exit / text.petal_color / "
+               "text.behind_subject)",
+         "outro_fx": "effects.endcard", "ambient_fx": "effects.ambient",
+         "text_fx": "effects.text", "finish_fx": "effects.finish",
+         "copy.clip_len": "video.clip_len"}
+
+
+def section(name):
+    """One schema-1 section of the active brand ({} when absent)."""
+    v = brand().get(name)
+    return v if isinstance(v, dict) else {}
+
+
+def video(key, default=None):
+    return section("video").get(key, default)
+
+
+def text_style(key, default=None):
+    return section("text").get(key, default)
+
+
+def effect_entries(placement):
+    """[(preset name, params)] the brand plays at a placement, stack order."""
+    entry = section("effects").get(placement)
+    out = []
+    for e in (entry if isinstance(entry, list) else [entry]):
+        if isinstance(e, dict):
+            out.append((str(e.get("preset") or ""), e.get("params") or {}))
+        elif isinstance(e, str) and e:
+            out.append((e, {}))
+    return out
+
+
+def check(data):
+    """(errors, warnings) for a brand.json dict. Errors stop a run at its
+    first second (a typo must never silently switch an effect off)."""
+    from . import gputext, performance, shaderfx
+    err, warn = [], []
+    if not isinstance(data, dict):
+        return ["brand.json is not a JSON object"], []
+    if data.get("schema") is None:
+        warn.append('no "schema": 1 (add it, or run `reelly brand migrate`)')
+    elif data.get("schema") != SCHEMA:
+        err.append(f"schema {data.get('schema')!r} is not supported (this Reelly reads {SCHEMA})")
+    for k in data:
+        if k in MOVED:
+            err.append(f'"{k}" moved to {MOVED[k]} (run `reelly brand migrate`)')
+        elif k not in TOP_KEYS:
+            err.append(f'unknown key "{k}"')
+    for k in ("accent", "ink", "surface"):
+        if k in data and not (isinstance(data[k], str) and _HEX.fullmatch(data[k])):
+            err.append(f'"{k}" must be a #RRGGBB colour')
+    fonts = data.get("fonts", {})
+    if not isinstance(fonts, dict) or not all(isinstance(v, str) and os.path.basename(v) == v
+                                              for v in fonts.values()):
+        err.append('"fonts" must map roles to font file names in the brand folder')
+    for sec, keys in SECTION_KEYS.items():
+        v = data.get(sec)
+        if v is None:
+            continue
+        if sec == "music" and isinstance(v, dict) and "tracks" not in v:
+            continue                    # the flat map {key: file} is still read as tracks
+        if not isinstance(v, dict):
+            err.append(f'"{sec}" must be an object')
+            continue
+        for k in v:
+            if f"{sec}.{k}" in MOVED:
+                err.append(f'"{sec}.{k}" moved to {MOVED[sec + "." + k]}')
+            elif k not in keys:
+                (warn if sec == "copy" else err).append(f'unknown key "{sec}.{k}"')
+    vid, txt, fx = (data.get(k) if isinstance(data.get(k), dict) else {}
+                    for k in ("video", "text", "effects"))
+    if "fps" in vid and vid["fps"] not in (24, 25, 30, 50, 60):
+        err.append('"video.fps" must be 24, 25, 30, 50 or 60')
+    if "reframe" in vid:
+        r = vid["reframe"]
+        ok = (isinstance(r, str) and r.strip().lower() in ("full_width", "full", "fit")) or \
+             (isinstance(r, (int, float)) and 1.0 <= r <= 2.0)
+        if not ok:
+            err.append('"video.reframe" must be "full_width" or a zoom from 1.0 to 2.0')
+    if "content_type" in vid and str(vid["content_type"]).strip().lower().replace("_", "-") \
+            not in shaderfx.content_types():
+        err.append(f'"video.content_type" must be one of {shaderfx.content_types()}')
+    if "clip_len" in vid and performance._parse_len(vid["clip_len"]) is None:
+        err.append('"video.clip_len" must be [min, max] seconds, 5 <= min < max <= 180')
+    if "motion" in txt and txt["motion"] not in gputext.MOTIONS:
+        err.append(f'"text.motion" must be one of {list(gputext.MOTIONS)}')
+    if "exit" in txt and txt["exit"] not in gputext.EXITS:
+        err.append(f'"text.exit" must be one of {list(gputext.EXITS)}')
+    if "petal_color" in txt and not (isinstance(txt["petal_color"], str)
+                                     and _HEX.fullmatch(txt["petal_color"])):
+        err.append('"text.petal_color" must be a #RRGGBB colour')
+    if "behind_subject" in txt and not isinstance(txt["behind_subject"], bool):
+        err.append('"text.behind_subject" must be true or false')
+    for placement, entry in fx.items():
+        if placement not in SECTION_KEYS["effects"] or entry is None:
+            continue
+        if placement != "ambient" and isinstance(entry, list):
+            err.append(f'"effects.{placement}" takes one preset, not a list')
+            continue
+        for e in (entry if isinstance(entry, list) else [entry]):
+            name, params = (e.get("preset"), e.get("params") or {}) if isinstance(e, dict) \
+                else (e, {})
+            if not isinstance(name, str) or not name:
+                err.append(f'"effects.{placement}": every entry needs a preset name')
+                continue
+            if name in ("off", "none"):
+                continue
+            pid = f"{placement}/{name}"
+            if pid not in shaderfx.presets():
+                have = [p.split("/", 1)[1] for p in shaderfx.presets()
+                        if p.startswith(placement + "/")]
+                err.append(f'"effects.{placement}": no preset "{name}" (have: {", ".join(have)})')
+                continue
+            if not isinstance(params, dict):
+                err.append(f'"effects.{placement}" {name}: "params" must be an object')
+                continue
+            try:
+                shaderfx.uniforms(pid, params)
+            except (shaderfx.EffectError, ValueError, TypeError, AttributeError) as e2:
+                err.append(f'"effects.{placement}" {name}: bad params ({e2})')
+    music = data.get("music")
+    if isinstance(music, dict) and "cleared" in music and not isinstance(music["cleared"], bool):
+        err.append('"music.cleared" must be true or false')
+    return err, warn
+
+
+def load_raw(name=None):
+    """(dict or None, error or None) straight from brand.json: a syntax error
+    is reported, never read as an empty brand."""
+    d = brand_dir(name)
+    p = os.path.join(d, "brand.json") if d else None
+    if not p or not os.path.exists(p):
+        return None, None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f), None
+    except ValueError as e:
+        return None, f"brand.json is not valid JSON ({e})"
+    except OSError as e:
+        return None, f"brand.json cannot be read ({e})"
+
+
+def validate(name=None):
+    """(errors, warnings) for a brand by name, including a broken file."""
+    data, err = load_raw(name)
+    if err:
+        return [err], []
+    if data is None:
+        return [], []
+    errs, warns = check(data)
+    d = brand_dir(name)
+    for role, fn in (data.get("fonts") or {}).items() if isinstance(data.get("fonts"), dict) else []:
+        if isinstance(fn, str) and os.path.basename(fn) == fn and not os.path.exists(os.path.join(d, fn)):
+            errs.append(f'font "{fn}" ({role}) is not in the brand folder')
+    return errs, warns
+
+
+def require_valid():
+    """Stop a run at its first second when the active brand.json has errors
+    (a typo in an effect name must not silently switch it off at minute 10)."""
+    name = brand_name()
+    if not name:
+        return
+    errs, warns = validate(name)
+    for w in warns:
+        print(f"[brand] {name}: {w}")
+    if errs:
+        raise SystemExit(f"[brand] {name}: brand.json has {len(errs)} error(s):\n  - "
+                         + "\n  - ".join(errs) + f"\nFix them, then `reelly brand check {name}`.")
+
+
+def migrate(data):
+    """An older brand.json dict rewritten to schema 1 (a new dict)."""
+    old = dict(data)
+    out = {k: v for k, v in old.items() if k not in MOVED}
+    vid = dict(out.get("video") or {})
+    txt = dict(out.get("text") or {})
+    eff = dict(out.get("effects") or {})
+    if "fps" in old:
+        vid.setdefault("fps", old["fps"])
+    if "reframe" in old:
+        vid.setdefault("reframe", old["reframe"])
+    if "profile" in old:
+        vid.setdefault("content_type", str(old["profile"]).replace("_", "-"))
+    copy = dict(out.get("copy") or {})
+    if "clip_len" in copy:
+        vid.setdefault("clip_len", copy.pop("clip_len"))
+        out["copy"] = copy
+    fx = old.get("fx") if isinstance(old.get("fx"), dict) else {}
+    names = {"smoke-endcard": "smoke", "smoke-ambient": "smoke", "embers-ambient": "embers",
+             "impact-ambient": "impact", "focus-ambient": "focus", "smoke-aura": "smoke"}
+
+    def conv(e):
+        if isinstance(e, dict):
+            return {**e, "preset": names.get(e.get("preset"), e.get("preset"))}
+        return names.get(e, e)
+    for placement, legacy, key in (("endcard", "outro_fx", "outro"), ("ambient", "ambient_fx", "ambient"),
+                                   ("text", "text_fx", "text"), ("finish", "finish_fx", "finish")):
+        v = fx.get(key)
+        if v is None and legacy and old.get(legacy):
+            v = old[legacy]                     # "smoke"
+        if v is not None:
+            eff.setdefault(placement, [conv(x) for x in v] if isinstance(v, list) else conv(v))
+    for a, b in (("text_motion", "motion"), ("text_exit", "exit"), ("petal_color", "petal_color"),
+                 ("text_behind", "behind_subject")):
+        if a in fx:
+            txt.setdefault(b, fx[a])
+    for k, v in (("video", vid), ("text", txt), ("effects", eff)):
+        if v:
+            out[k] = v
+    return {"schema": SCHEMA, **{k: v for k, v in out.items() if k != "schema"}}
+
+
+def record_verdict(name, approve=(), reject=(), keep=40):
+    """Append approved / rejected lines to brands/<name>/brand.json "copy"
+    (deduplicated, newest last, at most `keep` each), so the next hook
+    writer and judge learn the brand's taste. Returns the copy dict."""
+    d = brand_dir(name)
+    p = os.path.join(d, "brand.json") if d else None
+    if not p or not os.path.exists(p):
+        raise ValueError(f"no brand.json for brand {name!r}")
+    with open(p, encoding="utf-8") as f:
+        spec = json.load(f)
+    copy = spec.setdefault("copy", {})
+    for key, new in (("approved_lines", approve), ("rejected_lines", reject)):
+        cur = [x for x in copy.get(key, []) if isinstance(x, str)]
+        for line in new:
+            line = str(line).strip()
+            if line:
+                cur = [x for x in cur if x != line] + [line]
+        copy[key] = cur[-keep:]
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(spec, f, indent=1)
+    return copy
+
+
+def font_css():
+    """CSS that points Chrome-rendered layers (overlays, cards) at the active
+    brand's own font files instead of a font CDN, or "" with no brand fonts.
+
+    `!important` rules beat the templates' inline font-family, so every
+    overlay takes the brand type from this one injection point. Headline-like
+    marks (.marker) take the headline role and the brand accent."""
+    from pathlib import Path
+    cap, head = _brand_font("caption"), _brand_font("headline")
+    if not cap and not head:
+        return ""
+    rules = []
+    for fam, path in (("ReellyBrandCaption", cap or head),
+                      ("ReellyBrandHeadline", head or cap)):
+        rules.append("@font-face {font-family:'%s'; src:url('%s');}"
+                     % (fam, Path(path).resolve().as_uri()))
+    acc = accent()
+    rules.append("body, body * {font-family:'ReellyBrandCaption', sans-serif "
+                 "!important;}")
+    rules.append(".marker {font-family:'ReellyBrandHeadline', sans-serif "
+                 "!important; color:%s !important;}" % acc)
+    return "\n".join(rules)
+
+
+def add_brand(name, fonts=None, accent=None, ink=None, surface=None,
+              force=False):
+    """Create or update brands/<name>/ in the LOCAL kit: copy each font file
+    in, write brand.json. Brand assets never live in the repository; this is
+    the one-step way for any user to register their own.
+
+    fonts: {role: path} (roles: headline, caption, cta, kicker). Colours are
+    #RRGGBB. Returns the brand folder. Raises ValueError on bad input."""
+    import shutil
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name or "") or name in (".", ".."):
+        raise ValueError(f"brand name must be letters, digits, . _ - : {name!r}")
+    for label, c in (("accent", accent), ("ink", ink), ("surface", surface)):
+        if c is not None and not _HEX.fullmatch(c):
+            raise ValueError(f"{label} must be #RRGGBB, got {c!r}")
+    d = os.path.join(kit_dir(), "brands", name)
+    spec = {}
+    if os.path.exists(os.path.join(d, "brand.json")) and not force:
+        try:
+            with open(os.path.join(d, "brand.json"), encoding="utf-8") as f:
+                spec = json.load(f) or {}
+        except (OSError, ValueError):
+            spec = {}
+    spec = {"schema": SCHEMA, **{k: v for k, v in spec.items() if k != "schema"}}
+    spec["name"] = name
+    spec.setdefault("fonts", {})
+    os.makedirs(d, exist_ok=True)
+    for role, src in (fonts or {}).items():
+        if role not in ROLE_FALLBACK:
+            raise ValueError(f"unknown font role {role!r}; use one of "
+                             f"{', '.join(ROLE_FALLBACK)}")
+        if not os.path.isfile(src) or not src.lower().endswith((".ttf", ".otf")):
+            raise ValueError(f"{role}: need a .ttf or .otf file, got {src!r} "
+                             "(cut variable or web fonts to a static .ttf first)")
+        fn = f"{role}{os.path.splitext(src)[1].lower()}"
+        shutil.copyfile(src, os.path.join(d, fn))
+        spec["fonts"][role] = fn
+    for key, c in (("accent", accent), ("ink", ink), ("surface", surface)):
+        if c is not None:
+            spec[key] = c
+    with open(os.path.join(d, "brand.json"), "w", encoding="utf-8") as f:
+        json.dump(spec, f, indent=1)
+    return d
+
+
+def list_brands():
+    """{name: brand.json dict} for every brand in the local kit."""
+    root = os.path.join(kit_dir(), "brands")
+    out = {}
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return out
+    for n in names:
+        if os.path.isdir(os.path.join(root, n)):
+            out[n] = brand(n)
+    return out
 
 
 def copy_bank():
@@ -153,7 +621,7 @@ def copy_bank():
             return {}
     try:
         import yaml
-        with open(p) as f:
+        with open(p, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return data if isinstance(data, dict) else {}
     except Exception:
@@ -167,7 +635,7 @@ def music_manifest():
         p = os.path.join(d, fn)
         if os.path.exists(p):
             try:
-                with open(p) as f:
+                with open(p, encoding="utf-8") as f:
                     data = loader(f)
                 return data if isinstance(data, dict) else {}
             except (OSError, ValueError):
@@ -232,7 +700,7 @@ def register_bed(path, genre, duration, source="fal-ai/elevenlabs/music"):
                          "date": datetime.date.today().isoformat()})
             man.update({"version": KIT_VERSION, "beds": beds})
             tmp = man_p + ".tmp"
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(man, f, indent=1)
             os.replace(tmp, man_p)
             return dst
@@ -329,7 +797,7 @@ def _default_copy_bank_data():
 def _write_default_copy_bank(path):
     import yaml
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(_default_copy_bank_data(), f, sort_keys=False,
                        allow_unicode=True)
     return path
@@ -494,7 +962,7 @@ def build_defaults(force=False):
 
     kit_out = {"version": KIT_VERSION, "sources": recorded, "accent": acc,
                "accent_source": acc_src}
-    with open(os.path.join(root, "kit.json"), "w") as f:
+    with open(os.path.join(root, "kit.json"), "w", encoding="utf-8") as f:
         json.dump(kit_out, f, indent=1)
     summary = {"kit_dir": root, "accent": acc, "endcards_built": built,
                "endcards_kept": kept, "copy_bank": bank_path,

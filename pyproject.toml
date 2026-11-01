@@ -1,12 +1,14 @@
 [project]
 name = "reelly"
-version = "0.1.0"
-description = "Local-first video editing engine"
+dynamic = ["version"]
+description = "Turns long recordings into finished vertical social clips with no manual editing: kinetic type on the beat, GPU motion design, flash-safety checks. Local-first, zero paid calls by default."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
-authors = [{name = "Reelly contributors"}]
-keywords = ["video", "editing", "ffmpeg", "captions", "shorts"]
+authors = [{name = "Fernando Guardiola"}]
+keywords = ["video", "video-editing", "short-form-video", "vertical-video", "shorts", "reels",
+            "tiktok", "captions", "kinetic-typography", "motion-graphics", "webgl", "glsl",
+            "ffmpeg", "photosensitivity", "local-first"]
 dependencies = [
     "mlx-whisper>=0.4; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "numpy",
@@ -26,6 +28,9 @@ Homepage = "https://github.com/FernGuard/reelly"
 Issues = "https://github.com/FernGuard/reelly/issues"
 
 [project.optional-dependencies]
+# 2.5D parallax for stills (reelly parallax): Depth Anything V2 Small through
+# ONNX Runtime on the CPU; the model (Apache-2.0) is downloaded separately.
+depth = ["onnxruntime>=1.20"]
 # local speaker diarization (gap 8): on-device, no per-run cost.
 # One-time setup documented in README and docs/SETUP.md.
 # Upper bound is deliberate. pyannote.audio 4.x rewires the speaker-diarization-3.1
@@ -38,10 +43,10 @@ Issues = "https://github.com/FernGuard/reelly/issues"
 # >=4 is forced, not preferred: pyannote.audio 3.x calls torchaudio.AudioMetaData,
 # removed in torchaudio 2.1+, so 3.x cannot run against the torch we build on.
 # Consequence for setup: 4.x fetches its embedding transform from
-# pyannote/speaker-diarization-community-1 unconditionally — even when the 3.1
+# pyannote/speaker-diarization-community-1 unconditionally, even when the 3.1
 # config.yaml names wespeaker-voxceleb-resnet34-LM and even when that config is
 # loaded from a local path. So THREE repos must be accepted, not the two the
-# pyannote docs imply. See the README diarization section.
+# pyannote docs imply. See docs/SETUP.md (models).
 diarize = ["pyannote.audio>=4"]
 # faster English-only ASR on Apple Silicon (REELLY_ASR=parakeet opts in;
 # default stays mlx-whisper until the accuracy A/B on real footage).
@@ -54,6 +59,9 @@ reelly = "reelly.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "reelly/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["reelly"]

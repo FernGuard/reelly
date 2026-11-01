@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "effect": "smoke_endcard",
+  "description": "Smoke rising through the end card with a ring of light on the ask's beat.",
+  "params": {},
+  "render": {
+    "scale": 0.5,
+    "bloom": {
+      "threshold": 0.45,
+      "strength": 1.2,
+      "sigma": 24
+    }
+  },
+  "lite": {
+    "render": {
+      "scale": 0.25,
+      "bloom": null
+    }
+  }
+}

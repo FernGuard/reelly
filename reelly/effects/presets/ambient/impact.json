@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "effect": "impact_ambient",
+  "description": "Comic impact lines that shoot out of the picture's edge where a real impact happens (sound and picture jump together).",
+  "params": {},
+  "render": {
+    "scale": 1.0,
+    "fps": 60,
+    "sparse": "events",
+    "bloom": {
+      "threshold": 0.45,
+      "strength": 1.0,
+      "sigma": 16
+    }
+  },
+  "lite": {
+    "render": {
+      "scale": 0.5,
+      "fps": 60,
+      "sparse": "events",
+      "bloom": null
+    }
+  }
+}

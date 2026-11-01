@@ -65,6 +65,15 @@ def _pyannote_version():
         return "unknown"
 
 
+def _load_error(e):
+    if config.local_only():
+        return (f"could not load {MODEL} from the local cache ({e}). Under "
+                f"--local-only nothing is downloaded: run once without it to "
+                f"fetch the model.")
+    return (f"could not load {MODEL} ({e}). Most often the model terms have "
+            f"not been accepted for this token.\n{SETUP_HELP}")
+
+
 def _pipeline():
     """The diarization pipeline, or a RuntimeError that says exactly what to fix."""
     try:
@@ -73,7 +82,11 @@ def _pipeline():
         raise RuntimeError(
             f"pyannote.audio is not installed ({e}).\n{SETUP_HELP}") from e
     tok = token()
-    if not tok:
+    if not tok and config.local_only():
+        # local-only: the Hub is offline, so only an already-downloaded model
+        # loads (no token needed for the cache)
+        tok = None
+    elif not tok:
         raise RuntimeError(
             f"no HuggingFace token found for the {MODEL} download.\n{SETUP_HELP}")
     # pyannote.audio renamed the kwarg (use_auth_token -> token) in v4. Support
@@ -90,15 +103,11 @@ def _pipeline():
                 f"pyannote.audio {_pyannote_version()} does not accept either "
                 f"`token` or `use_auth_token` on Pipeline.from_pretrained "
                 f"({e}). This is a reelly compatibility bug, not a setup "
-                f"problem — the token and model terms are fine.") from e
+                f"problem -- the token and model terms are fine.") from e
         except Exception as e:
-            raise RuntimeError(
-                f"could not load {MODEL} ({e}). Most often the model terms have "
-                f"not been accepted for this token.\n{SETUP_HELP}") from e
+            raise RuntimeError(_load_error(e)) from e
     except Exception as e:
-        raise RuntimeError(
-            f"could not load {MODEL} ({e}). Most often the model terms have "
-            f"not been accepted for this token.\n{SETUP_HELP}") from e
+        raise RuntimeError(_load_error(e)) from e
     if pipe is None:
         raise RuntimeError(
             f"HuggingFace returned no pipeline for {MODEL}: the model terms "
@@ -109,8 +118,8 @@ def _pipeline():
 def _to_best_device(pipe):
     """Move the pipeline to the Apple GPU (MPS) when available; CPU otherwise.
 
-    Returns the device name actually in use. ANY failure — no torch, no MPS,
-    an op the MPS backend does not support at load time — falls back to CPU
+    Returns the device name actually in use. ANY failure -- no torch, no MPS,
+    an op the MPS backend does not support at load time -- falls back to CPU
     and says so; it never crashes analyze. REELLY_DIAR_DEVICE=cpu forces CPU.
     """
     if os.environ.get("REELLY_DIAR_DEVICE", "").strip().lower() == "cpu":
@@ -124,7 +133,7 @@ def _to_best_device(pipe):
         pipe.to(torch.device("mps"))
         print("[diar ] pipeline on Apple GPU (MPS)")
         return "mps"
-    except Exception as e:  # noqa: BLE001 — device selection must never crash
+    except Exception as e:  # noqa: BLE001 -- device selection must never crash
         print(f"[diar ] could not move pipeline to MPS ({e}): pipeline on CPU")
         try:
             import torch
@@ -139,7 +148,7 @@ def _infer(pipe, wav, device):
     at inference) retries once on CPU instead of killing the stage."""
     try:
         return pipe(wav)
-    except Exception as e:  # noqa: BLE001 — MPS gaps surface as many types
+    except Exception as e:  # noqa: BLE001 -- MPS gaps surface as many types
         if device != "mps":
             raise
         print(f"[diar ] MPS inference failed ({e}); retrying on CPU")
@@ -200,15 +209,25 @@ def needs_rerun(out_json):
     if not os.path.exists(out_json):
         return False
     try:
-        art = json.load(open(out_json))
+        art = json.load(open(out_json, encoding="utf-8"))
     except (ValueError, OSError):
         return False
     if art.get("status") == "ok":
         return False
-    if art.get("status") == "unavailable" and token() is None:
-        print("[diar ] diarization still unavailable (no HuggingFace token); "
-              "skipping the retry -- add a token to re-enable")
-        return False
+    if art.get("status") == "unavailable":
+        # Name the blocker that is actually still there: the extra not being
+        # installed was reported as a missing token before.
+        try:
+            _import_pipeline()
+        except ImportError:
+            print("[diar ] diarization still unavailable (pyannote.audio is not "
+                  "installed); skipping the retry -- install the diarize extra "
+                  "to re-enable")
+            return False
+        if token() is None:
+            print("[diar ] diarization still unavailable (no HuggingFace "
+                  "token); skipping the retry -- add a token to re-enable")
+            return False
     return True
 
 
@@ -269,7 +288,7 @@ def run(video, out_json):
               f"(local, $0, {device}) ...")
         ann = _annotation(_infer(pipe, wav, device))
     artifact = _artifact_from(_turns_from(ann))
-    json.dump(artifact, open(out_json, "w"), indent=1)
+    json.dump(artifact, open(out_json, "w", encoding="utf-8"), indent=1)
     _sync_voices(out_json, artifact)
     _report(artifact)
     return artifact
@@ -358,7 +377,7 @@ def run_windows(video, windows, out_json=None):
         "mode": "windows", "windows": [[round(s, 2), round(e, 2)] for s, e in windows],
         "note": "voice identity is only verified INSIDE these windows"})
     if out_json:
-        json.dump(artifact, open(out_json, "w"), indent=1)
+        json.dump(artifact, open(out_json, "w", encoding="utf-8"), indent=1)
         _sync_voices(out_json, artifact)
     _report(artifact)
     return artifact

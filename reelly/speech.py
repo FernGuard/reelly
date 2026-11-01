@@ -55,6 +55,9 @@ def _detect_gain_db(video):
 
 
 def get_silences(video, noise="-32dB", min_d=0.12):
+    if not media.has_audio(video):
+        total = media.duration(video)
+        return [(0.0, round(total, 3))] if total else []
     gain = _detect_gain_db(video)
     af = f"silencedetect=noise={noise}:d={min_d}"
     if gain:
@@ -77,18 +80,36 @@ def get_silences(video, noise="-32dB", min_d=0.12):
     return sil
 
 
-def words_from(result):
+# A word the recogniser itself gives under this probability is noise, not
+# speech: on music-only or silent footage whisper invents tokens like "!" at
+# p=0.0002, and those reached the transcript as real words. Words with no
+# probability (other engines) are kept.
+MIN_WORD_PROB = 0.05
+
+
+def _is_word(t):
+    return any(ch.isalnum() for ch in t)
+
+
+def words_from(result, min_prob=MIN_WORD_PROB):
     """Flatten a whisper result (dict or path) into [{t, s, e}],
-    brand-vocabulary corrected."""
+    brand-vocabulary corrected. Drops tokens with no letters or digits and
+    words below `min_prob` confidence."""
     from . import vocab
     if isinstance(result, str):
-        result = json.load(open(result))
+        result = json.load(open(result, encoding="utf-8"))
     out = []
     for seg in result.get("segments", []):
         for w in seg.get("words", []):
             t = str(w.get("word", w.get("text", ""))).strip()
-            if t and w.get("start") is not None and w.get("end") is not None:
-                out.append({"t": t, "s": float(w["start"]), "e": float(w["end"])})
+            if not t or w.get("start") is None or w.get("end") is None:
+                continue
+            if not _is_word(t):
+                continue
+            p = w.get("probability")
+            if isinstance(p, (int, float)) and p == p and p < min_prob:
+                continue
+            out.append({"t": t, "s": float(w["start"]), "e": float(w["end"])})
     return vocab.correct_words(out)
 
 
@@ -174,7 +195,7 @@ def clean_srt(words, path, **kw):
     out = []
     for i, (s, e, t) in enumerate(cues, 1):
         out += [str(i), f"{_srt_ts(s)} --> {_srt_ts(max(e, s + 0.4))}", t, ""]
-    open(path, "w").write("\n".join(out))
+    open(path, "w", encoding="utf-8").write("\n".join(out))
     return len(cues)
 
 

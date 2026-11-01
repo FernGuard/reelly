@@ -2,12 +2,23 @@
 
   reelly setup [--json]
   reelly analyze <video> [--facecam F] [--name N] [--out DIR] [--skip-visual]
-                 [--force] [--crop W:H:X:Y]
+                 [--force] [--crop W:H:X:Y|auto]
   reelly budget
   reelly budget sprint <cap> [--days N] [--reason TEXT]
   reelly budget endsprint
+
+Global flags, accepted anywhere on the command line:
+  --allow-paid     let THIS run call providers that bill per call (Gemini,
+                   OpenAI, FAL, Anthropic). Off by default: Reelly is zero-paid.
+  --brand NAME     render with the brand kit's brands/NAME (fonts, accent,
+                   ink, surface). Same as REELLY_BRAND=NAME.
+  --length LO-HI   clip length window in seconds for planning (default 20-28,
+                   or the brand brief's "clip_len"). Same as REELLY_CLIP_LEN.
 """
 import argparse
+import os
+import subprocess
+import sys
 
 from . import ledger
 
@@ -38,11 +49,17 @@ class _CutGfx:
         self.futs.append((plan["id"], self.pool.submit(self._one, plan["id"])))
 
     def _one(self, cid):
-        from . import overlays
-        if self.autoplan_needed:
-            overlays.autoplan(self.project, product=self.product, cut_id=cid,
-                              tag=self.tag)
-        overlays.apply(self.project, cut_id=cid, tag=self.tag)
+        from . import degrade, direct, overlays
+        degrade.begin()                  # this thread's fallbacks land on the cut too
+        try:
+            if self.autoplan_needed:
+                overlays.autoplan(self.project, product=self.product, cut_id=cid,
+                                  tag=self.tag)
+            overlays.apply(self.project, cut_id=cid, tag=self.tag)
+        finally:
+            notes = degrade.collect()
+            if notes:
+                degrade.append(direct.resolve_project(self.project), cid, notes)
 
     def finish(self):
         """Barrier: wait for every queued gfx job; raise like apply() did."""
@@ -50,7 +67,7 @@ class _CutGfx:
         for cid, fu in self.futs:
             try:
                 fu.result()
-            except Exception as e:  # noqa: BLE001 — isolate per cut
+            except Exception as e:  # noqa: BLE001 -- isolate per cut
                 print(f"[overlays] {cid} FAILED: {e}")
                 failed.append(cid)
         self.pool.shutdown()
@@ -58,8 +75,51 @@ class _CutGfx:
             raise RuntimeError("overlays failed on: " + ", ".join(failed))
 
 
-def main():
+BRAINS = ["auto", "codex", "claude", "gemini", "gpt"]
+BRAIN_HELP = ("editor brain: auto (default) uses the signed-in codex CLI "
+              "(subscription) and falls back to heuristics; claude must be "
+              "asked for by name; gemini and gpt bill per call and need "
+              "--allow-paid")
+
+
+def _global_flags(argv):
+    """Strip --allow-paid / --local-only / --brand NAME / --length from
+    anywhere in argv into the env, so they work before or after the
+    subcommand. Returns the remaining argv."""
+    out, i = [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--allow-paid":
+            os.environ["REELLY_ALLOW_PAID"] = "1"
+        elif a == "--local-only":
+            os.environ["REELLY_LOCAL_ONLY"] = "1"
+        elif a == "--brand" and i + 1 < len(argv):
+            os.environ["REELLY_BRAND"] = argv[i + 1]
+            i += 1
+        elif a.startswith("--brand="):
+            os.environ["REELLY_BRAND"] = a.split("=", 1)[1]
+        elif a == "--length" and i + 1 < len(argv):
+            os.environ["REELLY_CLIP_LEN"] = argv[i + 1]
+            i += 1
+        elif a.startswith("--length="):
+            os.environ["REELLY_CLIP_LEN"] = a.split("=", 1)[1]
+        else:
+            out.append(a)
+        i += 1
+    return out
+
+
+def main(argv=None):
+    argv = _global_flags(list(sys.argv[1:] if argv is None else argv))
+    from . import config as _config
+    if _config.local_only():
+        # model libraries (mlx-whisper, parakeet, pyannote) use only what is
+        # already cached: no Hugging Face Hub request, not even a version check
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    from . import __version__
     ap = argparse.ArgumentParser(prog="reelly")
+    ap.add_argument("--version", action="version", version=f"reelly {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("analyze", help="full analysis bundle for a recording")
@@ -69,14 +129,15 @@ def main():
     a.add_argument("--out", help="projects root (default: config.DEFAULT_PROJECTS)")
     a.add_argument("--skip-visual", action="store_true", help="skip the Gemini pass")
     a.add_argument("--force", action="store_true", help="ignore cached artifacts")
-    a.add_argument("--crop", help="W:H:X:Y crop to hide a baked-in facecam corner")
+    a.add_argument("--crop", help="W:H:X:Y source crop, or 'auto' to find the game "
+                                  "view inside capture chrome (Unity editor, OBS "
+                                  "borders). Applied to analysis AND render")
 
     d = sub.add_parser("direct", help="editor brain: cut plans from an analysis bundle")
     d.add_argument("project", help="project name or path")
     d.add_argument("--no-ai", action="store_true", help="heuristic refinement only")
     d.add_argument("--max-cuts", type=int, default=8)
-    d.add_argument("--brain", choices=["gemini", "gpt"], default="gpt",
-                   help="language-model backend for edit refinement")
+    d.add_argument("--brain", choices=BRAINS, default="auto", help=BRAIN_HELP)
     d.add_argument("--tag", help="suffix for plan/preview files (A/B experiments)")
 
     c = sub.add_parser("cut", help="ONE PASS: plans -> fully treated videos + REVIEW.md "
@@ -85,7 +146,7 @@ def main():
     c.add_argument("--replan", action="store_true",
                    help="re-run the editor brain even if cut plans already exist")
     c.add_argument("--max-cuts", type=int, default=8)
-    c.add_argument("--brain", choices=["gemini", "gpt"], default="gpt")
+    c.add_argument("--brain", choices=BRAINS, default="auto", help=BRAIN_HELP)
     c.add_argument("--tag", help="suffix for plan/deliverable files (A/B experiments)")
     c.add_argument("--product", default="video",
                    choices=["video", "story", "games", "adventure"])
@@ -328,15 +389,211 @@ def main():
     su.add_argument("--json", action="store_true",
                     help="machine-readable check results")
 
-    args = ap.parse_args()
+    br = sub.add_parser("brand", help="manage local brands in the brand kit "
+                                      "(fonts, accent, ink, surface)")
+    brs = br.add_subparsers(dest="brand_cmd", required=True)
+    ba = brs.add_parser("add", help="create or update a brand in ~/.reelly/brandkit/brands/")
+    ba.add_argument("name")
+    ba.add_argument("--headline", help="static .ttf/.otf for hooks and end cards")
+    ba.add_argument("--caption", help="static .ttf/.otf for captions and labels")
+    ba.add_argument("--cta", help="optional .ttf/.otf for the call to action")
+    ba.add_argument("--accent", help="#RRGGBB highlight colour")
+    ba.add_argument("--ink", help="#RRGGBB text colour")
+    ba.add_argument("--surface", help="#RRGGBB plate / backdrop colour")
+    ba.add_argument("--replace", action="store_true",
+                    help="start brand.json fresh instead of updating it")
+    brs.add_parser("list", help="list the brands in the local kit")
+    bc = brs.add_parser("check", help="validate a brand's brand.json (schema, presets, values)")
+    bc.add_argument("name", nargs="?", help="brand name (default: the active brand)")
+    bm = brs.add_parser("migrate", help="rewrite an older brand.json to the current schema")
+    bm.add_argument("name", nargs="?", help="brand name (default: the active brand)")
+    bm.add_argument("--write", action="store_true",
+                    help="write it (keeps brand.json.bak); default: print the result")
+    cf = sub.add_parser("config", help="every REELLY_* setting and its value in effect")
+    cf.add_argument("--all", action="store_true", help="include advanced settings")
+    md = sub.add_parser("models", help="optional local models: status, or `fetch NAME`")
+    md.add_argument("action", nargs="?", choices=["fetch"], help="download and verify")
+    md.add_argument("name", nargs="?", help="depth | segmenter | all")
+    bv = brs.add_parser("verdict", help="record approved / rejected lines "
+                                        "into the brand brief (the hook writer learns them)")
+    bv.add_argument("name")
+    bv.add_argument("--approve", action="append", default=[], metavar="LINE")
+    bv.add_argument("--reject", action="append", default=[], metavar="LINE")
+    hk = sub.add_parser("hooks", help="re-write the hook + opening frame of existing cut plans")
+    hk.add_argument("project")
+    hk.add_argument("--cut", help="one cut id only")
+    hk.add_argument("--brain", choices=BRAINS, default="auto", help=BRAIN_HELP)
+
+    px_ = sub.add_parser("parallax", help="a 2.5D camera move on a still (key art, a "
+                         "photo) from its estimated depth, as a vertical clip")
+    px_.add_argument("image")
+    px_.add_argument("--out", help="mp4 path (default <image>_parallax.mp4)")
+    px_.add_argument("--dur", type=float, default=6.0)
+    px_.add_argument("--move", choices=["push", "dolly"], default="push")
+    px_.add_argument("--center", help="focus point in image uv, y up: x,y (default 0.5,0.5)")
+    px_.add_argument("--depth", help="use this depth PNG (white = near) instead of estimating")
+    px_.add_argument("--fit", choices=["width", "cover"], default="width",
+                     help="width: the whole still across the frame (default, keeps the "
+                          "composition); cover: fill the frame, cropping the sides")
+    sz_ = sub.add_parser("safezones", help="draw the TikTok/Reels/Shorts chrome "
+                                           "over frames of a render (proof sheet)")
+    sz_.add_argument("video")
+    sz_.add_argument("--at", default="0,1,5,9",
+                     help="comma list of seconds to sample (default 0,1,5,9)")
+    sz_.add_argument("--out", help="PNG path (default <video>_safezones.png)")
+
+    args = ap.parse_args(argv)
+    if args.cmd == "parallax":
+        import os
+        import shutil
+        import tempfile
+        from . import config, depth, models, shaderfx
+        if not 0.5 <= args.dur <= 60.0:
+            raise SystemExit("parallax: --dur must be between 0.5 and 60 seconds")
+        if not os.path.isfile(args.image):
+            raise SystemExit(f"parallax: no image at {args.image}")
+        out = args.out or os.path.splitext(args.image)[0] + "_parallax.mp4"
+        dpng = args.depth or os.path.splitext(out)[0] + "_depth.png"
+        work = tempfile.mkdtemp(prefix="reelly-parallax-")
+        # a phone photo stores "rotate me" in EXIF: render it the right way up
+        image = shaderfx.upright(args.image, work)
+        if not args.depth:
+            try:
+                import onnxruntime  # noqa: F401
+            except ImportError:
+                shutil.rmtree(work, ignore_errors=True)
+                raise SystemExit("parallax: depth estimation needs onnxruntime: "
+                                 "uv sync --extra depth (or pass --depth DEPTH.png)")
+            if not models.path("depth"):
+                shutil.rmtree(work, ignore_errors=True)
+                raise SystemExit("parallax: " + models.missing_message("depth"))
+            depth.estimate(image, dpng)
+            print(f"[depth] {dpng} (Depth Anything V2 Small, Apache-2.0)")
+        params = {}
+        if args.move == "dolly":
+            params = {"u_push": 0.04, "u_depthk": 0.03, "u_dolly": 0.05}
+        if args.center:
+            cx, cy = (float(v) for v in args.center.split(","))
+            params["u_center"] = [cx, cy]
+        params["u_fit"] = 0.0 if args.fit == "cover" else 1.0
+        try:
+            pat = shaderfx.render_parallax("still/parallax", image, dpng,
+                                           os.path.join(work, "f"), args.dur, params=params)
+            subprocess.run([config.FFMPEG, "-y", "-v", "error", "-framerate",
+                            str(config.output_fps()), "-i", pat, "-pix_fmt", "yuv420p",
+                            *config.final_encode_args(), out], check=True)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        print(f"[parallax] {out} ({args.dur:.1f}s, {args.move})")
+        return
+    if args.cmd == "safezones":
+        from . import safezones
+        times = [float(x) for x in args.at.split(",") if x.strip()]
+        out = args.out or os.path.splitext(args.video)[0] + "_safezones.png"
+        print(safezones.sheet(args.video, times, out))
+        return
+    if args.cmd == "hooks":
+        from . import direct, hooks
+        brain = direct.resolve_brain(args.brain)
+        if not brain:
+            raise SystemExit("hooks: no signed-in subscription brain (codex) and paid "
+                             "brains are off; nothing to write with")
+        hooks.rewrite(direct.resolve_project(args.project), brain, cut_id=args.cut)
+        return
+    if args.cmd == "config":
+        from . import settings
+        settings.report(args.all)
+        return
+    if args.cmd == "models":
+        from . import models
+        if args.action == "fetch":
+            keys = list(models.MODELS) if args.name in (None, "all") else [args.name]
+            for k in keys:
+                if k not in models.MODELS:
+                    raise SystemExit(f"models: no model {k!r} (have: {', '.join(models.MODELS)})")
+                models.fetch(k)
+            return
+        for k, p, what in models.status():
+            print(f"  {k:<10} {'installed' if p else 'not installed':<14} {what}"
+                  + (f"\n             {p}" if p else f"\n             reelly models fetch {k}"))
+        return
+    if args.cmd == "brand" and args.brand_cmd in ("check", "migrate"):
+        import json as _json
+        import os
+        from . import brandkit
+        name = args.name or brandkit.brand_name()
+        d = brandkit.brand_dir(name) if name else None
+        p = os.path.join(d, "brand.json") if d else None
+        if not p or not os.path.exists(p):
+            raise SystemExit(f"brand {args.brand_cmd}: no brand.json for {name or '(no active brand)'}")
+        data, perr = brandkit.load_raw(name)
+        if perr:
+            raise SystemExit(f"brand {args.brand_cmd} {name}: {perr}")
+        if args.brand_cmd == "check":
+            errs, warns = brandkit.validate(name)
+            for w in warns:
+                print(f"  warning: {w}")
+            for e in errs:
+                print(f"  ERROR: {e}")
+            print(f"brand '{name}': " + ("OK" if not errs else f"{len(errs)} error(s)"))
+            sys.exit(1 if errs else 0)
+        new = brandkit.migrate(data)
+        errs, _ = brandkit.check(new)
+        if not args.write:
+            print(_json.dumps(new, indent=1, ensure_ascii=False))
+            print(f"\n(dry run; `reelly brand migrate {name} --write` saves it)", file=sys.stderr)
+        else:
+            import shutil
+            shutil.copyfile(p, p + ".bak")
+            with open(p, "w", encoding="utf-8") as f:
+                _json.dump(new, f, indent=1, ensure_ascii=False)
+            print(f"brand '{name}': migrated to schema {brandkit.SCHEMA} (old file: {p}.bak)")
+        for e in errs:
+            print(f"  still to fix by hand: {e}", file=sys.stderr)
+        return
+    if args.cmd == "brand":
+        import json as _json
+        from . import brandkit
+        if args.brand_cmd == "verdict":
+            try:
+                c = brandkit.record_verdict(args.name, args.approve, args.reject)
+            except ValueError as e:
+                raise SystemExit(f"brand verdict: {e}")
+            print(f"brand '{args.name}': {len(c.get('approved_lines', []))} approved, "
+                  f"{len(c.get('rejected_lines', []))} rejected line(s) on file")
+            return
+        if args.brand_cmd == "add":
+            fonts = {r: getattr(args, r) for r in ("headline", "caption", "cta")
+                     if getattr(args, r)}
+            try:
+                d = brandkit.add_brand(args.name, fonts=fonts, accent=args.accent,
+                                       ink=args.ink, surface=args.surface,
+                                       force=args.replace)
+            except ValueError as e:
+                raise SystemExit(f"brand add: {e}")
+            print(f"brand '{args.name}' -> {d}")
+            print(_json.dumps(brandkit.brand(args.name), indent=1))
+            print(f"use it with: reelly <command> ... --brand {args.name}")
+        else:
+            brands = brandkit.list_brands()
+            if not brands:
+                print(f"no brands yet in {brandkit.kit_dir()}/brands "
+                      f"(add one: reelly brand add NAME --headline F.ttf --accent #RRGGBB)")
+            for n, spec in brands.items():
+                roles = ", ".join(sorted((spec.get("fonts") or {}).keys())) or "no fonts"
+                print(f"  {n:<16} accent {spec.get('accent', '-'):<8} "
+                      f"ink {spec.get('ink', '-'):<8} fonts: {roles}")
+        return
     from . import runlog
     if args.cmd == "runs":
-        import sys
         sys.exit(1 if runlog.report() else 0)
     if args.cmd == "setup":
-        import sys
         from . import config
         sys.exit(config.doctor(as_json=args.json))
+    if args.cmd in ("cut", "finalize", "direct", "preview", "overlays", "motion", "sizzle",
+                    "longform", "burnin", "reveal", "hooks"):
+        from . import brandkit
+        brandkit.require_valid()
     if args.cmd != "budget":
         # every real command heartbeats: `reelly runs` then answers "which of
         # my parallel sessions is stuck, and on what stage" in one glance
@@ -365,7 +622,7 @@ def main():
             direct.run(args.project, max_cuts=args.max_cuts, brain=args.brain, tag=args.tag)
         else:
             print(f"[cut  ] using existing plans ({plans_p}); --replan to redo them")
-        _plans = _json.load(open(plans_p))
+        _plans = _json.load(open(plans_p, encoding="utf-8"))
         # Music beds depend ONLY on the plan, so queue them at FAL now: they
         # download while finalize encodes segments instead of each cut sitting
         # through the 10-13s queue+poll wait mid-chain. Same path finalize's
@@ -513,7 +770,7 @@ def main():
     elif args.cmd == "motion":
         import json as _json
         from . import motion
-        copy_override = _json.load(open(args.copy)) if args.copy else None
+        copy_override = _json.load(open(args.copy, encoding="utf-8")) if args.copy else None
         message = args.message
         if not message and copy_override:
             fallback = copy_override.get("caption") or copy_override.get("hook")
@@ -559,7 +816,6 @@ def main():
                                args.speaker, cleared=args.cleared,
                                by=args.by, note=args.note)
     elif args.cmd == "judge":
-        import sys
 
         from . import judge
         sys.exit(1 if judge.run(args.project, tag=args.tag,

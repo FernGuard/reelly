@@ -95,6 +95,15 @@ def check_file(path, expect_vertical=True, plan_dur=None):
 
     err = _analysis_stderr(path, bool(v), bool(a))
     integ, tp = _parse_loudness(err)
+    if a:
+        # Loudness is graded on an AUDIO-ONLY decode, always: the combined
+        # video+audio graph under-reads some files, and not only absurdly
+        # (2026-10-28: a -16.4 LUFS music mix read -22.4 through it, a
+        # plausible-looking wrong number the old sub- -45 check let through).
+        r_a = _ffmpeg_stderr(["-i", path, "-map", "0:a", "-af", EBUR128])
+        ia, ta = _parse_loudness(r_a)
+        if ia is not None:
+            integ, tp = ia, (ta if ta is not None else tp)
     if integ is not None and integ < -45 and a:
         # Sanity re-measure: the combined video+audio single-decode graph can
         # under-read audio on -c copy concat files (seen 2026-08-03: a healthy
@@ -130,6 +139,17 @@ def check_file(path, expect_vertical=True, plan_dur=None):
     freezes = _parse_freeze(err)
     R.append(("frozen_video", "PASS" if not freezes else "WARN",
               f"{len(freezes)} freezes >5s (screen content can be static)"))
+    if v:
+        from . import flashqc
+        try:
+            R.append(flashqc.gate(path))
+        except Exception as e:   # noqa: BLE001 -- a broken probe must not pass silently
+            R.append(("flashes", "FAIL", f"flash check could not run ({e})"))
+        from . import iris
+        try:
+            R.append(iris.gate(path))
+        except Exception as e:   # noqa: BLE001
+            R.append(("iris", "WARN", f"IRIS could not run ({e})"))
     return {"file": path, "results": R}
 
 
@@ -138,7 +158,7 @@ def caption_coverage(plan, words):
 
     Skipped for captions:"none" cuts. Those are picture-planned, their audio is
     music or game VO, and the ASR words were rejected as untrustworthy on
-    purpose (P-TRUST) — so "0 of 0 words reached cues" is the correct outcome,
+    purpose (P-TRUST) -- so "0 of 0 words reached cues" is the correct outcome,
     not a defect. Failing them here would train a human to ignore the gate.
     """
     if plan.get("captions") == "none":
@@ -154,39 +174,115 @@ def caption_coverage(plan, words):
             f"{in_cues}/{len(wtl)} words reach cues")
 
 
-def _text_layers(plan, words):
+def _text_layers(plan, words, with_x=False):
     """Every burned text layer as (t0, t1, y0, y1, label), mirroring the
-    geometry _burn_final actually renders (same y anchors, same wrap)."""
-    from . import captions, speech
+    geometry the render actually uses: y anchors from the ONE layout
+    authority (layout.plan_text, which finalize reads), the same wrap and
+    fonts. with_x=True appends (x0, x1) of the drawn text, centred."""
+    from . import captions, layout as _layout, speech
     from .finalize import _shifted_words
     comp = plan.get("composition")
-    layout = comp.get("cam") if comp else None
-    hook_y, cue_y = (40, 820) if layout == "split" else (210, 1430)
+    template = comp.get("cam") if comp else None
+    L = _layout.plan_text(plan, template)
+    hook_y = L.get("hook", {}).get("y", _layout.FULL_CENTER[0] + 6)
+    cue_y = L.get("karaoke", {}).get("y", _layout.FULL_BOTTOM[0] + 6)
+    mid = _layout.FRAME_W // 2
     layers = []
+
+    def add(t0, t1, y0, h, label, text_w):
+        row = (t0, t1, int(y0), int(y0 + h), label)
+        if with_x:
+            row += (int(mid - text_w / 2), int(mid + text_w / 2))
+        layers.append(row)
+
     hook = plan.get("hook") or {}
     if hook.get("text"):
-        h = captions.block_height(hook["text"], width=980, size=74)
-        layers.append((0.0, float(hook.get("show_s", 3.6)),
-                       hook_y, hook_y + h, "hook"))
+        size = captions.hook_size(hook["text"])
+        add(0.0, float(hook.get("show_s", 3.6)), hook_y,
+            captions.hook_block_height(hook["text"]), "hook",
+            captions.text_extent(hook["text"], captions.HOOK_WIDTH, size,
+                                 captions.HOOK_ROLE))
     for o in plan.get("overlay_lines") or []:
         t0 = float(o["t"])
-        h = captions.block_height(o["text"], width=980, size=74)
-        layers.append((t0, t0 + float(o.get("show_s", 3.0)),
-                       hook_y, hook_y + h, f"overlay@{t0:.0f}s"))
+        size = captions.hook_size(o["text"])
+        add(t0, t0 + float(o.get("show_s", 3.0)), hook_y,
+            captions.hook_block_height(o["text"]), f"overlay@{t0:.0f}s",
+            captions.text_extent(o["text"], captions.HOOK_WIDTH, size,
+                                 captions.HOOK_ROLE))
+    gname = str(plan.get("game_name") or "").strip()
+    if gname and "game_name" in L:
+        content = float(plan.get("content_s") or plan.get("duration_s") or 0)
+        add(0.0, content, L["game_name"]["y"],
+            captions.block_height(gname, width=760, size=40, stroke_w=6),
+            "game_name", captions.text_extent(gname, 760, 40))
     payoff = plan.get("payoff") or {}
     if payoff.get("jump") and payoff.get("local_t") is not None:
         t0 = float(payoff["local_t"])
-        chip_y = 970 if layout == "split" else 1310
-        h = captions.block_height(">> " + payoff.get("chip", "moments later"),
-                                  width=560, size=42, stroke_w=5)
-        layers.append((t0, t0 + 1.6, chip_y, chip_y + h, "payoff_chip"))
+        chip_y = cue_y - 4                    # as finalize._burn_events places it
+        chip = ">> " + payoff.get("chip", "moments later")
+        add(t0, t0 + 1.6, chip_y,
+            captions.block_height(chip, width=560, size=42, stroke_w=5),
+            "payoff_chip", captions.text_extent(chip, 560, 42))
     if plan.get("captions") != "none":
         wtl, _ = _shifted_words(words, plan["segments"])
         for s, e, wlist in speech.group_cue_words(wtl):
             text = " ".join(w["t"] for w in wlist)
-            h = captions.block_height(text, width=960, size=56)
-            layers.append((s, e, cue_y, cue_y + h, f"cue@{s:.1f}s"))
+            add(s, e, cue_y,
+                captions.block_height(text, width=captions.CUE_WIDTH, size=56),
+                f"cue@{s:.1f}s", captions.text_extent(text, captions.CUE_WIDTH, 56))
     return layers
+
+
+def text_contrast(root, plan):
+    """D3/D7 on the burned social text, from finalize's measurement
+    (qc/text_contrast.json): FAIL when even the heaviest plate leaves a layer
+    unreadable, PASS otherwise (saying which layers needed a plate)."""
+    p = os.path.join(root, "qc", "text_contrast.json")
+    try:
+        rows = json.load(open(p, encoding="utf-8")).get(plan.get("id"), None)
+    except (OSError, ValueError):
+        rows = None
+    if rows is None:
+        return ("text_contrast", "SKIP", "not measured (finalize predates the check, "
+                "or REELLY_LEGIBILITY=off)")
+    bad = [r for r in rows if not r.get("pass", True)]
+    plated = [f"{r['label']} ({r['scrim']:.0%})" for r in rows if r.get("scrim", 0) > 0]
+    if bad:
+        return ("text_contrast", "FAIL", "; ".join(
+            f"{r['label']} unreadable even on a full plate (backdrop luma "
+            f"{r.get('backdrop_luma')}): change the colour or the moment" for r in bad[:3]))
+    return ("text_contrast", "PASS",
+            f"{len(rows)} layer(s) measured" + (f"; plated: {', '.join(plated)}" if plated
+                                                else "; none needed a plate"))
+
+
+def ui_zones(plan, words):
+    """No text of ours may sit under platform chrome (layout.UI_ZONES, the
+    union of the TikTok, Reels and Shorts header, caption/nav block and action
+    rail). Burned layers plus the end-card CTA when the outro is typeset."""
+    from . import captions, layout as _layout, outro as outro_mod
+    bad = []
+    rows = _text_layers(plan, words, with_x=True)
+    ob = plan.get("outro") or {}
+    cta = (plan.get("cta") or "").strip()
+    if ob and cta and outro_mod.card_kind(plan, None) == "typeset":
+        y = int(_layout.FRAME_H * outro_mod.CTA_Y_FRAC)
+        width = _layout.centered_width(y, y + 120)
+        size = captions.hook_size(cta, width)
+        w = captions.text_extent(cta, width, size, captions.HOOK_ROLE)
+        h = captions.block_height(cta, width=width, size=size, role=captions.HOOK_ROLE)
+        mid = _layout.FRAME_W // 2
+        rows.append((0, 0, y, y + h, "end_card_cta",
+                     int(mid - w / 2), int(mid + w / 2)))
+    # the drawn glyphs, not the padded PNG box: trim the shadow/stroke pad
+    for _, _, y0, y1, label, x0, x1 in rows:
+        hits = _layout.ui_hits(x0, y0 + 4, x1, y1 - captions._shadow_pad() - 4)
+        if hits:
+            bad.append(f"{label} (x {x0}-{x1}, y {y0}-{y1}) enters {', '.join(hits)}")
+    if bad:
+        return ("ui_zones", "FAIL", "; ".join(bad[:4]))
+    return ("ui_zones", "PASS",
+            f"{len(rows)} text layer(s) clear of the TikTok/Reels/Shorts chrome")
 
 
 def caption_collisions(plan, words, t_eps=0.05):
@@ -278,7 +374,7 @@ def hook_from_frame1(root, plan):
     spec_p = os.path.join(root, "edl", "overlay_specs.json")
     if not os.path.exists(spec_p):
         return ("hook_frame1", "SKIP", "no overlay specs")
-    events = json.load(open(spec_p)).get(plan["id"], [])
+    events = json.load(open(spec_p, encoding="utf-8")).get(plan["id"], [])
     for ev in events:
         t = ev.get("t", [None])
         if t and t[0] is not None and float(t[0]) <= 0.01 and ev.get("fade_in", True) is False:
@@ -298,7 +394,7 @@ def _spec_data(root, plan_id):
     p = os.path.join(root, "edl", "overlay_specs.json")
     if not os.path.exists(p):
         return None, None
-    specs = json.load(open(p))
+    specs = json.load(open(p, encoding="utf-8"))
     return specs.get(plan_id) or [], (specs.get("_meta") or {}).get(plan_id) or {}
 
 
@@ -499,7 +595,7 @@ def run(project, tag=None, visual=False):
     root = direct.resolve_project(project)
     sfx = f"_{tag}" if tag else ""
     plans_p = os.path.join(root, "edl", f"cut_plans{sfx}.json")
-    plans = {p["id"]: p for p in json.load(open(plans_p))} if os.path.exists(plans_p) else {}
+    plans = {p["id"]: p for p in json.load(open(plans_p, encoding="utf-8"))} if os.path.exists(plans_p) else {}
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     blocked = clearance.blocked_ranges(root)
     reports, fails = [], 0
@@ -527,6 +623,10 @@ def run(project, tag=None, visual=False):
         if plan:
             rep["results"].append(caption_coverage(plan, words))
             rep["results"].append(caption_collisions(plan, words))
+            rep["results"].append(ui_zones(plan, words))
+            rep["results"].append(text_contrast(root, plan))
+            from . import degrade
+            rep["results"].append(degrade.gate(root, plan["id"]))
             rep["results"].append(plain.verdict(plan))
             rep["results"].append(retention.bait(plan))
             rep["results"].append(safety.verdict(plan))
@@ -564,6 +664,9 @@ def run(project, tag=None, visual=False):
 
     # perceptual pass (WARN-level: advises the human, never blocks shipping)
     visual_findings = {}
+    if visual and config.paid_blocked("google-genai"):
+        print("[judge] perceptual join review skipped: paid calls are off")
+        visual = False
     if visual:
         from . import visual_qc
         visual_findings = visual_qc.review(root, tag)
@@ -584,8 +687,8 @@ def run(project, tag=None, visual=False):
                     "SKIP": "n/a"}[status]
             L.append(f"- {gate}: {mark} ({detail})")
         L.append("")
-    open(os.path.join(qc, f"qc_report{sfx}.md"), "w").write("\n".join(L))
-    json.dump(reports, open(os.path.join(qc, f"qc_report{sfx}.json"), "w"),
+    open(os.path.join(qc, f"qc_report{sfx}.md"), "w", encoding="utf-8").write("\n".join(L))
+    json.dump(reports, open(os.path.join(qc, f"qc_report{sfx}.json"), "w", encoding="utf-8"),
               indent=1, default=str)
     print("\n".join(L))
     print(f"[judge] {len(reports)} files, {fails} failing gates -> {qc}/qc_report{sfx}.md")

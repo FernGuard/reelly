@@ -415,7 +415,10 @@ def test_unavailable_artifact_is_marked_unverified_and_retried(tmp_path, monkeyp
     monkeypatch.setattr(config, "HOME", str(tmp_path / "empty"))
     # no token: skip retry (would fail identically)
     assert diarize.needs_rerun(p) is False
+    # token present and pyannote installed: retry (without the extra the
+    # retry would fail identically, so it is skipped too)
     monkeypatch.setenv("HUGGINGFACE_TOKEN", "hf_test_not_a_real_token")
+    monkeypatch.setattr(diarize, "_import_pipeline", lambda: object)
     assert diarize.needs_rerun(p) is True
 
 

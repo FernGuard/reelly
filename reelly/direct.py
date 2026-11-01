@@ -7,6 +7,7 @@ edges, and a cut without a clean landing is dropped (playbook C4, learned
 from the fragmentary-clip failure). Every plan carries `because:` fields
 citing the playbook rules and signals that produced it.
 """
+import functools
 import json
 import re
 import os
@@ -39,7 +40,7 @@ RULES = {
 }
 
 RULES.update({
-    "P-LEN": "20-28s: the public default short-form window",
+    "P-LEN": "the clip length window (public default 20-28s; brands and --length tune it)",
     "P-HANDLES": "2+ engagement handles, or reach does not convert",
     "P-TEXT": "the best writing belongs on screen, not only in the caption",
     "P-TRUST": "never caption a transcript the ASR check rejected",
@@ -49,8 +50,8 @@ RULES.update({
               "cheapest way to lose a viewer"),
     "P-LOOP": ("end near where it started: rewatch is one of the strongest "
                "short-form signals and a loop earns it without asking"),
-    "P-BAIT": ("ask for one thing: a comment, a share, a save or a rewatch. "
-               "Saves lead on Instagram, shares and rewatch on TikTok"),
+    "P-BAIT": ("ask for exactly one thing, the one the brand needs (its brief "
+               "names it); a cut that asks for nothing gets nothing"),
     "P-REWARD": "pay off the hook within 5-15s, not at the end",
     "P-SCREEN": ("a cut is not deliverable until a human has watched it end to "
                  "end and recorded a verdict: guns/blood, retired branding, "
@@ -59,7 +60,7 @@ RULES.update({
 
 PLAYBOOK_VERSION = "0.17.0"
 
-VISUAL_REFINE_PROMPT = """You are a short-form video editor cutting one vertical clip (TikTok/Reels/Shorts) from gameplay footage. This footage has NO usable narration: either it is music and ambience, or the automatic transcript failed its reliability check. You are cutting on PICTURE ALONE. There will be no subtitles, so every word you write will be burned on screen as text.
+VISUAL_REFINE_PROMPT = """You are a short-form video editor cutting one vertical clip (TikTok/Reels/Shorts) from {footage}. This footage has NO usable narration: either it is music and ambience, or the automatic transcript failed its reliability check. You are cutting on PICTURE ALONE. There will be no subtitles, so every word you write will be burned on screen as text.
 
 CANDIDATE MOMENT: {why}
 VISUAL SEQUENCES available near this moment (time | scores | what happens):
@@ -69,7 +70,7 @@ AUDIO ENERGY PEAKS (impacts, stings, reveals): {peaks}
 SOURCE RUNS: 0 to {duration:.1f}s
 
 PUBLIC DEFAULTS (tune these with your own private evidence):
-- Target 20 to 28 seconds for this template.
+- Target {len_lo:.0f} to {len_hi:.0f} seconds for this template.
 - Every clip MUST carry at least 2 of these visible engagement handles:
   - persistent_character: a character on screen long enough to attach to
   - readable_detail: on-screen text or a micro-detail worth pausing on
@@ -85,10 +86,12 @@ FORMAT LIBRARY (build to the closest shape):
 - F5 one_vs_escalation: small stake escalating to huge stake
 - F6 late_reveal: normal scene, the last 2 seconds flip it
 - F7 day_in_life: day in the life of [unexpected subject]
+- F9 one_beat: one move and its result, nothing else (a combo lands, a hit, a WIN)
 
 Pick ONE contiguous time range in SECONDS that forms one complete beat: something moving at the very first frame, a middle that escalates the SAME image, and a landing (a reveal, a result, a title card, a turn). Hard rules:
 - SINGLE SCENE ONLY: return exactly ONE unbroken range [[start_s, end_s]]. Never split across gaps or stitch multiple ranges -- a cut is one continuous take. If no single continuous stretch lands, set "landing_ok": false.
-- Total duration 20 to 28 seconds. This is not negotiable.
+- Total duration {len_lo:.0f} to {len_hi:.0f} seconds. This is not negotiable.
+- A short cut is ONE BEAT: one move and its visible result (a combo lands, an attack hits, a curse breaks, a board clears, a WIN). Setup, the move, the result on screen, a breath. A longer cut is a small story with a turn. Pick whichever the footage actually holds.
 - Open on motion. Never open on a static establishing shot or a menu.
 - The last second must land. If this moment has no landing on screen, set "landing_ok": false.
 - ENDING: the clip must END on the payoff fully COMPLETING plus a natural breath. The promised result must be fully on screen and settled before the cut ends -- never end mid-action, mid-generation, or while the result is still playing out. A branded outro is appended AFTER your content automatically; do not reserve room for a card. Report "payoff_complete_by": the second (from the clip's start) by which the payoff has fully completed. It must be at or before the clip's end.
@@ -100,11 +103,11 @@ Write the on-screen text yourself:
 - "overlay_lines": 1 to 3 further lines timed in seconds FROM THE START OF THE CLIP, each max 10 words, spaced at least 4s apart, none in the first 4s (the hook owns that), none in the last 1.5s. Use them to carry the mood or the turn. Leave empty only if the picture genuinely says it all.
 - Every overlay line carries a "role": "tease" DELIBERATELY precedes its event (a hook, a question, building dread); "reveal" NAMES or DESCRIBES a specific on-screen moment (a result, an action, a turn that is visible when the line is up). A reveal must never appear before the moment it describes: the render will hold it back to that moment.
 - "caption": the post caption. Make it a self-insertion prompt ("you get one door, which one") or a 3-fragment lore tease. Never a bare credit line.
-- "cta": the ask, max 6 words, burned on screen at the end. It must tell a viewer what to DO, not what was made. "watch the full version", "try it yourself", "join the community". Imperative, no hype, no exclamation marks.
+- "cta": the ask, max 6 words, burned on screen at the end. It must tell a viewer what to DO, not what was made. Imperative, no hype, no exclamation marks. If a BRAND BRIEF follows, its CTA wins.
 - Pay the hook off within 5 to 15 seconds. A viewer who feels baited leaves and does not engage, and the payoff arriving at the end is the same as no payoff.
 - Never hold one picture past about 3.5 seconds. Each visual change reads as new content; a held frame reads as a stall.
 - Prefer an ending that returns near the opening image. Rewatch is one of the strongest short-form signals and a loop earns it without asking for it.
-- The "cta" must ask for exactly one thing, and it should be the thing that platform rewards: a comment or a save on Instagram, a share or a rewatch on TikTok. A cut that asks for nothing gets nothing.
+- The "cta" must ask for exactly one thing. A cut that asks for nothing gets nothing.
 - Write for someone with no project context. Every word must make sense on its own. Name what happens, not an internal label. Avoid internal workflow terms, metrics, and phase labels.
 
 Return ONLY JSON:
@@ -116,12 +119,12 @@ Return ONLY JSON:
  "caption": "post caption",
  "cta": "the ask, max 6 words",
  "handles": ["persistent_character", "readable_detail"],
- "format": "F1|F2|F4|F5|F6|F7",
+ "format": "F1|F2|F4|F5|F6|F7|F9",
  "payoff_complete_by": 24.5,
  "stranger_appeal": 1-10,
  "why": "one line on why this works as a clip"}}"""
 
-REFINE_PROMPT = """You are a short-form video editor picking the exact lines for one vertical clip (TikTok/Reels/Shorts) from a screen recording of someone building with a creative AI tool.
+REFINE_PROMPT = """You are a short-form video editor picking the exact lines for one vertical clip (TikTok/Reels/Shorts) from a narrated recording.
 
 CANDIDATE MOMENT: {why}
 VISUAL CONTEXT in this window: {visuals}
@@ -152,7 +155,7 @@ Pick the sentence indices that form ONE complete little story: setup (what they 
 - Last sentence must land: a payoff, reveal, reaction, or question. Trailing filler is forbidden.
 - ENDING: the clip must END on the payoff fully COMPLETING plus a natural breath -- the landing line fully spoken, the shown result fully on screen and settled. Never end mid-sentence, mid-action, or while the result is still generating or playing out. A branded outro is appended AFTER your content automatically; do not reserve room for a card. Report "payoff_complete_by": the second (from the clip's start) by which the payoff has fully completed, at or before the clip's end.
 - SINGLE SCENE ONLY: return exactly ONE contiguous range of sentence indices [[first_idx, last_idx]]. Do NOT return multiple ranges and do NOT skip sentences in the middle -- a cut is one unbroken take, never stitched across gaps. Splicing narration from separate moments makes the audio a non-sequitur. If the only way to make this work is to jump across boring middle sentences, this window is not a clean single-scene cut: set "landing_ok": false.
-- Total 20 to 28 seconds for the public default template. Fewer, cleaner lines beat more.
+- Total {len_lo:.0f} to {len_hi:.0f} seconds. Fewer, cleaner lines beat more.
 - If this window has no clean opener or no landing, set "landing_ok": false and stop.
 - The hook text lands on the FIRST frame of the clip and the viewer is reading it before anything else happens. Write it so it works cold over the opening line.
 - Every overlay line carries a "role": "tease" DELIBERATELY precedes its event (a hook, a question, building anticipation); "reveal" NAMES or DESCRIBES a specific spoken or on-screen moment. A reveal must never appear before the moment it describes: the render will hold it back to that moment.
@@ -193,7 +196,7 @@ GPT_MODEL = "gpt-5.6-sol"
 
 def _load(an, f):
     p = os.path.join(an, f)
-    return json.load(open(p)) if os.path.exists(p) else None
+    return json.load(open(p, encoding="utf-8")) if os.path.exists(p) else None
 
 
 def resolve_project(project):
@@ -203,6 +206,17 @@ def resolve_project(project):
     if os.path.isdir(p):
         return p
     raise SystemExit(f"project not found: {project}")
+
+
+def source_crop(root):
+    """The analysis-time source crop ('W:H:X:Y') recorded in
+    analysis/source.json, or None. The render applies the same crop, so a
+    capture's editor chrome never reaches a deliverable."""
+    try:
+        c = json.load(open(os.path.join(root, "analysis", "source.json"), encoding="utf-8")).get("crop")
+    except (OSError, ValueError):
+        return None
+    return c if isinstance(c, str) and re.fullmatch(r"\d+:\d+:\d+:\d+", c) else None
 
 
 def _source_video(root):
@@ -263,7 +277,9 @@ def _refine_ai(cand, wsents, vr, peaks, project):
     resp = client.models.generate_content(
         model=config.GEMINI_MODEL,
         contents=REFINE_PROMPT.format(why=cand["why"], visuals=visuals, peaks=pk,
-                                      sents=lines, payoffs=_payoff_lines(cand, vr)),
+                                      sents=lines, payoffs=_payoff_lines(cand, vr),
+                                      **_len_kw())
+        + brief_block(),
         config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.3))
     with _LEDGER_LOCK:
         ledger.add("gemini-direct", f"refine {cand['why'][:40]}", EST_REFINE_COST, project)
@@ -290,7 +306,7 @@ def _refine_gpt(cand, wsents, vr, peaks, project):
         json={"model": GPT_MODEL,
               "messages": [{"role": "user", "content": REFINE_PROMPT.format(
                   why=cand["why"], visuals=visuals, peaks=pk, sents=lines,
-                  payoffs=_payoff_lines(cand, vr))}],
+                  payoffs=_payoff_lines(cand, vr), **_len_kw()) + brief_block()}],
               "response_format": {"type": "json_object"}},
         timeout=180)
     with _LEDGER_LOCK:
@@ -312,8 +328,281 @@ def _refine_heuristic(cand, wsents):
             "why": "heuristic: whole sentences in candidate window"}
 
 
+# ---------------------------------------------------------------- brains
+# Zero-paid by default: "auto" uses a signed-in SUBSCRIPTION CLI (codex, then
+# claude) and falls back to the heuristic planner. gemini/gpt bill per call
+# and only run with --allow-paid. The API-key env vars are stripped from the
+# CLI subprocess so a stray key can never turn a subscription call into a
+# billed one.
+_CLI_KEY_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN")
+CLI_TIMEOUT_S = 300
+PAID_BRAINS = {"gemini": "google-genai", "gpt": "openai"}
+
+
+def _cli_env():
+    env = dict(os.environ)
+    for k in _CLI_KEY_ENV:
+        env.pop(k, None)
+    return env
+
+
+@functools.lru_cache(maxsize=None)
+def cli_ready(tool):
+    """True when `tool` (codex | claude) is installed AND signed in to a
+    subscription on this machine. Probed once per process."""
+    import shutil
+    import subprocess
+    if config.local_only():
+        return False
+    exe = shutil.which(tool)
+    if not exe:
+        return False
+    cmd = {"codex": [exe, "login", "status"],
+           "claude": [exe, "auth", "status"]}.get(tool)
+    if not cmd:
+        return False
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                           env=_cli_env(), stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    out = (r.stdout or "") + (r.stderr or "")
+    if tool == "codex":
+        return r.returncode == 0 and "logged in" in out.lower()
+    try:
+        return bool(json.loads(r.stdout).get("loggedIn"))
+    except (ValueError, AttributeError):
+        return False
+
+
+def resolve_brain(brain):
+    """The brain this run will actually use, or None for heuristics only.
+
+    auto -> codex when signed in, else None. claude only when asked for by
+    name: its sign-in check reads the macOS keychain, which from ssh or a
+    background job raises a dialog on the user's screen.
+    codex/claude asked for by name but not signed in -> None, said loudly.
+    gemini/gpt without --allow-paid -> SystemExit with the opt-in message."""
+    brain = brain or "auto"
+    if config.local_only():
+        print("[brain] local-only: no CLI or provider calls; planning with heuristics only")
+        return None
+    if brain in PAID_BRAINS:
+        if config.paid_blocked(PAID_BRAINS[brain]):
+            raise SystemExit(config.paid_disabled_message(PAID_BRAINS[brain]))
+        return brain
+    order = ("codex",) if brain == "auto" else (brain,)
+    for tool in order:
+        if cli_ready(tool):
+            return tool
+    print(f"[brain] no signed-in subscription CLI ({' / '.join(order)}); "
+          f"planning with heuristics only")
+    return None
+
+
+def _json_from_text(text):
+    """The first JSON object in a model reply (tolerates code fences and a
+    sentence of chatter around it)."""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        t = t[t.find("\n") + 1:] if "\n" in t else t
+    a, b = t.find("{"), t.rfind("}")
+    if a < 0 or b <= a:
+        return None
+    try:
+        out = json.loads(t[a:b + 1])
+    except json.JSONDecodeError:
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def _ask_cli(tool, prompt, project, label, images=None):
+    """One JSON completion from a subscription CLI. $0 per call; logged in
+    the ledger at 0.0 so the run's record still shows every brain call.
+    images: files attached to the prompt (codex only: `-i`)."""
+    import shutil
+    import subprocess
+    import tempfile
+    if config.local_only():             # backstop: nothing leaves the machine
+        return None
+    exe = shutil.which(tool)
+    prompt = prompt + "\n\nReply with the JSON object only."
+    r, text = None, ""
+    with tempfile.TemporaryDirectory() as td:
+        if tool == "codex":
+            out_p = os.path.join(td, "reply.txt")
+            for model in _codex_models():
+                cmd = [exe, "exec", "--skip-git-repo-check", "--ephemeral",
+                       "-s", "read-only", "-o", out_p]
+                if model:
+                    cmd += ["-m", model]
+                for img in images or []:
+                    cmd += ["-i", os.path.abspath(img)]
+                # The prompt goes in on STDIN (`-`), never as an argument: on
+                # Windows codex is a .cmd shim, and cmd.exe cuts an argument at
+                # its first newline (and at 8191 chars), so every sight sheet
+                # came back with no JSON. `--`: --image takes several files and
+                # would read the `-` as one.
+                cmd += ["--", "-"]
+                r = _run_cli(cmd, td, tool, stdin_text=prompt)
+                if r is None:
+                    return None
+                text = open(out_p, encoding="utf-8").read() if os.path.exists(out_p) else ""
+                if r.returncode == 0 or not _model_refused(r):
+                    if r.returncode == 0:      # remember only a model that answered
+                        _CODEX_MODEL_OK[0] = model
+                    break
+                print(f"  [codex] model {model or '(CLI default)'} refused: "
+                      f"{_cli_error(r)}; trying the next")
+        else:
+            if images:
+                raise ValueError("the claude CLI brain takes no images; use codex")
+            cmd = [exe, "-p", "--output-format", "json",
+                   "--no-session-persistence", "--strict-mcp-config", prompt]
+            r = _run_cli(cmd, td, tool)
+            if r is None:
+                return None
+            try:
+                env_out = json.loads(r.stdout)
+                text = "" if env_out.get("is_error") else env_out.get("result", "")
+            except (ValueError, AttributeError):
+                text = r.stdout
+    with _LEDGER_LOCK:
+        ledger.add(f"{tool}-cli", label, 0.0, project)
+    reply = _json_from_text(text)
+    if reply is None:
+        print(f"  [{tool}] no JSON in the reply (exit {r.returncode}: "
+              f"{_cli_error(r) or 'no error text'}); heuristic for this window")
+    return reply
+
+
+# The model the CLI accepted this run (None = its own default). Tried first
+# on every later call so a refused model is not retried per call.
+_CODEX_MODEL_OK = [False]
+
+
+def _codex_models():
+    """Models to try, in order. REELLY_CODEX_MODEL pins one. Otherwise the
+    CLI's own default first (it tracks what the signed-in plan supports), then
+    config.CODEX_MODEL for an older CLI whose default model needs a newer
+    version. A model ID pinned in code goes stale; the CLI default does not."""
+    pinned = os.environ.get("REELLY_CODEX_MODEL")
+    if pinned:
+        return [pinned]
+    order = [None, config.CODEX_MODEL]
+    if _CODEX_MODEL_OK[0] is not False:
+        order = [_CODEX_MODEL_OK[0]] + [m for m in order if m != _CODEX_MODEL_OK[0]]
+    return order
+
+
+def _run_cli(cmd, cwd, tool, stdin_text=None):
+    import subprocess
+    try:
+        # stdin is the prompt (stdin_text) or closed: both CLIs read a piped
+        # stdin as (extra) prompt and would otherwise wait on the parent's
+        # stdin until the timeout
+        extra = ({"input": stdin_text} if stdin_text is not None
+                 else {"stdin": subprocess.DEVNULL})
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
+                              timeout=CLI_TIMEOUT_S, env=_cli_env(), **extra)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"  [{tool}] call failed ({e}); heuristic for this window")
+        return None
+
+
+def _cli_error(r):
+    """The CLI's own error message, short (never the prompt or a token)."""
+    for line in reversed(((r.stderr or "") + "\n" + (r.stdout or "")).splitlines()):
+        if "error" in line.lower():
+            m = re.search(r'"message":\s*"([^"]+)"', line)
+            return (m.group(1) if m else line.strip())[:160]
+    return ""
+
+
+def _model_refused(r):
+    e = _cli_error(r).lower()
+    return any(k in e for k in ("model", "newer version", "not supported"))
+
+
+def _refine_cli(cand, wsents, vr, peaks, project, tool):
+    """The speech refine contract on a subscription CLI brain."""
+    lines = "\n".join(f"{i} | {media.fmt(x['s'])}-{media.fmt(x['e'])} | {x['text']}"
+                      for i, x in wsents)
+    visuals = "; ".join(f"[{v.get('start_abs')}-{v.get('end_abs')}] {v.get('what_happens', '')}"
+                        for v in vr if cand["s"] - 20 <= v.get("start_s", 0) <= cand["e"] + 20) or "none noted"
+    pk = ", ".join(f"{media.fmt(p['t'])} ({p['above_median']:+.1f}dB)"
+                   for p in peaks if cand["s"] - 10 <= p["t"] <= cand["e"] + 10) or "none"
+    return _ask_cli(tool, REFINE_PROMPT.format(
+        why=cand["why"], visuals=visuals, peaks=pk, sents=lines,
+        payoffs=_payoff_lines(cand, vr), **_len_kw()) + brief_block(), project,
+        f"refine {cand['why'][:40]}")
+
+
+def _len_kw():
+    """The clip length window for the prompts (performance.target_len)."""
+    lo, hi = performance.target_len()
+    return {"len_lo": lo, "len_hi": hi}
+
+
+def brief_block():
+    """The BRAND BRIEF appended to every editor-brain prompt ("" without a
+    brand brief). It names who the clip is for, what it promises, the voice,
+    the one ask and what never to write, and it overrides the generic advice
+    in the prompt above it."""
+    from . import brandkit
+    c = brandkit.copy_brief()
+    if not c:
+        return ""
+    lines = ["", "BRAND BRIEF (this overrides any generic advice above; write every word for it):"]
+    for key, label in (("audience", "Audience"), ("promise", "What the game is"),
+                       ("proof", "What the footage can prove"), ("voice", "Voice")):
+        if c.get(key):
+            lines.append(f"- {label}: {c[key]}")
+    if c.get("cta"):
+        lines.append(f'- The CTA is fixed: "{c["cta"]}". Use it verbatim, never another ask.')
+    avoid = c.get("avoid") or []
+    if avoid:
+        lines.append("- Never write: " + ", ".join(f'"{a}"' for a in avoid))
+    approved = [str(x) for x in (c.get("approved_lines") or []) if str(x).strip()][-12:]
+    if approved:
+        lines.append("- LINES THE BRAND APPROVED (the voice to match: rhythm, dryness, "
+                     "specificity; never copy them verbatim):")
+        lines += [f'    "{x}"' for x in approved]
+    rejected = [str(x) for x in (c.get("rejected_lines") or []) if str(x).strip()][-12:]
+    if rejected:
+        lines.append("- LINES THE BRAND REJECTED (never write like these):")
+        lines += [f'    "{x}"' for x in rejected]
+    lines.append("- Every claim must be visible in the footage; never invent mechanics, story or offers.")
+    return "\n".join(lines)
+
+
+def apply_brand_cta(plan):
+    """A brand with a fixed CTA gets it on every plan, verbatim, whatever the
+    model wrote; the action word (cta_hot) is what pops on the end card."""
+    from . import brandkit
+    c = brandkit.copy_brief()
+    if c.get("cta") and plan is not None:
+        if (plan.get("cta") or "").strip() != c["cta"]:
+            plan.setdefault("because", []).append(
+                f"CTA from the brand brief: {c['cta']!r} (model wrote "
+                f"{plan.get('cta')!r})")
+        plan["cta"] = c["cta"]
+        plan["cta_source"] = "brand brief, hand-authored"
+        if c.get("cta_hot"):
+            plan["cta_hot"] = c["cta_hot"]
+            plan["cta_hot_reason"] = "the brand's action word"
+    return plan
+
+
 def _ask_json(prompt, brain, project, label):
     """One JSON completion from whichever brain is selected."""
+    if brain in ("codex", "claude"):
+        return _ask_cli(brain, prompt, project, label)
     if brain == "gpt":
         import requests
         with _LEDGER_LOCK:
@@ -359,9 +648,11 @@ def _refine_visual(cand, vr, peaks, scenes, duration, brain, project):
                    if cand["s"] - 30 <= t <= cand["e"] + 60)[:600] or "none"
     pk = ", ".join(f"{p['t']:.1f}s ({p['above_median']:+.1f}dB)" for p in peaks
                    if cand["s"] - 15 <= p["t"] <= cand["e"] + 60) or "none"
+    from . import sight
     return _ask_json(VISUAL_REFINE_PROMPT.format(
-        why=cand["why"], visuals=visuals, scenes=sc, peaks=pk, duration=duration),
-        brain, project, f"visual refine {cand['why'][:40]}")
+        why=cand["why"], visuals=visuals, scenes=sc, peaks=pk, duration=duration,
+        footage=sight.subject()["footage"], **_len_kw())
+        + brief_block(), brain, project, f"visual refine {cand['why'][:40]}")
 
 
 def _snap_scene(t, scenes, window=1.5):
@@ -521,7 +812,7 @@ def _breathe_tail(merged, total, delivery_end, room, hard_hi=None):
     (`room`), capped by the hard length gate. Returns
     (merged, total, note_or_None); mutates merged."""
     from . import outro as outro_mod
-    hard_hi = hard_hi if hard_hi is not None else performance.HARD_LEN[1]
+    hard_hi = hard_hi if hard_hi is not None else performance.hard_len()[1]
     need = delivery_end + outro_mod.TAIL_BREATH_S
     if total >= need - 1e-6:
         return merged, total, None
@@ -907,7 +1198,7 @@ def _subtract_regions(keep, drops, min_keep=0.4):
 
 # PACING (taste wave, 2026-08-02): how much silence survives around kept
 # speech when dead air is collapsed. The old 0.35s pad clipped breaths a touch
-# tight — deliveries landed and were immediately cut off, which reads rushed on
+# tight -- deliveries landed and were immediately cut off, which reads rushed on
 # rewatch. One notch less aggressive (+20%) keeps the beat AFTER a line without
 # reopening real dead air (join_gap still merges anything under 2.5s apart).
 PACING = {"keep_silence_pad_s": 0.42}   # was 0.35
@@ -947,7 +1238,13 @@ def _full_edit(sm, sents=None, join_gap=2.5, pad=None):
 
 
 def _auto_reframe(root):
-    """Cinematic 16:9 with no facecam can lose its sides; screen recordings cannot."""
+    """Cinematic 16:9 with no facecam can lose its sides; screen recordings
+    cannot. A brand's own framing ("reframe" in brand.json, e.g. full_width
+    for a game whose whole screen must read) wins over the guess."""
+    from . import brandkit
+    pinned = brandkit.reframe()
+    if pinned is not None:
+        return pinned
     try:
         probe = media.probe(_source_video(root))
         v = next(x for x in probe["streams"] if x.get("codec_type") == "video")
@@ -1013,10 +1310,18 @@ def _batched_refine(cands, worker, consume, batch_size=12, max_workers=12):
                 return
 
 
-def run(project, ai=True, max_cuts=8, brain="gemini", tag=None):
+def run(project, ai=True, max_cuts=8, brain="auto", tag=None):
     root = resolve_project(project)
+    if ai:
+        brain = resolve_brain(brain)
+        ai = brain is not None
+    if not ai:
+        brain = "heuristic"
+    print(f"[brain] {brain}" + (" (subscription CLI, $0 per call)"
+                                if brain in ("codex", "claude") else ""))
     an = os.path.join(root, "analysis")
     edl = os.path.join(root, "edl")
+    os.makedirs(edl, exist_ok=True)
     sfx = f"_{tag}" if tag else ""
     words = speech.words_from(os.path.join(an, "words.json"))
     sents = topics_mod.sentences(words)
@@ -1093,7 +1398,10 @@ def run(project, ai=True, max_cuts=8, brain="gemini", tag=None):
         if as_visual:
             ref = _refine_visual(cand, vr, peaks, scenes, duration, brain, name) if ai else None
         else:
-            refine = {"gemini": _refine_ai, "gpt": _refine_gpt}.get(brain, _refine_ai)
+            if brain in ("codex", "claude"):
+                refine = functools.partial(_refine_cli, tool=brain)
+            else:
+                refine = {"gemini": _refine_ai, "gpt": _refine_gpt}.get(brain, _refine_ai)
             ref = (refine(cand, wsents, vr, peaks, name) if ai else None) \
                 or _refine_heuristic(cand, wsents)
             # A window can have speech nearby and still have no spoken landing:
@@ -1158,9 +1466,25 @@ def run(project, ai=True, max_cuts=8, brain="gemini", tag=None):
     with timing.stage("direct refine", timing.timings_path(root)):
         _batched_refine(cands, _refine_one, _consume)
 
+    # The brand's one ask, then the hook and opening frame chosen together.
+    from . import hooks
+    used = set()
+    for plan in plans:
+        apply_brand_cta(plan)
+        if ai:
+            with timing.stage(f"hooks {plan['id']}", timing.timings_path(root)):
+                try:
+                    hooks.compose(plan, an, _source_video(root), brain, name,
+                                  vr=vr, used_openers=used)
+                except Exception as e:  # noqa: BLE001 -- keep the planned hook
+                    print(f"  [hooks] {plan['id']}: failed ({e}); keeping the planned hook")
+        first = (plan.get("hook") or {}).get("text", "").lower().split()
+        if first:
+            used.add(re.sub(r"[^a-z0-9']", "", first[0]))
+
     full = _full_edit(sm, sents)
-    json.dump(plans, open(os.path.join(edl, f"cut_plans{sfx}.json"), "w"), indent=1)
-    json.dump(full, open(os.path.join(edl, "full_edit.json"), "w"), indent=1)
+    json.dump(plans, open(os.path.join(edl, f"cut_plans{sfx}.json"), "w", encoding="utf-8"), indent=1)
+    json.dump(full, open(os.path.join(edl, "full_edit.json"), "w", encoding="utf-8"), indent=1)
     _write_md(name, plans, full, os.path.join(edl, f"CUT-PLANS{sfx}.md"))
     print(f"\n{len(plans)} cut plans ({brain}) -> {edl}/CUT-PLANS{sfx}.md")
     return plans
@@ -1185,6 +1509,19 @@ def _write_md(name, plans, full, path):
               f"captions: {p.get('captions', 'burned')}"]
         for o in p.get("overlay_lines") or []:
             L.append(f"- On screen at {o['t']:.1f}s: \"{o['text']}\"")
+        if p.get("cta"):
+            L.append(f"- CTA: \"{p['cta']}\"")
+        if p.get("hook_variants"):
+            L.append("- Hook and opening-frame variants (score = 0.5 judge + 0.2 "
+                     "writer stop + 0.3 frame, + unlikely bonus, - repeated opener):")
+            for v in p["hook_variants"]:
+                judge = (f"judge {v['judge_score']:.1f}"
+                         + (f" '{v['judge_note']}'" if v.get("judge_note") else "") + ", "
+                         if "judge_score" in v else "")
+                L.append(f"    - {v['score']:.1f} [{v['path']}] \"{v['hook']}\" over "
+                         f"{v['t']:.1f}s ({judge}stop {v['stop_score']}, frame "
+                         f"{v['opening_score']}, typicality {v['typicality']})"
+                         + (" REPEATS AN OPENER" if v.get("repeats_batch_opener") else ""))
         if p.get("caption"):
             L.append(f"- Caption: {p['caption']}")
         L += [f"- Says: {p['transcript'][:300]}" if p.get("transcript") else "", "",
@@ -1200,4 +1537,4 @@ def _write_md(name, plans, full, path):
           f"- {media.fmt(full['original_s'])} -> {media.fmt(full['edited_s'])} "
           f"({full['removed_s']:.0f}s of dead air out, {len(full['keep'])} kept blocks)",
           "- Renders in M4; data in `full_edit.json`", ""]
-    open(path, "w").write("\n".join(L))
+    open(path, "w", encoding="utf-8").write("\n".join(L))

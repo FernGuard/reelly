@@ -128,7 +128,7 @@ def needs_rerun(out_json):
     if not os.path.exists(out_json):
         return False
     try:
-        return bool(missing_ranges(json.load(open(out_json))))
+        return bool(missing_ranges(json.load(open(out_json, encoding="utf-8"))))
     except (ValueError, OSError):
         return False
 
@@ -199,7 +199,7 @@ def _review_chunk(video, model, ci, n, cs, clen, crop, project, cache_dir):
     rng = f"{media.fmt(cs)}-{media.fmt(cs + clen)}"
     cache_p = chunk_cache_path(cache_dir, video, cs, cs + clen, model)
     if os.path.exists(cache_p):
-        seqs = json.load(open(cache_p)).get("sequences", [])
+        seqs = json.load(open(cache_p, encoding="utf-8")).get("sequences", [])
         print(f"{tag} {rng} cached ({len(seqs)} sequences, $0)")
         kind, cost = "cached", 0.0
     else:
@@ -223,7 +223,7 @@ def _review_chunk(video, model, ci, n, cs, clen, crop, project, cache_dir):
                        cost, project)
         json.dump({"video": os.path.basename(video), "start_s": cs,
                    "end_s": cs + clen, "model": model, "sequences": seqs},
-                  open(cache_p, "w"), indent=1)
+                  open(cache_p, "w", encoding="utf-8"), indent=1)
         print(f"{tag} found {len(seqs)}")
         kind = "fresh"
     for s in seqs:
@@ -292,7 +292,7 @@ def review(video, out_json, out_md, model=None, chunk_min=10, crop=None, project
     artifact = {"video": os.path.basename(video), "model": model,
                 "chunk_min": chunk_min, "duration_s": round(total, 2),
                 "complete": not missing, "missing": missing, "sequences": allseq}
-    json.dump(artifact, open(out_json, "w"), indent=1)
+    json.dump(artifact, open(out_json, "w", encoding="utf-8"), indent=1)
 
     lines = [f"# Visual review: {os.path.basename(video)}", "",
              f"{len(allseq)} sequences across {media.fmt(total)}. T=trailer score, S=short-form score.", ""]
@@ -306,7 +306,7 @@ def review(video, out_json, out_md, model=None, chunk_min=10, crop=None, project
         lines.append(f"{i:2}. [{s['start_abs']}-{s['end_abs']}]  "
                      f"T{s.get('trailer_score', '?')}/S{s.get('short_score', '?')}  {hook}  {s.get('label', '')}")
         lines.append(f"      {s.get('what_happens', '')}  |  {s.get('why', '')}")
-    open(out_md, "w").write("\n".join(lines) + "\n")
+    open(out_md, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 
     if missing:
         holes = ", ".join(f"[{m['start_abs']}-{m['end_abs']}]" for m in missing)

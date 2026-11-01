@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "A person speaking to camera (facecam, creator, interview): the face and the speech come first.",
+  "allow": {
+    "endcard": "*",
+    "ambient": [
+      "smoke",
+      "embers"
+    ],
+    "text": "*",
+    "finish": []
+  },
+  "faces": true,
+  "events": false
+}

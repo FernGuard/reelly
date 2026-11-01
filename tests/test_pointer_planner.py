@@ -2,9 +2,17 @@
 points a circle/brackets at the thing the narrator names, located by vision,
 rate-limited so it stays tasteful. Vision only fires on a real referent.
 """
+import pytest
 from PIL import Image
 
 from reelly import design, finalize, overlays
+
+
+@pytest.fixture(autouse=True)
+def _paid_calls_on(monkeypatch):
+    """These tests exercise the paid-provider paths (mocked, nothing bills).
+    Reelly is zero-paid by default, so they opt in the way a real run must."""
+    monkeypatch.setenv("REELLY_ALLOW_PAID", "1")
 
 
 # --- design.locate_referent ---------------------------------------------------

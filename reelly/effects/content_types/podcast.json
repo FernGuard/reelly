@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "description": "Two or more speakers, split or alternating: no marks on people, calm space.",
+  "allow": {
+    "endcard": "*",
+    "ambient": [
+      "smoke"
+    ],
+    "text": "*",
+    "finish": []
+  },
+  "faces": true,
+  "events": false
+}

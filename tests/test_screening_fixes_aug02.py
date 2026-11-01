@@ -225,7 +225,10 @@ def test_linking_a_chain_collapses_to_the_real_file(tmp_path):
     alias = os.path.join(tmp_path, "alias.mov")
     os.symlink(real, alias)
     dst = ingest.link_source(root, alias, "screen")
-    assert os.readlink(dst) == real         # realpath'd, not the alias
+    # realpath'd, not the alias (compared as real paths: Windows returns the
+    # \\?\ long-path form from readlink)
+    norm = lambda p: os.path.realpath(p).removeprefix("\\\\?\\")
+    assert norm(os.readlink(dst)) == norm(real)
 
 
 def test_composite_never_freezes_or_grabs_frames(tmp_path):

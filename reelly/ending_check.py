@@ -49,7 +49,10 @@ Answer ONLY JSON:
 
 
 def enabled():
-    return os.environ.get("REELLY_ENDING_CHECK", "").lower() != "off"
+    """On unless REELLY_ENDING_CHECK=off, and only when paid calls are on
+    (the check is a Gemini call)."""
+    return (os.environ.get("REELLY_ENDING_CHECK", "").lower() != "off"
+            and not config.paid_blocked("google-genai"))
 
 
 def _payoff_desc(plan):
@@ -178,7 +181,7 @@ def extend_plan(plan, root, max_ext=MAX_EXT_S):
     sm_p = os.path.join(root, "analysis", "speech_map.json")
     if os.path.exists(sm_p) and plan.get("captions") != "none":
         try:
-            sil = [tuple(x) for x in json.load(open(sm_p))["silences"]]
+            sil = [tuple(x) for x in json.load(open(sm_p, encoding="utf-8"))["silences"]]
             snapped = speech.snap_end(new_e, sil)
             if src_e + MIN_EXT_S <= snapped <= limit:
                 new_e = snapped
@@ -204,9 +207,9 @@ def extend_plan(plan, root, max_ext=MAX_EXT_S):
 def _save_plan(root, plan, tag=None):
     sfx = f"_{tag}" if tag else ""
     p = os.path.join(root, "edl", f"cut_plans{sfx}.json")
-    plans = json.load(open(p))
+    plans = json.load(open(p, encoding="utf-8"))
     plans = [plan if x.get("id") == plan["id"] else x for x in plans]
-    json.dump(plans, open(p, "w"), indent=1)
+    json.dump(plans, open(p, "w", encoding="utf-8"), indent=1)
 
 
 def _watch_file(root, plan, tag=None):
@@ -276,7 +279,7 @@ def run(project, tag=None, product="video", account=None, variants=None,
     root = direct.resolve_project(project)
     sfx = f"_{tag}" if tag else ""
     plans_p = os.path.join(root, "edl", f"cut_plans{sfx}.json")
-    plans = json.load(open(plans_p))
+    plans = json.load(open(plans_p, encoding="utf-8"))
     name = os.path.basename(root)
 
     def _rerender(plan):

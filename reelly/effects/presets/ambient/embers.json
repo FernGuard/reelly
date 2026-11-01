@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "effect": "embers_ambient",
+  "description": "Embers rising through the space around the picture, reacting to beats, hits and pops.",
+  "params": {
+    "u_density": 0.35,
+    "u_speed": 0.12
+  },
+  "render": {
+    "scale": 0.5,
+    "fps": 30,
+    "bloom": {
+      "threshold": 0.12,
+      "strength": 3.5,
+      "sigma": 12
+    }
+  },
+  "lite": {
+    "render": {
+      "scale": 0.25,
+      "fps": 30,
+      "bloom": null
+    }
+  }
+}

@@ -37,7 +37,8 @@ def test_env_var_overrides_kit_dir(monkeypatch):
     monkeypatch.setenv("REELLY_BRANDKIT", "/somewhere/else")
     assert brandkit.kit_dir() == "/somewhere/else"
     monkeypatch.delenv("REELLY_BRANDKIT")
-    assert brandkit.kit_dir() == os.path.expanduser("~/.reelly/brandkit")
+    from reelly import config
+    assert brandkit.kit_dir() == os.path.join(config.HOME, "brandkit")
 
 
 def test_everything_degrades_gracefully_with_no_kit(tmp_path, monkeypatch):

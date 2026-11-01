@@ -1,0 +1,115 @@
+"""GPU kinetic text: atlas, layout and page match the DOM kinetic contract."""
+import json
+import re
+
+import pytest
+
+from reelly import gputext, kinetic
+
+
+def test_atlas_has_one_distance_tile_per_glyph():
+    sheet, place = gputext.atlas("Wishlist on Steam", 72, "headline")
+    assert set(place) == set("Wishlist on Steam") - {" "}
+    x, y, w, h, ox, oy = place["W"]
+    px = sheet.getpixel((x + w // 2, y + h // 2))
+    assert sheet.getpixel((x, y)) == 0                       # far outside: 0
+    assert oy < 0                                            # tile starts above the baseline
+    lo, hi = sheet.crop((x, y, x + w, y + h)).getextrema()
+    assert lo == 0 and hi > 150                              # a real distance field
+
+
+def test_layout_centres_lines_and_matches_the_static_wrap():
+    text = "Death threats delivered to your door."
+    lines = kinetic.wrap_lines(text, 58, 800, "headline")
+    glyphs, anchors, words = gputext.layout(text, 58, 800, "headline", lines, kinetic.PAD)
+    assert words == text.split()
+    assert len(glyphs) == len(text.replace(" ", ""))
+    for li in range(len(lines)):
+        xs = [g[1] for g in glyphs if g[4] == li]
+        left, right = min(xs) - kinetic.PAD, 800 - (max(xs) - kinetic.PAD)
+        assert left > 0 and abs(left - right) < 80          # centred (last glyph's width aside)
+    assert len({round(g[2]) for g in glyphs}) == len(lines)  # one baseline per line
+
+
+def test_vertex_data_and_page():
+    text = "Wishlist on Steam"
+    sheet, place = gputext.atlas(text, 72, "headline")
+    lines = [text.split()]
+    glyphs, anchors, _ = gputext.layout(text, 72, 800, "headline", lines, kinetic.PAD)
+    v = gputext.vertex_data(glyphs, anchors, place, hot=0)
+    assert len(v) == len(glyphs) * 6 * 8
+    assert v[7] == 1.0 and v[-1] == 0.0                     # first word hot, last not
+    html, settle, exit_t, off = gputext.page(text, 72, 856, 200, 3.0, "headline", 0, lines,
+                                             True, False, 1.0, "#FCFCFB", "#a87cf0")
+    params = json.loads(re.search(r"var P = (\{.*?\});\n", html, re.S).group(1))
+    assert params["ease_type"] == [0.16, 0.84, 0.28, 1.0]
+    assert params["ease_pop"] == [0.3, 1.6, 0.5, 1.0] and params["hot"] == 0
+    assert params["pop"] == 1.0 and params["leave"] is False and exit_t == 3.0
+    assert "requestAnimationFrame" not in html and "window.__reellyDraw = function(ms)" in html
+
+
+def test_off_switch_and_word_limit(monkeypatch):
+    monkeypatch.setenv("REELLY_TEXT_GPU", "off")
+    assert not gputext.enabled()
+    monkeypatch.delenv("REELLY_TEXT_GPU")
+    assert gputext.enabled()
+    with pytest.raises(ValueError):
+        gputext.page(" ".join(["w"] * 41), 40, 800, 200, 3.0, "headline", None,
+                     [["w"] * 41], True, True, None, "#ffffff", "#a87cf0")
+
+
+def test_motion_setting(monkeypatch):
+    from reelly import brandkit
+    monkeypatch.delenv("REELLY_TEXT_MOTION", raising=False)
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {})
+    assert gputext.motion() == "rise"
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"text": {"motion": "blocklock"}})
+    assert gputext.motion() == "blocklock"
+    monkeypatch.setenv("REELLY_TEXT_MOTION", "wobble")
+    assert gputext.motion() == "rise"                         # unknown: the default
+    html, _, _, _ = gputext.page("Wishlist on Steam", 72, 856, 200, 3.0, "headline", 0,
+                              [["Wishlist", "on", "Steam"]], True, False, 1.0, "#FCFCFB", "#a87cf0")
+    assert '"motion": "rise"' in html and "u_w2[0]" in html
+
+
+def test_petal_exit(monkeypatch):
+    from reelly import brandkit
+    monkeypatch.setenv("REELLY_TEXT_EXIT", "petals")
+    monkeypatch.setattr(brandkit, "brand", lambda name=None: {"text": {"petal_color": "#ff8800"}})
+    lines = [["Curse", "cleared."]]
+    html, settle, hold_end, off = gputext.page("Curse cleared.", 72, 856, 200, 3.0, "headline",
+                                               1, lines, True, True, 1.0, "#FCFCFB", "#a87cf0")
+    assert off == gputext.PETAL_MARGIN and '"exit_style": "petals"' in html
+    assert abs(hold_end - (3.0 - gputext.DISSOLVE_S)) < 1e-6      # the hold ends where it starts
+    assert "u_c2" in html and "u_dis" in html
+    # a line that does not leave, or is too short, keeps the plain exit
+    html2, _, _, off2 = gputext.page("Curse cleared.", 72, 856, 200, 3.0, "headline", 1, lines,
+                                     True, False, 1.0, "#FCFCFB", "#a87cf0")
+    assert off2 == 0 and '"exit_style": "fade"' in html2
+
+
+def test_petals_linger_only_into_free_time(monkeypatch):
+    from reelly import finalize
+    monkeypatch.setenv("REELLY_TEXT_EXIT", "petals")
+    assert finalize._linger(7.2, 10.0, 16.9) == gputext.PETAL_LINGER   # room to drift
+    assert finalize._linger(7.2, 7.5, 16.9) == 0.25                    # next line soon
+    assert finalize._linger(16.8, 20.0, 16.9) == 0.05                  # content ends
+    monkeypatch.setenv("REELLY_TEXT_EXIT", "fade")
+    assert finalize._linger(7.2, 10.0, 16.9) == 0.0                    # no petals, no linger
+
+
+def test_blocklock_holds_only_after_the_last_block_locks(monkeypatch):
+    # the still frame is rendered once at `settle` and reused for the hold:
+    # taken any earlier, a block would hang mid-fall for the whole hold
+    monkeypatch.setenv("REELLY_TEXT_MOTION", "blocklock")
+    words = "one two three four five six seven eight nine ten".split()
+    lines = [words[:5], words[5:]]
+    html, settle, _, _ = gputext.page(" ".join(words), 60, 856, 300, 6.0, "headline", 0,
+                                      lines, True, True, None, "#FCFCFB", "#a87cf0")
+    P = json.loads(re.search(r"var P = (\{.*?\});\n", html, re.S).group(1))
+    last_land = max(P["rank"]) * P["stagger"] * 1.5 + P["block_fall"]
+    assert settle >= last_land + 0.45
+    monkeypatch.setenv("REELLY_TEXT_MOTION", "rise")
+    _, rise_settle, _, _ = gputext.page(" ".join(words), 60, 856, 300, 6.0, "headline", 0,
+                                        lines, True, True, None, "#FCFCFB", "#a87cf0")
+    assert rise_settle < settle

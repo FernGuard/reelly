@@ -82,14 +82,14 @@ def _chapters(topics, keep, min_gap=60.0, max_n=15):
 
 def run(project, product="video", music=True):
     root = direct.resolve_project(project)
-    full = json.load(open(os.path.join(root, "edl", "full_edit.json")))
+    full = json.load(open(os.path.join(root, "edl", "full_edit.json"), encoding="utf-8"))
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     tp = os.path.join(root, "analysis", "topics.json")
-    topics = json.load(open(tp)) if os.path.exists(tp) else []
+    topics = json.load(open(tp, encoding="utf-8")) if os.path.exists(tp) else []
     lp = os.path.join(root, "analysis", "loudness.json")
-    loud = json.load(open(lp)) if os.path.exists(lp) else {}
+    loud = json.load(open(lp, encoding="utf-8")) if os.path.exists(lp) else {}
     sess_p = os.path.join(root, "analysis", "session.json")
-    offset = (json.load(open(sess_p)).get("facecam_offset_s", 0.0)
+    offset = (json.load(open(sess_p, encoding="utf-8")).get("facecam_offset_s", 0.0)
               if os.path.exists(sess_p) else 0.0)
     video = direct._source_video(root)
     facecam = _facecam_source(root)
@@ -115,7 +115,8 @@ def run(project, product="video", music=True):
 
     endtag = captions.text_png(products.PRODUCTS[product]["end_tag"],
                                os.path.join(td, "endtag.png"),
-                               width=900, size=40, fill="#FCFCFB", stroke_w=5)
+                               width=900, size=40, fill=captions.ink("#FCFCFB"),
+                               stroke_w=5, role="cta")
 
     parts = []
     print(f"[long ] {len(keep)} blocks, {media.fmt(full['edited_s'])} target ...")
@@ -130,7 +131,7 @@ def run(project, product="video", music=True):
         if (i + 1) % 10 == 0:
             print(f"[long ] {i + 1}/{len(keep)} blocks")
     lst = os.path.join(td, "list.txt")
-    open(lst, "w").write("\n".join(f"file '{p}'" for p in parts))
+    open(lst, "w", encoding="utf-8").write("\n".join(f"file '{p}'" for p in parts))
     joined = os.path.join(td, "joined.mp4")
     subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat", "-safe", "0",
                     "-i", lst, "-c", "copy", joined], check=True)
@@ -170,9 +171,9 @@ def run(project, product="video", music=True):
 
     ncues = _retimed_srt(words, keep, os.path.join(out, f"{name}_longform.srt"))
     chapters = _chapters(topics, keep)
-    open(os.path.join(out, "chapters.txt"), "w").write("\n".join(chapters) + "\n")
+    open(os.path.join(out, "chapters.txt"), "w", encoding="utf-8").write("\n".join(chapters) + "\n")
     p = products.PRODUCTS[product]
-    open(os.path.join(out, "DESCRIPTION.md"), "w").write("\n".join([
+    open(os.path.join(out, "DESCRIPTION.md"), "w", encoding="utf-8").write("\n".join([
         f"# {name} longform - posting block", "",
         f"Built live with {p['name']}: {products.link(product, 'youtube')}", "",
         "## Chapters (paste into the YouTube description)", "", *chapters, "",

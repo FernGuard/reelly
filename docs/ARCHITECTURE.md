@@ -41,7 +41,7 @@ All analysis is cached and content-addressed; nothing runs twice.
 - **Speech map**: silences (silencedetect), filler words (um, uh, like, you know), restarts and repeated takes (near-duplicate sentence detection).
 - **Speaker map**: who talks when (needed for podcast/interview cuts).
 - **Shot/scene detection**: visual cut points, so edits never land mid-shot awkwardly.
-- **Visual understanding**: Gemini video analysis in chunks (proven pipeline) scoring trailer/short potential, describing on-screen action, flagging highlights, reading on-screen UI text.
+- **Visual understanding**: contact sheets of sampled frames read by a vision model (the Codex CLI on your own subscription, a local OpenAI-compatible endpoint, or Gemini with `--allow-paid`), scoring trailer and short potential, describing on-screen action, flagging highlights and reading on-screen text.
 - **Audio map**: loudness curve (EBU R128), music vs speech segments, claps/laughs/reaction spikes (energy peaks are hook candidates).
 - **Face/subject tracking**: where the subject is in frame, to drive smart 9:16 reframes instead of blind center-crop.
 
@@ -62,11 +62,13 @@ Every decision carries a `because:` field referencing the playbook rule that pro
 Two outputs per deliverable, always:
 
 - **Resolve handoff**: timeline via FCPXML/OTIO import AND (preferred) the DaVinci Resolve scripting API (Resolve ships a Python API that can create projects, import media, build timelines, add markers, and apply LUTs directly). Music, SFX, captions, and titles arrive as separate tracks. Markers carry the engine's notes ("hook", "trim candidate", "SFX: riser").
-- **Rendered MP4**: ffmpeg render of the same EDL for post-now use. Loudness normalized to platform target (-14 LUFS integrated, true peak -1 dBTP), styled captions burned via PNG overlays, blurred-fill or tracked-crop reframe for 9:16.
+- **Rendered MP4**: ffmpeg render of the same EDL for post-now use, at the brand's frame rate (30 or 60). Loudness normalized to platform target (-14 LUFS integrated, true peak -1 dBTP), blurred-fill, full-width or face-following reframe for 9:16.
+- **Look and motion** (see [EFFECTS.md](EFFECTS.md)): each cut gets a control track (beat grid, hot-word pops, onsets, loudness, vision-verified impacts). In order: ambient shader layers in the space around the picture, an optional finish, kinetic type drawn on the GPU (SDF glyphs, beat-timed hot word, text effect fused in the same pass), optional text behind the subject, then the end card (shader backdrop with an ink transition from the last frame) and the mix. Effects are GLSL in headless Chrome on the hardware GPU (Direct3D 11, Metal, OpenGL; software fallback), read back over a local binary socket. Any step that falls back is recorded per cut.
 
 ## 5. JUDGE
 
-- **QC gates (deterministic)**: caption/word sync drift, caption overlap, audio clipping, loudness compliance, black/frozen frames, cut-on-word violations, safe-zone violations (platform UI overlap), first-frame legibility.
+- **QC gates (deterministic)**: caption/word sync drift, caption overlap, audio clipping, loudness compliance, black/frozen frames, cut-on-word violations, safe-zone violations (platform UI overlap), text contrast, photosensitive flashes (WCAG 2.3.1, plus EA IRIS where installed; an unreadable file fails), and fallbacks (WARN when any configured effect did not render).
+- **Golden frames**: every effect is rendered from fixed inputs and compared with per-renderer reference images in the test suite.
 - **AI judge (optional, budget-gated)**: 2-3 variants of a cut scored against the playbook rubric (hook strength, pacing, clarity, ending); only the winner ships. Off by default to stay under budget; on for hero content.
 
 ## 6. LEARN

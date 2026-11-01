@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "description": "Software or product demo: the UI must stay exact and readable.",
+  "allow": {
+    "endcard": "*",
+    "ambient": [
+      "smoke"
+    ],
+    "text": "*",
+    "finish": []
+  },
+  "faces": false,
+  "events": false
+}

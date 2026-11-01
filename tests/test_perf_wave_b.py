@@ -14,6 +14,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from reelly import analyze, config, diarize, judge, scenes, transcribe, visual  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _paid_calls_on(monkeypatch):
+    """These tests exercise the paid-provider paths (mocked, nothing bills).
+    Reelly is zero-paid by default, so they opt in the way a real run must."""
+    monkeypatch.setenv("REELLY_ALLOW_PAID", "1")
+
+
+
 # --- 1. parallel analyze DAG -------------------------------------------------
 
 def _fake_words():
@@ -94,7 +102,7 @@ def test_analyze_dag_respects_word_dependencies_but_runs_chains_concurrently(wir
     for dep in ("srt", "speech_map", "topics", "guests"):
         assert ev[dep][0] >= ev["transcribe"][1], f"{dep} ran before transcribe finished"
     # independent chains overlap the (slow) transcribe stage instead of
-    # queueing behind it — the whole point of the DAG
+    # queueing behind it -- the whole point of the DAG
     overlapped = [n for n in ("scenes", "loudness", "diarize", "visual")
                   if ev[n][0] < ev["transcribe"][1]]
     assert overlapped, "no independent chain started while transcribe was running"
@@ -260,6 +268,8 @@ def test_parakeet_refused_for_non_english_model(monkeypatch, tmp_path):
 
 # --- 4. hardware decode --------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform != "darwin",
+                    reason="VideoToolbox hardware decode is macOS-only by design")
 def test_hwdecode_args_env_gate(monkeypatch):
     monkeypatch.delenv("REELLY_NO_HWDECODE", raising=False)
     assert config.hwdecode_args() == ["-hwaccel", "videotoolbox"]
@@ -272,6 +282,8 @@ def _hw_before_input(args):
     return "-hwaccel" in args and args.index("-hwaccel") < args.index("-i")
 
 
+@pytest.mark.skipif(sys.platform != "darwin",
+                    reason="VideoToolbox hardware decode is macOS-only by design")
 def test_scene_cuts_decode_uses_videotoolbox(monkeypatch):
     monkeypatch.delenv("REELLY_NO_HWDECODE", raising=False)
     seen = {}
@@ -287,6 +299,8 @@ def test_scene_cuts_decode_uses_videotoolbox(monkeypatch):
     assert "-hwaccel" not in seen["args"]
 
 
+@pytest.mark.skipif(sys.platform != "darwin",
+                    reason="VideoToolbox hardware decode is macOS-only by design")
 def test_judge_analysis_decode_uses_videotoolbox_for_video_only(monkeypatch):
     monkeypatch.delenv("REELLY_NO_HWDECODE", raising=False)
     seen = []
@@ -298,6 +312,8 @@ def test_judge_analysis_decode_uses_videotoolbox_for_video_only(monkeypatch):
     assert "-hwaccel" not in seen[2]  # audio-only: nothing to accelerate
 
 
+@pytest.mark.skipif(sys.platform != "darwin",
+                    reason="VideoToolbox hardware decode is macOS-only by design")
 def test_visual_proxy_compress_uses_videotoolbox(monkeypatch):
     monkeypatch.delenv("REELLY_NO_HWDECODE", raising=False)
     seen = {}
@@ -307,6 +323,8 @@ def test_visual_proxy_compress_uses_videotoolbox(monkeypatch):
     assert _hw_before_input(seen["args"])
 
 
+@pytest.mark.skipif(sys.platform != "darwin",
+                    reason="VideoToolbox hardware decode is macOS-only by design")
 def test_preview_cut_segments_uses_videotoolbox_on_source_not_concat(monkeypatch, tmp_path):
     from reelly import preview
     monkeypatch.delenv("REELLY_NO_HWDECODE", raising=False)

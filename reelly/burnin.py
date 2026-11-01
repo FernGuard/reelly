@@ -29,7 +29,7 @@ def _sidecars(out, words, cues):
     for i, (s, e, wl) in enumerate(cues, 1):
         rows.append(f"{i}\n{_ts(s)} --> {_ts(e)}\n"
                     + " ".join(x["t"] for x in wl) + "\n")
-    open(srt, "w").write("\n".join(rows))
+    open(srt, "w", encoding="utf-8").write("\n".join(rows))
     ch = os.path.splitext(out)[0] + "_chapters.txt"
     sents = topics.sentences(words)
     clips = topics.topic_clips(sents)
@@ -43,7 +43,7 @@ def _sidecars(out, words, cues):
             last = s
     if lines:
         lines[0] = "0:00 " + lines[0].split(" ", 1)[1]
-        open(ch, "w").write("\n".join(lines) + "\n")
+        open(ch, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     print(f"[burn ] sidecars: {os.path.basename(srt)}, "
           f"{os.path.basename(ch)} (retitle chapters by hand)")
 
@@ -169,7 +169,7 @@ def run(video, project=None, out=None, music=True, cut_pauses=False,
             parts.append(_burn_chunk(video, s, e, cs, td, i))
             print(f"[burn ] chunk {i + 1}: {s:.1f}-{e:.1f}s, {len(cs)} cues")
         lst = os.path.join(td, "parts.txt")
-        open(lst, "w").write("".join(f"file '{p}'\n" for p in parts))
+        open(lst, "w", encoding="utf-8").write("".join(f"file '{p}'\n" for p in parts))
         joined = os.path.join(td, "joined.mp4")
         subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat",
                         "-safe", "0", "-i", lst, "-c", "copy", joined],

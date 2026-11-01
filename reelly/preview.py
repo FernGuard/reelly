@@ -15,6 +15,11 @@ from . import captions, config, direct, speech
 MAX_OFFSET_S = 30.0  # beyond this, waveform sync failed rather than found a real lag
 
 
+
+def _brand_accent():
+    from . import brandkit
+    return brandkit.accent()
+
 def run_parallel(items, fn, max_workers=3):
     """Run fn over items on a small thread pool; results in input order.
 
@@ -29,7 +34,7 @@ def run_parallel(items, fn, max_workers=3):
         for it in items:
             try:
                 out.append((it, fn(it), None))
-            except Exception as e:  # noqa: BLE001 — isolate per item
+            except Exception as e:  # noqa: BLE001 -- isolate per item
                 out.append((it, None, e))
         return out
     from concurrent.futures import ThreadPoolExecutor
@@ -59,7 +64,7 @@ def _atempo_chain(speed):
     return ",".join(parts)
 
 
-def _reframe_vf(zoom=1.0):
+def _reframe_vf(zoom=1.0, x_expr=None, src_crop=None):
     """16:9 source into a 9:16 frame over a blurred bed.
 
     zoom=1.0 fits the full width, which leaves a 16:9 source occupying only
@@ -67,12 +72,15 @@ def _reframe_vf(zoom=1.0):
     can afford to lose the sides: zoom scales up and center-crops back to 1080,
     trading horizontal framing for a taller, more legible content band.
     zoom=1.78 makes it square; ~3.16 fills the frame. Cap at 2x per CO7 so the
-    content stays legible."""
+    content stays legible. x_expr (follow.crop_x_expr) moves the crop with
+    the action instead of holding it at the centre."""
     zoom = max(1.0, min(float(zoom or 1.0), 2.0))
+    x = x_expr if x_expr else "(iw-1080)/2"
     fg = ("[fg]scale=1080:-2[fgs];" if zoom == 1.0 else
           f"[fg]scale=w={round(1080 * zoom)}:h=-2,"
-          f"crop=1080:ih:(iw-1080)/2:0[fgs];")
-    return ("split=2[bg][fg];"
+          f"crop=1080:ih:{x}:0[fgs];")
+    pre = f"crop={src_crop}," if src_crop else ""
+    return (pre + "split=2[bg][fg];"
             "[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
             "crop=1080:1920,boxblur=24:2,eq=brightness=-0.05:saturation=1.15[bgb];"
             + fg +
@@ -164,15 +172,35 @@ def _face_shots(video, s, e, td, i):
                         "-ss", str(a), "-to", str(b),
                         "-i", video,
                         "-vf", f"crop={cw}:{ch}:{cx}:{cy},scale=1080:1920,setsar=1",
-                        "-r", "30", *config.intermediate_encode_args(),
+                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", p], check=True)
         parts.append(p)
     return parts
 
 
+def _follow_plan(video, s, e, reframe, focus, crop=None):
+    """(zoom, crop x expression) for one segment: follow the action on a
+    zoomed cinematic reframe, else (reframe, None) = the fixed centre."""
+    from . import follow
+    if not follow.enabled() or float(reframe or 1.0) <= 1.0:
+        return reframe, None
+    try:
+        fp = follow.plan_segment(video, s, e, base_zoom=float(reframe), focus=focus,
+                                 crop=crop)
+    except Exception as e:  # noqa: BLE001 -- the centre crop still renders
+        print(f"         follow: failed ({e}); centre crop")
+        return reframe, None
+    print(f"         follow: zoom {fp['zoom']:.2f} (action spread "
+          f"{fp['spread'] if fp['spread'] is not None else '-'}), "
+          f"{len(fp['keys'])} keyframe(s), {fp['source']}")
+    return fp["zoom"], fp["x_expr"]
+
+
 def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
-                  follow_faces=False, reframe=1.0):
-    """Extract + reframe each segment (cam composited if present), then concat."""
+                  follow_faces=False, reframe=1.0, focus=None, src_crop=None):
+    """Extract + reframe each segment (cam composited if present), then concat.
+    Cinematic reframes follow the action (follow.py); `focus` (a number, or
+    one per segment) pins the crop centre instead."""
     from . import media as _media
     sdr_v = _media.sdr_chain(video)
     sdr_cam = _media.sdr_chain(facecam) if facecam else ""
@@ -233,6 +261,10 @@ def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
                 parts += _face_shots(video, s, e, td, i)
                 continue
             p = os.path.join(td, f"seg{i}.mp4")
+            seg_focus = (focus[i] if isinstance(focus, (list, tuple)) and i < len(focus)
+                         else focus if isinstance(focus, (int, float)) else None)
+            fzoom, fx = ((reframe, None) if layout else
+                         _follow_plan(video, s, e, reframe, seg_focus, src_crop))
             # hwaccel is a per-input option (before the -i it accelerates);
             # never on the mask (-loop image) input or the concat pass below
             args = [config.FFMPEG, "-y", "-v", "error", *config.hwdecode_args(),
@@ -274,12 +306,12 @@ def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
                 args += ["-filter_complex", _tonemapped(fc), "-map", vmap, "-map", "0:a"]
             elif speed != 1.0:
                 args += ["-filter_complex",
-                         _tonemapped(f"[0:v]{_reframe_vf(reframe)},setpts=PTS/{speed}[vsp]"),
+                         _tonemapped(f"[0:v]{_reframe_vf(fzoom, fx, src_crop)},setpts=PTS/{speed}[vsp]"),
                          "-map", "[vsp]", "-map", "0:a"]
             elif sdr_v:
-                args += ["-vf", sdr_v + "," + _reframe_vf(reframe)]
+                args += ["-vf", sdr_v + "," + _reframe_vf(fzoom, fx, src_crop)]
             else:
-                args += ["-vf", _reframe_vf(reframe)]
+                args += ["-vf", _reframe_vf(fzoom, fx, src_crop)]
             # 30ms boundary fades: a cut landing mid-waveform clicks, and the
             # downstream adeclick pass only partially rescues it
             adur = (e - s) / speed
@@ -289,12 +321,12 @@ def _cut_segments(video, segments, dst, comp=None, facecam=None, workdir=None,
                 args += ["-filter:a", _atempo_chain(speed) + "," + fades]
             else:
                 args += ["-filter:a", fades]
-            args += ["-r", "30", *config.intermediate_encode_args(),
+            args += ["-r", str(config.output_fps()), *config.intermediate_encode_args(),
                      "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", p]
             subprocess.run(args, check=True)
             parts.append(p)
         lst = os.path.join(td, "list.txt")
-        open(lst, "w").write("\n".join(f"file '{p}'" for p in parts))
+        open(lst, "w", encoding="utf-8").write("\n".join(f"file '{p}'" for p in parts))
         subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat",
                         "-safe", "0", "-i", lst, "-c", "copy", dst], check=True)
 
@@ -326,7 +358,7 @@ def _burn(src, dst, cues, hook, workdir, layout=None, payoff=None, overlays=None
     if payoff and payoff.get("jump"):  # C6: mark the jump so it reads as intent
         chip = captions.text_png(">> " + payoff.get("chip", "moments later"),
                                  os.path.join(workdir, "chip.png"),
-                                 width=560, size=42, fill="#17cdff", stroke_w=5)
+                                 width=560, size=42, fill=_brand_accent(), stroke_w=5)
         t0 = payoff["local_t"]
         inputs += ["-i", chip]
         filters.append(f"[{last}][{idx}:v]overlay=(W-w)/2:"
@@ -382,7 +414,7 @@ def _facecam_source(root):
 def render(project, cut_id=None, tag=None):
     root = direct.resolve_project(project)
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     video = direct._source_video(root)
     facecam = _facecam_source(root)

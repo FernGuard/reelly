@@ -11,6 +11,10 @@
 
 ## In progress
 
+- Transcription beyond Apple Silicon.
+- Text behind the subject and depth parallax on the GPU (both run on the CPU today).
+- Golden-frame references for more GPU tiers, recorded in CI.
+
 - Broader non-Apple transcription support.
 - Clearer command-level capability and cost preflight.
 - Reproducible evaluation fixtures using synthetic media.
@@ -18,6 +22,8 @@
 - Continuous integration across supported operating systems.
 
 ## Later
+
+- More effect presets and content types, contributed as effect files.
 
 - Additional local model backends.
 - A documented plugin system for organization-specific products and accounts.

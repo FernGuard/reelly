@@ -1,12 +1,12 @@
 """UNDERSTAND: word-level transcription.
 
-Default engine is mlx-whisper (config.WHISPER_MODEL) — the proven path.
+Default engine is mlx-whisper (config.WHISPER_MODEL) -- the proven path.
 REELLY_ASR=parakeet (env, or "asr" in ~/.reelly/config.json) opts into
 parakeet-mlx, a much faster English-only ASR on Apple Silicon, installed via
 `uv sync --extra asr-fast`. The parakeet result is mapped onto the EXACT
 words.json schema mlx-whisper writes (segments[].words[] with "word"/"start"/
-"end", seconds, leading-space word text), so every consumer of words.json —
-speech.words_from and everything behind it — is engine-blind. If parakeet is
+"end", seconds, leading-space word text), so every consumer of words.json --
+speech.words_from and everything behind it -- is engine-blind. If parakeet is
 requested but unavailable (not installed, or a non-English model is asked
 for), we say so and fall back to whisper; default stays whisper until an A/B
 on real footage says otherwise.
@@ -28,7 +28,7 @@ def engine():
     cfg = os.path.join(config.HOME, "config.json")
     if os.path.exists(cfg):
         try:
-            e = str(json.load(open(cfg)).get("asr", "")).strip().lower()
+            e = str(json.load(open(cfg, encoding="utf-8")).get("asr", "")).strip().lower()
             if e:
                 return e
         except (ValueError, OSError):
@@ -38,7 +38,7 @@ def engine():
 
 def _parakeet_available():
     try:
-        import parakeet_mlx  # noqa: F401 — probing the optional extra
+        import parakeet_mlx  # noqa: F401 -- probing the optional extra
         return True
     except ImportError:
         return False
@@ -88,11 +88,18 @@ def _parakeet_transcribe(wav, out_json):
            "language": "en",
            "engine": f"parakeet-mlx:{PARAKEET_MODEL}",
            "segments": segments}
-    json.dump(res, open(out_json, "w"))
+    json.dump(res, open(out_json, "w", encoding="utf-8"))
     return res
 
 
 def transcribe(video, out_json, model=None):
+    if not media.has_audio(video):
+        # nothing to hear: an empty transcript, not a failed analysis
+        print("[asr  ] no audio track in the source; empty transcript "
+              "(picture-only footage)")
+        res = {"segments": [], "text": "", "no_audio": True}
+        json.dump(res, open(out_json, "w", encoding="utf-8"))
+        return res
     wav = out_json + ".tmp.wav"
     media.extract_wav(video, wav)
     try:
@@ -112,13 +119,13 @@ def transcribe(video, out_json, model=None):
                   "Transcript skipped; other analyze stages still run.")
             res = {"segments": [], "text": "", "unavailable": True,
                    "error": "mlx-whisper not installed"}
-            json.dump(res, open(out_json, "w"))
+            json.dump(res, open(out_json, "w", encoding="utf-8"))
             return res
         from . import vocab
         res = mlx_whisper.transcribe(
             wav, path_or_hf_repo=model or config.WHISPER_MODEL,
             word_timestamps=True, initial_prompt=vocab.bias_prompt())
-        json.dump(res, open(out_json, "w"))
+        json.dump(res, open(out_json, "w", encoding="utf-8"))
         return res
     finally:
         if os.path.exists(wav):

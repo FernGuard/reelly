@@ -4,10 +4,16 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont
 
+from . import layout as _layout
+
 FONTS = [
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",       # macOS
     "/System/Library/Fonts/Helvetica.ttc",
     "/System/Library/Fonts/SFNS.ttf",
+    "C:\\Windows\\Fonts\\arialbd.ttf",                         # Windows
+    "C:\\Windows\\Fonts\\segoeuib.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",    # Linux
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 ]
 
 # "Dynamic minimalism" (the 2026 taste bar): clean sans, white text with ONE
@@ -95,19 +101,19 @@ def _style_accent(explicit=None):
         return "#17CDFF"
 
 
-def _font_paths():
-    """Kit font first (graceful: brandkit returns None without a kit), then
-    the system fallbacks -- pre-kit behavior is byte-identical."""
+def _font_paths(role=None):
+    """Kit font for the role first (graceful: brandkit returns None without a
+    kit), then the system fallbacks -- pre-kit behavior is byte-identical."""
     try:
         from . import brandkit
-        kit_font = brandkit.font(DEFAULT_STYLE.get("font_role", "caption"))
+        kit_font = brandkit.font(role or DEFAULT_STYLE.get("font_role", "caption"))
     except Exception:
         kit_font = None
     return ([kit_font] if kit_font else []) + FONTS
 
 
-def _font(size):
-    for p in _font_paths():
+def _font(size, role=None):
+    for p in _font_paths(role):
         if os.path.exists(p):
             try:
                 return ImageFont.truetype(p, size)
@@ -130,17 +136,50 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
+def wrap_balanced(draw, text, font, max_w):
+    """Same number of lines as the greedy wrap, but the breaks chosen so the
+    lines come out as even as possible: no single word stranded on the last
+    line (a widow), which is how a designer sets a two-line headline.
+    Minimises the widest line, then the spread between lines."""
+    greedy = _wrap(draw, text, font, max_w)
+    words = text.split()
+    n = len(greedy)
+    if n < 2 or len(words) <= n or len(words) > 16 or n > 4:
+        return greedy           # one line, or too long to be a headline
+    width = lambda ws: draw.textlength(" ".join(ws), font=font)
+    best, best_key = greedy, None
+
+    def splits(start, k):
+        if k == 1:
+            yield [words[start:]]
+            return
+        for cut in range(start + 1, len(words) - k + 2):
+            for rest in splits(cut, k - 1):
+                yield [words[start:cut]] + rest
+
+    for lines in splits(0, n):
+        ws = [width(ln) for ln in lines]
+        if max(ws) > max_w:
+            continue
+        key = (round(max(ws)), round(max(ws) - min(ws)))
+        if best_key is None or key < best_key:
+            best, best_key = [" ".join(ln) for ln in lines], key
+    return best
+
+
 def text_png(text, path, width=1000, size=58, fill="white", stroke="black",
-             stroke_w=None, align="center"):
+             stroke_w=None, align="center", role=None, balance=False):
     """Render wrapped text to a tight transparent PNG.
 
     stroke_w=None -> DEFAULT_STYLE["stroke_px"] (thin outline) + the style's
-    soft shadow; an explicit stroke_w is honored exactly as passed."""
+    soft shadow; an explicit stroke_w is honored exactly as passed. role picks
+    the brand font (caption by default; the hook uses headline). balance=True
+    sets multi-line text in even lines (headlines: no widows)."""
     stroke_w = _stroke_px(stroke_w)
-    font = _font(size)
+    font = _font(size, role)
     probe = Image.new("RGBA", (width, 10))
     d = ImageDraw.Draw(probe)
-    lines = _wrap(d, text, font, width - 2 * stroke_w)
+    lines = (wrap_balanced if balance else _wrap)(d, text, font, width - 2 * stroke_w)
     lh = int(size * 1.22)
     h = lh * len(lines) + 2 * stroke_w + 8 + _shadow_pad()
     img = Image.new("RGBA", (width, h), (0, 0, 0, 0))
@@ -159,18 +198,24 @@ def text_png(text, path, width=1000, size=58, fill="white", stroke="black",
     return path
 
 
+# Caption cues sit in the bottom band, beside the platforms' action rail, so
+# their box is the centred width the layout allows there (not the full 960).
+CUE_WIDTH = _layout.centered_width(*_layout.FULL_BOTTOM)
+
+
 def cue_png(text, path):
-    return text_png(text, path, width=960, size=56)
+    return text_png(text, path, width=CUE_WIDTH, size=56)
 
 
-def block_height(text, width=1000, size=58, stroke_w=None):
+def block_height(text, width=1000, size=58, stroke_w=None, role=None):
     """Rendered height of a text block, using the SAME wrap as text_png.
 
     The collision gate needs the real footprint of each burned layer, not a
     guess: a one-line hook and a three-line hook occupy very different bands.
+    Pass the same role the layer was drawn with (hooks: "headline").
     """
     stroke_w = _stroke_px(stroke_w)
-    font = _font(size)
+    font = _font(size, role)
     probe = Image.new("RGBA", (width, 10))
     d = ImageDraw.Draw(probe)
     lines = _wrap(d, text, font, width - 2 * stroke_w)
@@ -207,10 +252,35 @@ def cam_mask(shape, path, size=512):
 
 # The karaoke word-highlight color (reviewer 2026-08-13): Hot Pink, a fixed
 # caption signature rather than the per-studio brand accent. Env-tunable.
+# With a brand active the highlight is the BRAND accent instead: one accent
+# per game, not a fixed pink beside it (see karaoke_highlight()).
 KARAOKE_HIGHLIGHT = os.environ.get("REELLY_KARAOKE_COLOR", "#FF69B4")
 
 
-def karaoke_png(word_texts, hi_index, path, width=960, size=56,
+def karaoke_highlight():
+    """REELLY_KARAOKE_COLOR > the active brand's accent > Hot Pink."""
+    env = os.environ.get("REELLY_KARAOKE_COLOR")
+    if env:
+        return env
+    try:
+        from . import brandkit
+        if brandkit.brand_name() and brandkit.brand().get("accent"):
+            return brandkit.accent()
+    except Exception:
+        pass
+    return KARAOKE_HIGHLIGHT
+
+
+def ink(default="#FCFCFB"):
+    """Text colour: the active brand's ink, else the caller's default."""
+    try:
+        from . import brandkit
+        return brandkit.ink() or default
+    except Exception:
+        return default
+
+
+def karaoke_png(word_texts, hi_index, path, width=None, size=56,
                 accent=None, fill="white", stroke="black", stroke_w=None):
     """Cue text with the currently spoken word highlighted in Hot Pink (M4
     word-highlight captions, the researched short-form norm).
@@ -220,7 +290,10 @@ def karaoke_png(word_texts, hi_index, path, width=960, size=56,
     -- and mixed case exactly as spoken. accent=None means the karaoke highlight
     (Hot Pink); pass an explicit accent to override. stroke_w=None means the
     style's thin outline + soft shadow (the old 6px slab read dated)."""
-    accent = accent or KARAOKE_HIGHLIGHT
+    width = width or CUE_WIDTH
+    accent = accent or karaoke_highlight()
+    if fill == "white":
+        fill = ink("white")
     stroke_w = _stroke_px(stroke_w)
     font = _font(size)
     probe = Image.new("RGBA", (width, 10))
@@ -277,8 +350,49 @@ def full_frame_overlay(text, path, kind="cue", canvas=(1080, 1920)):
     return path
 
 
+# The hook is set in the HEADLINE role: the brand's display face (e.g. a wide
+# heavy cut) rather than the caption face. Without a headline font the role
+# borrows the caption font, so a caption-only kit looks as it did.
+HOOK_ROLE = "headline"
+# The hook layer is centred on the 1080 frame, so its box is kept symmetric
+# inside the platform-safe right edge (x 940): 2 * (940 - 540) = 800 wide,
+# x 140..940. A wide display face fits by stepping the size down (to a floor)
+# before it is allowed to wrap, because the layout gives the hook ONE line
+# slot with the game-name strip right under it.
+HOOK_WIDTH = _layout.centered_width(*_layout.FULL_CENTER)      # 800
+HOOK_SIZE, HOOK_MIN_SIZE = 74, 58
+
+
+def hook_size(text, width=None):
+    """Largest size from HOOK_SIZE down to HOOK_MIN_SIZE at which the hook
+    sets on one line inside `width` (HOOK_WIDTH by default)."""
+    width = width or HOOK_WIDTH
+    stroke_w = _stroke_px(None)
+    probe = ImageDraw.Draw(Image.new("RGBA", (width, 10)))
+    for size in range(HOOK_SIZE, HOOK_MIN_SIZE - 1, -2):
+        if probe.textlength(text, font=_font(size, HOOK_ROLE)) <= width - 2 * stroke_w:
+            return size
+    return HOOK_MIN_SIZE
+
+
+def text_extent(text, width, size, role=None):
+    """Widest rendered line of a text block (same wrap as text_png), px."""
+    stroke_w = _stroke_px(None)
+    font = _font(size, role)
+    d = ImageDraw.Draw(Image.new("RGBA", (width, 10)))
+    lines = _wrap(d, text, font, width - 2 * stroke_w) or [""]
+    return int(max(d.textlength(ln, font=font) for ln in lines)) + 2 * stroke_w
+
+
 def hook_png(text, path):
-    return text_png(text, path, width=980, size=74, fill="#FCFCFB")
+    return text_png(text, path, width=HOOK_WIDTH, size=hook_size(text),
+                    fill=ink("#FCFCFB"), role=HOOK_ROLE, balance=True)
+
+
+def hook_block_height(text):
+    """block_height for a hook_png layer: same width, size and role."""
+    return block_height(text, width=HOOK_WIDTH, size=hook_size(text),
+                        role=HOOK_ROLE)
 
 
 def scrim_png(path, alpha=0.80, w=1080, h=1920):

@@ -472,11 +472,13 @@ def hue_luma(image):
     """Saturation-weighted circular-mean hue (degrees, or None near-greyscale)
     and mean luma (0..255) over the visible pixels of a PIL image. Fully
     transparent pixels (a lettering PNG's background) are ignored."""
+    import numpy as np
     im = image.convert("RGBA")
     im.thumbnail((80, 80))
     sx = sy = lum = wn = 0.0
     n = 0
-    for r, g, b, a in im.getdata():
+    # numpy, not Image.getdata (deprecated; removed in Pillow 14)
+    for r, g, b, a in np.asarray(im).reshape(-1, 4).tolist():
         if a < 40:
             continue
         n += 1

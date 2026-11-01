@@ -37,6 +37,29 @@ def duration(path):
     return float(probe(path).get("format", {}).get("duration", 0) or 0)
 
 
+def filter_path(path):
+    """A file path safe to put INSIDE an ffmpeg filter option
+    (metadata=print:file=..., movie=...). The filtergraph parser strips one
+    level of escaping before the option parser sees the value, so the value
+    is single-quoted (the graph level) with its colons escaped inside (the
+    option level): C:\\x.txt -> 'C\\:/x.txt'. Forward slashes throughout;
+    a quote in the path closes, escapes and reopens the quoting."""
+    p = str(path).replace("\\", "/").replace(":", "\\:")
+    return "'" + p.replace("'", "'\\\\''") + "'"
+
+
+def has_audio(path):
+    """True when the file carries at least one audio stream. Silent gameplay
+    captures and screen grabs often carry none."""
+    try:
+        streams = probe(path).get("streams")
+    except Exception:   # noqa: BLE001 -- unreadable: let the caller's ffmpeg say why
+        return True
+    if not streams:     # no stream info at all is "unknown", not "silent"
+        return True
+    return any(s.get("codec_type") == "audio" for s in streams)
+
+
 def fmt(sec):
     return f"{int(sec) // 60:02d}:{int(sec) % 60:02d}"
 
@@ -78,7 +101,7 @@ def sdr_chain(path):
     """Tonemap chain for an HDR source, or '' when nothing is needed OR the
     build cannot do it. The zscale steps need libzimg, which lean homebrew
     builds omit (same story as libass): in that case warn loudly and ship
-    untonemapped — the judge's sdr_transfer gate FAILs the deliverable, so
+    untonemapped -- the judge's sdr_transfer gate FAILs the deliverable, so
     the problem stays visible instead of erroring mid-render."""
     if not is_hdr(path):
         return ""

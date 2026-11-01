@@ -3,7 +3,7 @@
 Takes a cut plan and produces deliverables/final/<id>.mp4: composed video
 (same layout as previews), S6 voice stem, generated music bed ducked under
 the voice, sparse SFX on the moments that earn them (S3), word-highlight
-captions, hook, payoff chip, product end tag — plus DESCRIPTION.md with the
+captions, hook, payoff chip, product end tag -- plus DESCRIPTION.md with the
 channel-correct tracked links and the posting checklist. Stems land in
 deliverables/audio/ so everything stays editable.
 """
@@ -15,6 +15,7 @@ import tempfile
 import threading
 
 from . import audio_post, audiotail, captions, config, direct, face, media, products, speech, timing
+from .shaderfx import GPUUnavailable
 from .preview import _cut_segments, _facecam_source, _se, run_parallel
 
 
@@ -74,6 +75,56 @@ def _pointer_events(plan, words_tl, workdir, video):
         return []
 
 
+class _Seq(str):
+    """A burn event whose image is a kinetic PNG SEQUENCE (k%05d.png), not a
+    still. Still a str, so the (png, y, t0, t1) event tuples keep their shape;
+    `offset` is how far into the sequence its window starts (non-zero only for
+    the second half of an event split across burn chunks)."""
+    def __new__(cls, pattern, offset=0.0):
+        obj = super().__new__(cls, pattern)
+        obj.offset = float(offset)
+        return obj
+
+
+def _linger(t_end, next_start, content_end):
+    """Seconds a dissolving line's petals may drift on past its slot: up to
+    gputext.PETAL_LINGER, never into the next text layer in that band and
+    never past the content. 0 unless the petal exit is on."""
+    from . import gputext
+    if gputext.exit_style() != "petals" or not gputext.enabled():
+        return 0.0
+    room = min(next_start, content_end) - t_end - 0.05
+    return round(max(0.0, min(gputext.PETAL_LINGER, room)), 3)
+
+
+def _text_layer(text, workdir, name, dur, hot=None, t0=0.0, hot_reason=None,
+                beats=None, linger=0.0):
+    """(path, y_shift) for a hook-style line: a kinetic sequence when the
+    kinetic layer is on, else the static Pillow PNG. A line on screen at t0=0
+    is readable on frame 0 (no entrance). A kinetic failure falls back to the
+    static PNG; it never fails the burn."""
+    from . import kinetic
+    if kinetic.enabled():
+        try:
+            pattern, _, _, pad = kinetic.hook_line(
+                text, os.path.join(workdir, f"kin_{name}"), dur, hot=hot,
+                enter=t0 > 0.0, hot_reason=hot_reason, label=name,
+                beat=kinetic.local_beat(beats, t0), linger=linger)
+            return _Seq(pattern), -pad
+        except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+            raise
+        except Exception as e:  # noqa: BLE001 -- static fallback, never break the burn
+            from . import degrade
+            degrade.note(f"text '{name}'", f"kinetic text failed ({e}); static text")
+    return captions.hook_png(text, os.path.join(workdir, f"{name}.png")), 0
+
+
+def _accent():
+    """The active brand's accent; the historical Blue Smoke without a kit."""
+    from . import brandkit
+    return brandkit.accent()
+
+
 def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     """Every overlay the final burn composites, as (png, y, t0, t1) rows.
 
@@ -105,7 +156,8 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     gname = str(plan.get("game_name") or "").strip()
     if gname:
         gp = captions.text_png(gname, os.path.join(workdir, "gamename.png"),
-                               width=760, size=40, fill="#FCFCFB", stroke_w=6)
+                               width=760, size=40, fill=captions.ink("#FCFCFB"),
+                               stroke_w=6)
         events.append((gp, gname_y, 0.0, dur))
 
     # NO BURN-TIME END-CARD SCRIM (2026-08-02). The closing card's dark pass
@@ -122,25 +174,35 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
 
     hook = plan.get("hook") or {}
     if hook.get("text"):
-        hp = captions.hook_png(hook["text"], os.path.join(workdir, "hook.png"))
-        events.append((hp, hook_y, 0.0, float(hook.get("show_s", 3.6))))
+        show = float(hook.get("show_s", 3.6))
+        starts = sorted(float(o["t"]) for o in plan.get("overlay_lines") or [])
+        lg = _linger(show, next((x for x in starts if x >= show - 1e-6), dur), dur)
+        hp, dy = _text_layer(hook["text"], workdir, "hook", show, hook.get("hot"),
+                             t0=0.0, hot_reason=hook.get("hot_reason"),
+                             beats=plan.get("_beats"), linger=lg)
+        events.append((hp, hook_y + dy, 0.0, show + lg))
 
     # P-TEXT: timed lines beyond the hook; on captions:"none" cuts they carry
     # all of the writing.
     for oi, o in enumerate(plan.get("overlay_lines") or []):
-        op = captions.hook_png(o["text"], os.path.join(workdir, f"ov{oi}.png"))
-        t0 = float(o["t"])
-        events.append((op, hook_y, t0, t0 + float(o.get("show_s", 3.0))))
+        t0, show = float(o["t"]), float(o.get("show_s", 3.0))
+        later = sorted(float(x["t"]) for x in plan.get("overlay_lines") or []
+                       if float(x["t"]) > t0)
+        lg = _linger(t0 + show, later[0] if later else dur, dur)
+        op, dy = _text_layer(o["text"], workdir, f"ov{oi}", show, o.get("hot"),
+                             t0=t0, hot_reason=o.get("hot_reason"),
+                             beats=plan.get("_beats"), linger=lg)
+        events.append((op, hook_y + dy, t0, t0 + show + lg))
 
     payoff = plan.get("payoff") or {}
     if payoff.get("jump") and payoff.get("local_t") is not None:
         chip = captions.text_png(">> " + payoff.get("chip", "moments later"),
                                  os.path.join(workdir, "chip.png"),
-                                 width=560, size=42, fill="#17cdff", stroke_w=5)
+                                 width=560, size=42, fill=_accent(), stroke_w=5)
         t0 = float(payoff["local_t"])
         events.append((chip, chip_y, t0, t0 + 1.6))
 
-    # captions:"none" — see preview._render. Non-narration audio (game VO,
+    # captions:"none" -- see preview._render. Non-narration audio (game VO,
     # music) makes ASR invent lines; those must never reach a deliverable.
     cue_groups = ([] if plan.get("captions") == "none"
                   else speech.group_cue_words(words_tl))
@@ -163,12 +225,28 @@ def _burn_events(plan, words_tl, dur, workdir, layout, product_key, video=None):
     if product_key and not (plan.get("cta") or "").strip():
         tag = captions.text_png(products.PRODUCTS[product_key]["end_tag"],
                                 os.path.join(workdir, "endtag.png"),
-                                width=900, size=44, fill="#FCFCFB", stroke_w=5)
+                                width=900, size=44, fill=captions.ink("#FCFCFB"),
+                                stroke_w=5, role="cta")
         events.append((tag, tag_y, max(0, dur - 2.2), dur))
 
     # Opt-in pointer overlays (circle/brackets) pointing at what the narrator
     # names -- transcript-driven, vision-located, guarded.
     events += _pointer_events(plan, words_tl, workdir, video)
+    # D3/D7 measured: a plate goes UNDER any layer whose brand ink does not
+    # separate from the footage behind it (composited first = drawn below)
+    from . import brandkit, legibility
+    if legibility.enabled() and video:
+        try:
+            res = legibility.measure(plan, video, captions.ink("#FCFCFB"))
+            plan["_text_contrast"] = res
+            plates = legibility.plates(res, workdir, brandkit.surface() or "#0b0b0c")
+            for r in res:
+                if r["scrim"] > 0:
+                    print(f"        legibility: {r['label']} on a {r['scrim']:.0%} plate "
+                          f"(backdrop luma {r['backdrop_luma']}, gap {r['luma_gap']})")
+            events = plates + events
+        except Exception as e:  # noqa: BLE001 -- measuring must never break the burn
+            print(f"        legibility: not measured ({e})")
     return events
 
 
@@ -185,7 +263,9 @@ def _burn_chunks(events, dur, chunk_s=BURN_CHUNK_S):
         e = min(dur, s + chunk_s)
         if dur - e < 5.0:
             e = dur
-        local = [(png, y, max(0.0, t0 - s), min(e, t1) - s)
+        local = [(_Seq(png, getattr(png, "offset", 0.0) + max(0.0, s - t0))
+                  if isinstance(png, _Seq) else png,
+                  y, max(0.0, t0 - s), min(e, t1) - s)
                  for png, y, t0, t1 in events if t1 > s and t0 < e]
         out.append((s, e, local))
         s = e
@@ -201,19 +281,193 @@ def _burn_pass(src, dst, events, seek=None):
     inputs += ["-i", src]
     filters, last, idx = [], "0:v", 1
     for png, y, t0, t1 in events:
-        inputs.extend(["-i", png])
-        filters.append(f"[{last}][{idx}:v]overlay=(W-w)/2:{y}:"
-                       f"enable='between(t,{t0:.2f},{t1:.2f})'[v{idx}]")
+        if isinstance(png, _Seq):
+            # kinetic sequence: frame 0 lands on t0 (minus any chunk offset)
+            inputs.extend(["-framerate", str(config.output_fps()), "-i", png])
+            trim = f"trim=start={png.offset:.3f}," if png.offset > 0 else ""
+            filters.append(f"[{idx}:v]{trim}setpts=PTS-STARTPTS+{t0:.3f}/TB[k{idx}]")
+            filters.append(f"[{last}][k{idx}]overlay=(W-w)/2:{y}:eof_action=pass:"
+                           f"enable='between(t,{t0:.2f},{t1:.2f})'[v{idx}]")
+        else:
+            inputs.extend(["-i", png])
+            filters.append(f"[{last}][{idx}:v]overlay=(W-w)/2:{y}:"
+                           f"enable='between(t,{t0:.2f},{t1:.2f})'[v{idx}]")
         last = f"v{idx}"
         idx += 1
     if filters:
         inputs += ["-filter_complex", ";".join(filters), "-map", f"[{last}]"]
     else:
         inputs += ["-map", "0:v"]
-    inputs += ["-an", "-r", "30",
-               "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", dst]
+    inputs += ["-an", "-r", str(config.output_fps()), *config.final_encode_args(), dst]
     subprocess.run(inputs, check=True)
     return dst
+
+
+def shaderfx_any():
+    """Is any shader layer on for this run (worth computing a control track)?"""
+    from . import shaderfx
+    return any(shaderfx.active_list(k) for k in shaderfx.BRAND_PLACEMENTS)
+
+
+def _pop_times(plan):
+    """Cut-time instants the hook's and the lines' hot words pop (the
+    beat-timed accents), for effects that answer them."""
+    from . import kinetic
+    beats, out = plan.get("_beats"), []
+    rows = []
+    hook = plan.get("hook") or {}
+    if hook.get("text"):
+        rows.append((hook["text"], 0.0, float(hook.get("show_s", 3.6)), hook.get("hot"),
+                     hook.get("hot_reason")))
+    for o in plan.get("overlay_lines") or []:
+        rows.append((o["text"], float(o["t"]), float(o.get("show_s", 3.0)), o.get("hot"),
+                     o.get("hot_reason")))
+    for text, t0, show, hot, why in rows:
+        words = text.split()
+        hi, _ = kinetic.choose_hot(words, hot, "line", why)
+        pop = kinetic.pop_time(len(words), show, hi, t0 > 0.0, True,
+                               kinetic.local_beat(beats, t0))
+        if pop is not None:
+            out.append(round(t0 + pop, 3))
+    return sorted(out)
+
+
+def _protected(plan, layout_template, follow=False):
+    """(pic, clear) in uv (y up): the picture rect and the caption band above
+    it, which brand-space layers never cover; None when the content fills
+    the frame (a follow-the-faces crop) and there is no brand space at all.
+    A split cut protects the facecam and the screen together (the camera
+    sits on top), so smoke and sparks never cross a face."""
+    from . import layout as _layout
+    H = _layout.FRAME_H
+    if follow:
+        return None
+    if layout_template and layout_template in _layout.TEMPLATES:
+        _, scr_y, out_h = _layout._split_geometry(plan.get("composition"))
+        return (0.0, 1 - min(H, scr_y + out_h) / H, 1.0, 1.0), (0.0, 0.0)
+    top = _layout.picture_top(plan.get("reframe", 1.0))
+    bottom = H - top
+    L = _layout.plan_text(plan, layout_template)
+    text_top = min(L.get("hook", {}).get("y", top), L.get("game_name", {}).get("y", top)) - 24
+    return (0.0, 1 - bottom / H, 1.0, 1 - top / H), (1 - top / H, 1 - max(0, text_top) / H)
+
+
+def _finish_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
+    """The brand's finish (shaderfx "finish", e.g. folk-print) over the space
+    around the picture, AFTER the ambient layers, so the fill, smoke and
+    sparks print as one surface; never the picture. Reads the cut's own
+    frames. Returns dst, or src when off / failed."""
+    from . import kinetic, shaderfx
+    fx = shaderfx.active("finish")
+    if not fx or not kinetic.enabled():
+        return src
+    prot = _protected(plan, layout_template, follow)
+    if prot is None:
+        return src                       # the content fills the frame
+    try:
+        pic, clear = prot
+        ro = shaderfx._render_opts(fx)
+        fps = int(ro.get("fps", 60))
+        w, h = shaderfx._size(ro.get("scale", 0.5))
+        fdir = os.path.join(workdir, "finish_src")
+        os.makedirs(fdir, exist_ok=True)
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src, "-vf",
+                        f"fps={fps},scale={w}:{h}", "-q:v", "3", "-start_number", "0",
+                        os.path.join(fdir, "s%05d.jpg")], check=True)
+        n = len([f for f in os.listdir(fdir) if f.endswith(".jpg")])
+        seq, ffps = shaderfx.render_finish(fx, fdir, n, fps, os.path.join(workdir, "fx_finish"),
+                                           pic, clear)
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src,
+                        "-framerate", str(ffps), "-i", seq, "-filter_complex",
+                        "[1:v]scale=1080:1920:flags=bicubic,format=rgba[f];"
+                        "[0:v][f]overlay=0:0:eof_action=pass:shortest=0,format=yuv420p[v]",
+                        "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
+                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
+                        dst], check=True)
+        print(f"        finish '{fx}': around the picture, {n} frames")
+        return dst
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
+    except Exception as e:   # noqa: BLE001 -- the cut ships without the finish
+        from . import degrade
+        degrade.note("finish", f"'{fx}' failed ({e}); no finish")
+        return src
+
+
+def _ambient_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
+    """The brand's cut-long shader layers (shaderfx ambient, stacked bottom
+    first) over the pre-caption cut, only outside the picture and the text
+    band, so the content is never tinted or covered. Every layer reads the
+    cut's control track (plan "_ctrl"). Returns dst, or src when the brand
+    has no ambient layer or none renders."""
+    from . import kinetic, shaderfx
+    layers = shaderfx.active_list("ambient")
+    if not layers or not kinetic.enabled():
+        return src
+    prot = _protected(plan, layout_template, follow)
+    if prot is None:
+        print("        ambient: the content fills the frame; no brand space to fill")
+        return src
+    fx = "+".join(layers)
+    try:
+        pic, clear = prot                                     # uv, y up
+        pops = _pop_times(plan)
+        ctrl = plan.get("_ctrl")
+        uses_events = any("u_events" in shaderfx.load_effect(shaderfx.load_preset(l)["effect"])[1]
+                          for l in layers)
+        if ctrl is not None and "events" not in ctrl and \
+                (not shaderfx.content_flag("events") or not uses_events):
+            # not a content type with hits, or no layer draws them: no
+            # detection, no vision check, nothing uploaded
+            ctrl["events"] = []
+        if ctrl is not None and "events" not in ctrl:
+            from . import control
+            try:
+                cand = control.events(src, plan.get("_audio"), pic, dur,
+                                      limit=control.MAX_CANDIDATES)
+                cache = (os.path.join(plan["_qc"], f"impacts_{plan['id']}.json")
+                         if plan.get("_qc") else None)
+                ctrl["events"] = control.verify_events(src, cand, pic, workdir,
+                                                       plan.get("id", ""), cache)[:control.MAX_EVENTS]
+            except Exception as e:   # noqa: BLE001 -- marks simply do not fire
+                from . import degrade
+                degrade.note("impacts", f"detection failed ({e}); no impact marks")
+                ctrl["events"] = []
+        inputs, chain, last = [], [], "0:v"
+        for i, name in enumerate(layers, start=1):
+            try:
+                seq, fx_fps = shaderfx.render_ambient(
+                    name, os.path.join(workdir, f"fx_ambient{i}"), dur, pic, clear, pops,
+                    ctrl=plan.get("_ctrl"))
+            except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+                raise
+            except Exception as e:   # noqa: BLE001 -- the other layers still play
+                from . import degrade
+                degrade.note("ambient", f"'{name}' failed ({e}); layer skipped")
+                continue
+            k = len(inputs) // 4 + 1
+            inputs += ["-framerate", str(fx_fps), "-i", seq]
+            chain.append(f"[{k}:v]scale=1080:1920:flags=bicubic,format=rgba[f{k}];"
+                         f"[{last}][f{k}]overlay=0:0:eof_action=pass:shortest=0[o{k}]")
+            last = f"o{k}"
+        if not chain:
+            return src
+        subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src, *inputs,
+                        "-filter_complex", ";".join(chain) + f";[{last}]format=yuv420p[v]",
+                        "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
+                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
+                        dst], check=True)
+        c = plan.get("_ctrl") or {}
+        print(f"        ambient '{fx}': outside the picture; control: {len(pops)} pop(s), "
+              f"{len(c.get('onsets', []))} onset(s), energy {'on' if c.get('energy') else 'off'}, "
+              f"impacts at {[e['t'] for e in c.get('events', [])]}")
+        return dst
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
+    except Exception as e:   # noqa: BLE001 -- the cut ships without the layer
+        from . import degrade
+        degrade.note("ambient", f"'{fx}' failed ({e}); no ambient layers")
+        return src
 
 
 def _burn_final(src, dst, plan, words_tl, dur, workdir, layout, product_key):
@@ -229,7 +483,7 @@ def _burn_final(src, dst, plan, words_tl, dur, workdir, layout, product_key):
         part = os.path.join(workdir, f"burnpart{i:03d}.mp4")
         parts.append(_burn_pass(src, part, local, seek=(s, e)))
     lst = os.path.join(workdir, "burnparts.txt")
-    open(lst, "w").write("".join(f"file '{p}'\n" for p in parts))
+    open(lst, "w", encoding="utf-8").write("".join(f"file '{p}'\n" for p in parts))
     subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat",
                     "-safe", "0", "-i", lst, "-c", "copy", dst], check=True)
     return dst
@@ -241,19 +495,28 @@ def _burn_final(src, dst, plan, words_tl, dur, workdir, layout, product_key):
 RAW_CACHE_VERSION = 2
 
 
-def _raw_cache_key(plan, video, facecam, follow):
+def _raw_cache_key(plan, video, facecam, follow, src_crop=None):
     """Cache key for a cut's concatenated pre-caption raw.mp4: everything the
     segment render depends on. Captions/music/overlay changes do NOT move it."""
+    from . import follow as follow_mod
     st = os.stat(video)
     parts = {"version": RAW_CACHE_VERSION,
              "segments": plan.get("segments"),
              "comp": plan.get("composition"),
              "reframe": plan.get("reframe", 1.0),
+             # the crop path is measured from the source: version + switch
+             "follow_action": (follow_mod.FOLLOW_VERSION if follow_mod.enabled()
+                               else "off"),
+             "focus": plan.get("focus"),
+             "src_crop": src_crop,
              "follow": bool(follow),
-             # facemesh vs blaze frame the facecam crop differently
-             "detector": face.detector_kind(),
+             # facemesh vs blaze frame the facecam crop differently; with no
+             # facecam there is no crop to frame, and building a detector here
+             # was what killed headless renders (mediapipe abort over ssh)
+             "detector": face.detector_kind() if facecam else "n/a",
              # intermediate encoder selection (incl. REELLY_SW/HW_ENCODE state)
              "encode": config.intermediate_encode_args(),
+             "fps": config.output_fps(),
              "src": [os.path.basename(video), st.st_mtime, st.st_size]}
     if facecam:
         fs = os.stat(facecam)
@@ -274,7 +537,7 @@ def _cached_raw(root, plan, sfx, key, force, render_fn):
     meta = raw + ".json"
     if not force and os.path.exists(raw) and os.path.exists(meta):
         try:
-            if json.load(open(meta)).get("key") == key:
+            if json.load(open(meta, encoding="utf-8")).get("key") == key:
                 print(f"[final] {plan['id']}: raw cut unchanged, reusing cached "
                       "segments+concat")
                 return raw
@@ -288,7 +551,7 @@ def _cached_raw(root, plan, sfx, key, force, render_fn):
     with slots.hold("render", plan["id"]):
         render_fn(tmp)
     os.replace(tmp, raw)
-    json.dump({"key": key, "id": plan["id"]}, open(meta, "w"))
+    json.dump({"key": key, "id": plan["id"]}, open(meta, "w", encoding="utf-8"))
     return raw
 
 
@@ -316,9 +579,9 @@ def _apply_tail_trim(root, sfx, plan, trim_s):
     p = os.path.join(root, "edl", f"cut_plans{sfx}.json")
     with _PLANS_LOCK:
         try:
-            plans = json.load(open(p))
+            plans = json.load(open(p, encoding="utf-8"))
             plans = [plan if q.get("id") == plan["id"] else q for q in plans]
-            json.dump(plans, open(p, "w"), indent=1)
+            json.dump(plans, open(p, "w", encoding="utf-8"), indent=1)
         except (OSError, ValueError) as e:
             print(f"[tail ] {plan['id']}: could not persist the trimmed "
                   f"plan ({e})")
@@ -327,8 +590,8 @@ def _apply_tail_trim(root, sfx, plan, trim_s):
 
 def run(project, cut_id=None, tag=None, product="video", targets_for=None,
         review=False, force=False, account=None, variants=None, on_cut=None):
-    """on_cut(plan, made_paths), when given, fires on the WORKER thread the
-    moment a cut's deliverables exist — the seam `cut` uses to start that
+    """on_cut(plan, made_paths), when given, fires on the worker thread the
+    moment a cut's deliverables exist -- the seam `cut` uses to start that
     cut's graphics layer while the remaining cuts are still rendering. It must
     be cheap (hand the work to another pool); an exception in it fails the
     cut like any other error."""
@@ -358,7 +621,7 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
           f"variants: {', '.join(wanted)}"
           + ("" if "music" in needed_mixes else " (no music generation needed)"))
     sfx = f"_{tag}" if tag else ""
-    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json")))
+    plans = json.load(open(os.path.join(root, "edl", f"cut_plans{sfx}.json"), encoding="utf-8"))
     words = speech.words_from(os.path.join(root, "analysis", "words.json"))
     video = direct._source_video(root)
     facecam = _facecam_source(root)
@@ -379,6 +642,21 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
     tpath = timing.timings_path(root)
 
     def _finalize_one(p):
+        from . import shaderfx as _fx
+        # pool threads are reused: resolve THIS cut's content type from its
+        # own plan, never the previous cut's, and leave nothing behind
+        from . import degrade
+        _fx.set_content_type(None)
+        _fx.set_content_type(_fx.content_type(p, follow=follow))
+        degrade.write(root, p["id"], [])          # a fresh record for this run
+        degrade.begin()
+        try:
+            return _finalize_cut(p)
+        finally:
+            _fx.set_content_type(None)
+            degrade.append(root, p["id"], degrade.collect())
+
+    def _finalize_cut(p):
         from . import outro as outro_mod
         comp = p.get("composition")
         layout = comp.get("cam") if comp and facecam else None
@@ -397,9 +675,12 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
                 with timing.stage(f"{p['id']} segments+concat", tpath):
                     _cut_segments(video, p["segments"], dst, comp=comp,
                                   facecam=facecam, follow_faces=follow,
+                                  focus=p.get("focus"),
+                                  src_crop=direct.source_crop(root),
                                   reframe=p.get("reframe", 1.0))
             raw = _cached_raw(root, p, sfx,
-                              _raw_cache_key(p, video, facecam, follow),
+                              _raw_cache_key(p, video, facecam, follow,
+                                             direct.source_crop(root)),
                               force, _render_raw)
             # Tail hygiene safety net (cut_04 screening bug): a legacy plan
             # whose frozen content end sits on a rising sound onset ships a
@@ -419,24 +700,89 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
             with timing.stage(f"{p['id']} voice stem", tpath):
                 voice = audio_post.voice_stem(raw, os.path.join(audir, f"{p['id']}_voice.wav"))
             events = audio_post.sfx_events(p)
-            with timing.stage(f"{p['id']} caption burn", tpath):
-                vid = _burn_final(raw, os.path.join(td, "burn.mp4"), p, words_tl,
-                                  dur, td, layout, product)
-            if ob:
-                with timing.stage(f"{p['id']} outro", tpath):
-                    # backdrop from the PRE-CAPTION raw so no burned text
-                    # bleeds into the darkened card background
-                    vid = outro_mod.append(vid, raw, p, product, td)
-            # delivery plan: build only the mixes the requested targets need;
-            # music is generated only when a music platform asked for it
-            mixes = {}
+            # Music first: its beat grid times the text (hot-word pops land on
+            # beats), so it has to exist before the burn.
+            mus, off = None, 0.0
             if "music" in needed_mixes:
                 with timing.stage(f"{p['id']} music/sfx", tpath):
                     mus = audio_post.music(p, os.path.join(audir, f"{p['id']}_music.mp3"), name)
                     payoff = p.get("payoff") or {}
                     beat_target = (float(payoff["local_t"]) if payoff.get("jump")
                                    else float(p["hook"].get("show_s", 3.6)))
-                    off = audio_post.beat_offset(mus, beat_target)
+                    if not mus:
+                        from . import degrade
+                        degrade.note("music", "no music bed (no brand track or kit bed, and "
+                                     "paid generation is off); voice and SFX only")
+                    if mus:
+                        src_track, key = audio_post.brand_track(p)
+                        bpm = audio_post.track_bpm(src_track, key) if src_track else None
+                        off, period = audio_post.beat_grid(mus, beat_target, bpm=bpm)
+                        if period:
+                            p["_beats"] = (beat_target, period)
+                            print(f"        beat grid: {60 / period:.1f} bpm "
+                                  f"({'stated' if bpm else 'detected'}), "
+                                  f"a beat on {beat_target:.2f}s")
+            if shaderfx_any():
+                from . import control
+                try:
+                    p["_ctrl"] = control.track(p, voice, dur)
+                    p["_audio"] = voice
+                    p["_qc"] = os.path.join(root, "qc")
+                    os.makedirs(p["_qc"], exist_ok=True)
+                except Exception as e:   # noqa: BLE001 -- effects run on the beat grid only
+                    from . import degrade
+                    degrade.note("control track", f"failed ({e}); effects follow beats and pops only")
+            with timing.stage(f"{p['id']} ambient fx", tpath):
+                lit = _ambient_pass(raw, os.path.join(td, "ambient.mp4"), p, dur, td, layout,
+                                    follow=follow)
+            with timing.stage(f"{p['id']} finish fx", tpath):
+                # AFTER the ambient layers: smoke, sparks and the fill print as
+                # one surface (before them the print hid under the smoke)
+                lit = _finish_pass(lit, os.path.join(td, "finish.mp4"), p, dur, td, layout,
+                                   follow=follow)
+            with timing.stage(f"{p['id']} caption burn", tpath):
+                vid = _burn_final(lit, os.path.join(td, "burn.mp4"), p, words_tl,
+                                  dur, td, layout, product)
+            from . import behind as _behind
+            if _behind.enabled(p):
+                with timing.stage(f"{p['id']} text behind", tpath):
+                    try:
+                        from . import judge as _judge
+                        mpat, mfps, mn = _behind.masks(raw, os.path.join(td, "masks"))
+                        rows = [((r[0], r[1], r[5], r[2], r[6], r[3]), str(r[4]))
+                                for r in _judge._text_layers(p, words, with_x=True)]
+                        boxes = [b for b, label in rows if not label.startswith("cue@")]
+                        cues = [b for b, label in rows if label.startswith("cue@")]
+                        from . import gputext as _gt, shaderfx as _sfx
+                        # how far moving type reaches past its layout box
+                        side = max(_gt.PETAL_MARGIN, _sfx.TEXT_OFF)
+                        top = 160 if _gt.motion() == "blocklock" else side
+                        linger = _gt.PETAL_LINGER if _gt.exit_style() == "petals" else 0.0
+                        dec = _behind.guard(mpat, mn, mfps, boxes, on_top=cues,
+                                            grow=(top, side, side, linger + 0.1))
+                        vid = _behind.apply(vid, raw, mpat, mfps, os.path.join(td, "behind.mp4"))
+                        print("        text behind the subject: "
+                              + ", ".join(f"{'behind' if b else 'on top'} (covered {c:.0%})"
+                                          for _, c, b in dec))
+                    except Exception as e:   # noqa: BLE001 -- text stays on top
+                        from . import degrade
+                        degrade.note("text behind", f"failed ({e}); text on top")
+            from . import legibility as _leg
+            # always written: a cut whose measurement failed must not keep
+            # the previous run's verdict
+            _leg.record(root, p["id"], p.pop("_text_contrast", None))
+            if ob:
+                with timing.stage(f"{p['id']} outro", tpath):
+                    # backdrop from the PRE-CAPTION raw so no burned text
+                    # bleeds into the darkened card background
+                    vid = outro_mod.append(vid, raw, p, product, td)
+            p.pop("_beats", None)          # render-time only, never persisted
+            p.pop("_ctrl", None)
+            p.pop("_audio", None)
+            p.pop("_qc", None)
+            # delivery plan: build only the mixes the requested targets need;
+            # music is generated only when a music platform asked for it
+            mixes = {}
             with timing.stage(f"{p['id']} mix", tpath):
                 # pad_to keeps the outro alive through amix(duration=first)
                 # and the mux's -shortest: the voice is padded with silence
@@ -456,13 +802,19 @@ def run(project, cut_id=None, tag=None, product="video", targets_for=None,
             made = []
             with timing.stage(f"{p['id']} mux/peak", tpath):
                 for suffix, mix in mixes.items():
+                    # at target BEFORE the mux: every later guard rebuilds the
+                    # audio from this file, so a correction made here sticks
+                    mix = audio_post.level_mix(mix)
                     dst = os.path.join(outdir, f"{p['id']}{suffix}.mp4")
                     subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", vid, "-i", mix,
                                     "-map", "0:v", "-map", "1:a", "-c:v", "copy",
                                     "-c:a", "aac", "-b:a", "192k", "-shortest", dst],
                                    check=True)
                     # The mix was normalised, but the AAC encode just added its own
-                    # inter-sample overshoot. Verify what was actually written.
+                    # inter-sample overshoot, and a loud bed under hard transients
+                    # can leave loudnorm short of target (it stops at the peak
+                    # ceiling). Bring the written file into the judge's window;
+                    # the true-peak guard runs again inside.
                     audio_post.enforce_true_peak(dst, source_audio=mix)
                     made.append(dst)
         products.description_md(product, p, os.path.join(outdir, f"{p['id']}_DESCRIPTION.md"),
@@ -538,9 +890,12 @@ def _write_review_md(root, plans, targets, sfx, cut_id=None):
     """The single review surface: fully treated files, what to watch, what ships."""
     outdir = f"deliverables/final{sfx}"
     shown = [p for p in plans if not cut_id or p["id"] == cut_id]
+    from . import degrade
     L = [f"# Review: {os.path.basename(root)}", "",
-         "Every file below is **fully treated**: music bed, karaoke captions, "
-         "hook and on-screen lines, SFX, end tag, loudness. What you watch is what ships.",
+         "Every file below is **fully treated** with everything this run could render: "
+         "music bed, karaoke captions, hook and on-screen lines, SFX, effects, end tag, "
+         "loudness. Anything that fell back is listed under its cut. What you watch is "
+         "what ships.",
          "", "**Watch** the plain `<cut>.mp4` (music baked in). **Post** the file named "
          "per platform in each cut's `_DESCRIPTION.md`: TikTok, Reels and Shorts take the "
          "`_trending` file with no bed so in-app trending audio can ride under the voice (P5).",
@@ -553,7 +908,7 @@ def _write_review_md(root, plans, targets, sfx, cut_id=None):
         watch = f"{p['id']}_gfx.mp4"
         if not os.path.exists(os.path.join(root, outdir, watch)):
             watch = f"{p['id']}.mp4"
-        L += [f"## {p['id']} — {p['title']}  ({p['duration_s']}s)", "",
+        L += [f"## {p['id']} -- {p['title']}  ({p['duration_s']}s)", "",
               f"- **Watch:** `{outdir}/{watch}`"
               + ("  (music + captions + SFX + VFX)" if watch.endswith("_gfx.mp4")
                  else "  (music + captions + SFX; no graphics layer)"),
@@ -565,9 +920,13 @@ def _write_review_md(root, plans, targets, sfx, cut_id=None):
         L += [f"- Handles: {', '.join(p.get('handles') or ['NONE'])} | "
               f"captions: {p.get('captions', 'burned')} | "
               f"planned from: {p.get('planned_from', 'speech')}",
-              f"- Posting block: `{outdir}/{p['id']}_DESCRIPTION.md`",
-              "- **Verdict:** _pending_", ""]
+              f"- Posting block: `{outdir}/{p['id']}_DESCRIPTION.md`"]
+        fell = degrade.read(root, p["id"])
+        if fell:
+            L.append("- **Fell back** (the cut shipped without these):")
+            L += [f"  - {n}" for n in fell]
+        L += ["- **Verdict:** _pending_", ""]
     L += ["---", "", f"{len(shown)} cuts. Delivery targets: {', '.join(targets)}.", ""]
     path = os.path.join(root, "deliverables", f"REVIEW{sfx}.md")
-    open(path, "w").write("\n".join(L))
+    open(path, "w", encoding="utf-8").write("\n".join(L))
     return path

@@ -297,7 +297,7 @@ def _survey_one(entry, studio, project, crop=None, tries=3):
     for n in range(tries):
         try:
             return _survey_call(entry, key, studio, project, crop)
-        except Exception as e:      # noqa: BLE001 — isolate the window
+        except Exception as e:      # noqa: BLE001 -- isolate the window
             last = f"{type(e).__name__}: {e}"[:160]
             if n + 1 < tries:
                 time.sleep(1.5 * (n + 1))
@@ -347,7 +347,7 @@ def survey(clips, product, out_json, project="", workers=4, crop=None,
     have = {}
     if os.path.exists(out_json):
         try:
-            have = {c["id"]: c for c in json.load(open(out_json))["clips"]}
+            have = {c["id"]: c for c in json.load(open(out_json, encoding="utf-8"))["clips"]}
         except (ValueError, OSError, KeyError):
             have = {}
     # A cached FAILURE is not an answer, it is a missing one. Only successful
@@ -370,7 +370,7 @@ def survey(clips, product, out_json, project="", workers=4, crop=None,
     ordered = [have[_cache_key(e[0], e[1], pick(e[0]))] for e in entries
                if _cache_key(e[0], e[1], pick(e[0])) in have]
     os.makedirs(os.path.dirname(os.path.abspath(out_json)) or ".", exist_ok=True)
-    json.dump({"product": product, "clips": ordered}, open(out_json, "w"),
+    json.dump({"product": product, "clips": ordered}, open(out_json, "w", encoding="utf-8"),
               indent=1)
     return ordered
 
@@ -425,7 +425,7 @@ def _write_social_warning(out, plan, pool):
                if by_id.get(s.get("id"), {}).get("weapons_or_blood")]
     p = os.path.join(os.path.dirname(os.path.abspath(out)),
                      "NOT-FOR-SOCIAL.md")
-    with open(p, "w") as f:
+    with open(p, "w", encoding="utf-8") as f:
         f.write(NOT_FOR_SOCIAL.format(
             out=os.path.basename(out),
             shots="\n".join(flagged) or "- (none in the final cut)"))
@@ -1267,7 +1267,7 @@ def cinecard(product, w, h, dur, workdir, project="", line=None, tag="card"):
     keyfile = out + ".key"
     ident = _norm_words(line or "")
     if os.path.exists(out) and media.duration(out) >= dur \
-            and os.path.exists(keyfile) and open(keyfile).read().strip() == ident:
+            and os.path.exists(keyfile) and open(keyfile, encoding="utf-8").read().strip() == ident:
         return out
 
     concept = CARD_CONCEPTS.get(key) or CARD_CONCEPTS["video"]
@@ -1320,7 +1320,7 @@ def cinecard(product, w, h, dur, workdir, project="", line=None, tag="card"):
         print(f"[card  ] {key} title lost its text by 85%; holding the typeset "
               f"still with a push-in instead (deterministic, always readable)")
         _still_push(still, out, w, h, seconds)
-    open(keyfile, "w").write(ident)
+    open(keyfile, "w", encoding="utf-8").write(ident)
     print(f"[card  ] generated {'TITLE SEQUENCE' if line else 'bed'} for "
           f"{key}: {os.path.basename(out)}")
     return out
@@ -1673,7 +1673,7 @@ def render(plan, out, size="1920x1080", project="", workers=4, cine=None,
                                 cine=cine, cine_at=cine_end))
 
         lst = os.path.join(td, "concat.txt")
-        with open(lst, "w") as f:
+        with open(lst, "w", encoding="utf-8") as f:
             f.writelines(f"file '{p}'\n" for p in parts)
         os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
         r = sh(config.FFMPEG, "-v", "error", "-y", "-f", "concat", "-safe", "0",
@@ -1824,7 +1824,7 @@ def build_from_script(script_path, out, size="1920x1080", project="",
     guarantee than a vision pass, and the gate exists to protect automatic
     selection.
     """
-    plan = json.load(open(script_path))
+    plan = json.load(open(script_path, encoding="utf-8"))
     product = products.ALIASES.get(plan["product"], plan["product"])
     plan["product"] = product
     plan["studio"] = products.PRODUCTS[product]["name"]
@@ -1853,7 +1853,7 @@ def build_from_script(script_path, out, size="1920x1080", project="",
                             line=plan["cta"], tag="end")
         cine = os.path.join(work, f"cinecard_{product}_base.png")
         cine = cine if os.path.exists(cine) else None
-    json.dump(plan, open(os.path.join(work, "plan.json"), "w"), indent=1)
+    json.dump(plan, open(os.path.join(work, "plan.json"), "w", encoding="utf-8"), indent=1)
 
     mute = os.path.join(work, "picture.mp4")
     render(plan, mute, size=size, project=project, cine=cine,
@@ -1897,13 +1897,13 @@ def build(product, clip_patterns, out, seconds=30, size="1920x1080",
     # a fresh plan.
     plan_path = os.path.join(work, "plan.json")
     if not replan and os.path.exists(plan_path):
-        p = json.load(open(plan_path))
+        p = json.load(open(plan_path, encoding="utf-8"))
         print(f"[plan  ] reusing {plan_path} (pass --replan to re-author)")
     else:
         p = plan(product, pool, seconds=seconds - OUTRO_S, brain=brain,
                  project=project)
         p["allow_weapons"] = bool(allow_weapons)
-        json.dump(p, open(plan_path, "w"), indent=1)
+        json.dump(p, open(plan_path, "w", encoding="utf-8"), indent=1)
     if allow_weapons:
         _write_social_warning(out, p, pool)
     print(f"[copy  ] hook   {p['hook']}\n[copy  ] payoff {p['payoff']}\n"

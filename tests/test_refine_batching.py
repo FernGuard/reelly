@@ -7,7 +7,7 @@ Two properties are money, not style:
   siblings short-circuit before their next LLM call, and the exception
   re-raises for the earliest failing candidate of its batch.
 
-The default batch width is 12 — run()'s candidate cap — so a normal run is a
+The default batch width is 12 -- run()'s candidate cap -- so a normal run is a
 SINGLE batch (two sequential 6-wide batches measured 48.9s). At that width the
 abort Event, not batch sequencing, is what bounds post-cap spend; the explicit
 batch_size=6 tests below keep the multi-batch machinery honest for callers
@@ -128,7 +128,7 @@ def test_default_single_batch_covers_the_candidate_cap():
 
 def test_max_cuts_never_submits_a_second_batch_at_default_width():
     """A --max-cuts run must still never pay for a batch past the one where
-    enough plans existed — at 12-wide that means candidates 13+ are never
+    enough plans existed -- at 12-wide that means candidates 13+ are never
     submitted."""
     calls = []
 

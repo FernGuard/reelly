@@ -12,6 +12,14 @@ import pytest
 from reelly import audio_post, cli, config, design, judge, motion
 
 
+@pytest.fixture(autouse=True)
+def _paid_calls_on(monkeypatch):
+    """These tests exercise the paid-provider paths (mocked, nothing bills).
+    Reelly is zero-paid by default, so they opt in the way a real run must."""
+    monkeypatch.setenv("REELLY_ALLOW_PAID", "1")
+
+
+
 # --- gap 1: real-art mode (no invented character over real games / product UI) -
 
 def test_real_art_prompt_forbids_inventing_any_content():
@@ -513,7 +521,7 @@ def test_fal_audio_retries_once_instrumental_on_content_policy(monkeypatch):
 
 
 def test_fal_audio_reraises_clearly_when_still_rejected(monkeypatch):
-    """One retry, then a clear message — never an infinite loop or a bare crash."""
+    """One retry, then a clear message -- never an infinite loop or a bare crash."""
     _no_ledger(monkeypatch)
     calls = []
 

@@ -32,17 +32,23 @@ import os
 import subprocess
 
 from . import config
+from .shaderfx import GPUUnavailable
 
 OUTRO_S = 2.8            # the designed outro length (2.5-3.0s band)
 TAIL_BREATH_S = 0.6      # natural breath the CONTENT ends on after the payoff
 FADE_IN_S = 0.25         # card fade-in at outro start
 
-# backdrop treatment: heavy blur + darken so the final frame reads as a
-# card background, not as a freeze of the action
+# backdrop treatment: heavy blur + dim so the final frame reads as a card
+# background, not as a freeze of the action. The dim MULTIPLIES (keeps 55% of
+# each pixel) instead of subtracting: brightness=-0.28 took a dark game
+# (luma ~25) to pure black, every outro opened on a black run (judge
+# black_frames at the content/outro join) and the ending read as a black
+# card, a look already rejected in review. Dimmed, the game's colours stay behind
+# the ask.
 _BACKDROP_VF = ("scale=1080:1920:force_original_aspect_ratio=increase,"
                 "crop=1080:1920,boxblur=luma_radius=24:luma_power=2:"
                 "chroma_radius=12:chroma_power=2,"
-                "eq=brightness=-0.28:saturation=0.5")
+                "colorchannelmixer=rr=0.55:gg=0.55:bb=0.55,eq=saturation=0.8")
 
 INK = (9, 12, 10)        # brand ink, same base as the endcard scrim
 
@@ -145,20 +151,122 @@ def backdrop_png(video, style, path):
     return _gradient_png(path), "gradient"
 
 
-def _typeset_card(cta, path, size=(1080, 1920)):
+CTA_Y_FRAC = 0.47       # the typeset CTA line's top, as a fraction of height
+
+
+def _typeset_card(cta, path, size=(1080, 1920), draw_text=True):
     """Last-resort card when no kit endcard and no registered wordmark
     exist: translucent scrim + the CTA line (memory: typeset CTA only as
-    fallback)."""
+    fallback). draw_text=False gives the scrim alone, for a kinetic CTA."""
     from PIL import Image, ImageDraw
     from . import captions
     W, H = size
-    img = Image.new("RGBA", (W, H), (*INK, 153))     # ~60% scrim
+    # ~60% scrim under static text; ~35% under the kinetic ask, which carries
+    # its own stroke and shadow (60% on top of the dimmed backdrop was black)
+    img = Image.new("RGBA", (W, H), (*INK, 153 if draw_text else 90))
+    if not draw_text:
+        img.save(path)
+        return path
     d = ImageDraw.Draw(img)
-    f = captions._font(52)
+    f = captions._font(52, "headline")
     tw = d.textlength(cta, font=f)
-    d.text(((W - tw) / 2, int(H * 0.47)), cta, font=f, fill=(252, 252, 251))
+    d.text(((W - tw) / 2, int(H * CTA_Y_FRAC)), cta, font=f,
+           fill=captions.ink("#FCFCFB"))
     img.save(path)
     return path
+
+
+def card_kind(plan, product):
+    """Which card the outro will use: "endcard" (baked kit card), "logo"
+    (wordmark + ask) or "typeset" (the ask on a scrim). Mirrors card_png."""
+    try:
+        from . import brandkit, products
+        key = products.ALIASES.get(product, product) if product else None
+        cta = (plan.get("cta") or "").strip()
+        src = str(plan.get("cta_source", "")).strip().lower()
+        authored = "manual" in src or "hand-authored" in src
+        if not (authored and cta):
+            p = brandkit.endcard(product) if product else None
+            if p and p.endswith(".png"):
+                return "endcard"
+        logo = products.brand_logo(key) if key else None
+        return "logo" if logo and os.path.exists(logo) else "typeset"
+    except Exception:   # noqa: BLE001
+        return "typeset"
+
+
+def _kinetic_cta(plan, product, workdir, len_s, starts_at=None):
+    """(scrim_png, (pattern, y)) when the outro is the typeset card and the
+    kinetic layer is on: the scrim without text, plus the ask as kinetic type
+    whose ACTION word pops in the accent. None otherwise (static card)."""
+    from . import kinetic
+    if not kinetic.enabled() or card_kind(plan, product) != "typeset":
+        return None
+    cta = (plan.get("cta") or "").strip()
+    if not cta:
+        return None
+    try:
+        scrim = _typeset_card(cta, os.path.join(
+            workdir, f"{plan.get('id', 'cut')}_outro_scrim.png"), draw_text=False)
+        pattern, _, _, pad = kinetic.cta_line(
+            cta, os.path.join(workdir, "kin_cta"), len_s,
+            hot=plan.get("cta_hot"), hot_reason=plan.get("cta_hot_reason"),
+            y=int(1920 * CTA_Y_FRAC),
+            beat=(kinetic.local_beat(plan.get("_beats"), starts_at)
+                  if starts_at is not None else None))
+        return scrim, (pattern, int(1920 * CTA_Y_FRAC) - pad)
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
+    except Exception as e:   # noqa: BLE001 -- static card instead
+        from . import degrade
+        degrade.note("end card", f"kinetic CTA failed ({e}); static card")
+        return None
+
+
+def _last_frame_png(video, path):
+    """The content's last frame as shown (burned text and layers included):
+    the outgoing image of the transition into the end card."""
+    for back in (0.05, 0.2, 0.5):
+        r = subprocess.run([config.FFMPEG, "-y", "-v", "error", "-sseof", f"-{back}", "-i", video,
+                            "-frames:v", "1", path], capture_output=True)
+        if r.returncode == 0 and os.path.exists(path) and os.path.getsize(path):
+            return path
+    return None
+
+
+def _shader_backdrop(backdrop, plan, workdir, len_s, starts_at, content_video=None):
+    """The backdrop as a living shader layer (shaderfx) when the brand asks
+    for one, timed so its ring of light leaves with the ask's beat-timed pop.
+    None when off or when the effect cannot render (the still is used)."""
+    from . import kinetic, shaderfx
+    fx = shaderfx.active()
+    cta = (plan.get("cta") or "").strip()
+    if not fx or not cta:
+        return None
+    try:
+        words = cta.split()
+        hi, _ = kinetic.choose_hot(words, plan.get("cta_hot"), "cta",
+                                   plan.get("cta_hot_reason"))
+        beat = (kinetic.local_beat(plan.get("_beats"), starts_at)
+                if starts_at is not None else None)
+        pop = kinetic.pop_time(len(words), len_s, hi, True, False, beat)
+        seq = shaderfx.render(fx, backdrop, os.path.join(workdir, "fx_outro"), len_s,
+                              pulse_t=pop, band=1.0 - CTA_Y_FRAC - 0.03,
+                              # the cut's ambient smoke left off at starts_at
+                              t0=(starts_at or 0.0) if shaderfx.active("ambient") else 0.0,
+                              ctrl=plan.get("_ctrl"), ctrl_t0=starts_at or 0.0,
+                              from_png=(_last_frame_png(content_video,
+                                                        os.path.join(workdir, "outro_from.png"))
+                                        if content_video else None))
+        print(f"[outro] {plan.get('id', '?')}: shader backdrop '{fx}'"
+              + (f", light ring with the pop at {pop:.2f}s" if pop is not None else ""))
+        return seq
+    except GPUUnavailable:   # REELLY_GPU=gpu: fail, never degrade
+        raise
+    except Exception as e:   # noqa: BLE001 -- the still backdrop instead
+        from . import degrade
+        degrade.note("end card", f"shader backdrop '{fx}' failed ({e}); still backdrop")
+        return None
 
 
 def card_png(plan, product, workdir):
@@ -190,36 +298,45 @@ def card_png(plan, product, workdir):
         return _typeset_card(cta or "edited with Reelly", dst)
     except Exception as e:   # noqa: BLE001
         dst = os.path.join(workdir, f"{plan.get('id', 'cut')}_outro_card.png")
-        print(f"[outro] card render degraded to typeset fallback ({e})")
+        from . import degrade
+        degrade.note("end card", f"card render failed ({e}); typeset fallback")
         return _typeset_card((plan.get("cta") or "").strip() or "Reelly",
                              dst)
 
 
-def build_segment(backdrop, card, len_s, dst, fps=30):
+def build_segment(backdrop, card, len_s, dst, fps=None, seq=None, backdrop_seq=None):
     """Encode the outro segment: static backdrop, card fading in, no audio.
+    seq=(pattern, y): a kinetic CTA sequence composited over the card.
 
-    Codec parameters MIRROR finalize._burn_pass (libx264 veryfast crf 20,
-    -r 30, yuv420p) so the concat with the burned content stream can run
+    Codec parameters MIRROR finalize._burn_pass (config.final_encode_args,
+    config.output_fps) so the concat with the burned content stream can run
     with -c copy.
     """
-    fc = (f"[0:v]scale=1080:1920,setsar=1[b];"
+    fps = fps or config.output_fps()
+    # backdrop_seq: a shaderfx PNG sequence (half size) instead of the still
+    fc = (f"[0:v]scale=1080:1920:flags=bicubic,setsar=1[b];"
           f"[1:v]scale=1080:1920,format=rgba,"
           f"fade=t=in:st=0.03:d={FADE_IN_S}:alpha=1[c];"
-          f"[b][c]overlay=0:0,format=yuv420p[v]")
+          f"[b][c]overlay=0:0" + ("[bc];" if seq else ",format=yuv420p[v]"))
+    extra = []
+    if seq:
+        extra = ["-framerate", str(fps), "-i", seq[0]]
+        fc += (f"[bc][2:v]overlay=(W-w)/2:{int(seq[1])}:eof_action=repeat,"
+               f"format=yuv420p[v]")
     subprocess.run(
-        [config.FFMPEG, "-y", "-v", "error",
-         "-loop", "1", "-framerate", str(fps), "-i", backdrop,
-         "-loop", "1", "-framerate", str(fps), "-i", card,
-         "-filter_complex", fc, "-map", "[v]", "-t", f"{len_s:.3f}",
-         "-r", str(fps), "-an",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", dst],
+        [config.FFMPEG, "-y", "-v", "error"]
+        + (["-framerate", str(fps), "-i", backdrop_seq] if backdrop_seq
+           else ["-loop", "1", "-framerate", str(fps), "-i", backdrop])
+        + ["-loop", "1", "-framerate", str(fps), "-i", card] + extra +
+        ["-filter_complex", fc, "-map", "[v]", "-t", f"{len_s:.3f}",
+         "-r", str(fps), "-an", *config.final_encode_args(), dst],
         check=True, capture_output=True)
     return dst
 
 
 def _concat_copy(a, b, dst, workdir):
     lst = os.path.join(workdir, os.path.basename(dst) + ".concat.txt")
-    with open(lst, "w") as f:
+    with open(lst, "w", encoding="utf-8") as f:
         f.write(f"file '{a}'\nfile '{b}'\n")
     r = subprocess.run([config.FFMPEG, "-y", "-v", "error", "-f", "concat",
                         "-safe", "0", "-i", lst, "-c", "copy", dst],
@@ -236,8 +353,8 @@ def _concat_reencode(a, b, dst):
          "[0:v]settb=AVTB,setpts=PTS-STARTPTS[v0];"
          "[1:v]settb=AVTB,setpts=PTS-STARTPTS[v1];"
          "[v0][v1]concat=n=2:v=1:a=0,format=yuv420p[v]",
-         "-map", "[v]", "-r", "30", "-an",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", dst],
+         "-map", "[v]", "-r", str(config.output_fps()), "-an",
+         *config.final_encode_args(), dst],
         check=True, capture_output=True)
     return dst
 
@@ -255,14 +372,24 @@ def append(content_video, backdrop_source, plan, product, workdir):
     style = ob.get("style") or style_from_kit()
     bp, used_style = backdrop_png(backdrop_source or content_video, style,
                                   os.path.join(workdir, "outro_backdrop.png"))
-    card = card_png(plan, product, workdir)
-    seg = build_segment(bp, card, len_s,
-                        os.path.join(workdir, "outro_seg.mp4"))
-    dst = os.path.join(workdir, "content_outro.mp4")
     try:
         content_d = float(media.probe(content_video)["format"]["duration"])
     except Exception:   # noqa: BLE001
         content_d = None
+    kin = _kinetic_cta(plan, product, workdir, len_s, starts_at=content_d)
+    card = kin[0] if kin else card_png(plan, product, workdir)
+    fx_seq = (_shader_backdrop(bp, plan, workdir, len_s, content_d, content_video)
+              if kin else None)
+    if not kin:
+        from . import shaderfx
+        if shaderfx.active():
+            # an opaque kit end card would hide a living backdrop anyway
+            print(f"[outro] end-card effect '{shaderfx.active()}' not used: "
+                  "the brand's own end card is shown as designed")
+    seg = build_segment(bp, card, len_s,
+                        os.path.join(workdir, "outro_seg.mp4"),
+                        seq=kin[1] if kin else None, backdrop_seq=fx_seq)
+    dst = os.path.join(workdir, "content_outro.mp4")
     ok = _concat_copy(content_video, seg, dst, workdir)
     if ok and content_d is not None:
         try:
@@ -288,17 +415,17 @@ def record_verdict(root, cut_id, entry):
     os.makedirs(qc, exist_ok=True)
     p = os.path.join(qc, "ending_check.json")
     try:
-        data = json.load(open(p))
+        data = json.load(open(p, encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
     data[cut_id] = entry
-    json.dump(data, open(p, "w"), indent=1)
+    json.dump(data, open(p, "w", encoding="utf-8"), indent=1)
     return p
 
 
 def load_verdicts(root):
     p = os.path.join(root, "qc", "ending_check.json")
     try:
-        return json.load(open(p))
+        return json.load(open(p, encoding="utf-8"))
     except (OSError, ValueError):
         return {}
