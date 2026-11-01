@@ -8,6 +8,9 @@ change behaviour; every such change is listed under "Upgrading").
 ## [Unreleased]
 
 ### Added
+- `reelly fx list` (every preset and its tunable parameters) and
+  `reelly fx preview NAME [--brand B] [--set u_name=value]`: an MP4 of any
+  preset over a stand-in cut, in your brand's colours, with values to try.
 - Continuous integration: the full suite, golden frames included, runs on
   Linux, macOS and Windows for every push and pull request. A runner whose
   renderer has no golden references records them as an artifact.

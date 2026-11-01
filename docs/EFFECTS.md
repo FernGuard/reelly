@@ -27,6 +27,18 @@ effect file (.glsl)  ->  preset (.json)  ->  brand kit (brand.json "effects")
 | `finish` | `folk-print` | experimental: the space around the picture reduced to a three-colour print (surface, accent, ink) with dither, halftone and grain | `u_mix`, `u_dot`, `u_grain` |
 | `still` | `parallax` | `reelly parallax`: a 2.5D push-in or dolly on a still from its depth map | `u_push`, `u_depthk`, `u_dolly`, `u_focus`, `u_center`, `u_fit` |
 
+See them before you pick:
+
+```sh
+reelly fx list                                   # every preset and its parameters
+reelly fx preview embers --brand mybrand         # fx-ambient-embers.mp4, in your colours
+reelly fx preview embers --set u_density=0.6     # try a value without editing brand.json
+```
+
+A preview plays the preset over a stand-in cut (a 16:9 panel with a blurred
+fill around it) with a scripted control track: a beat every half second, two
+hot-word pops and two impacts, so reactive effects show how they react.
+
 Colour inputs marked with a brand slot (`accent`, `ink`, `surface`) take the
 brand's colours automatically. Tune a preset per brand:
 
