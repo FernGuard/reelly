@@ -212,13 +212,13 @@ def raw_tail_trim(raw_path, floor_local, cut_id):
 
 def trim_file(src, trim_s, dst):
     """src minus trim_s off the end -> dst, re-encoded (a stream copy cannot
-    cut mid-GOP) with the standard intermediate encoder args."""
+    cut mid-GOP) losslessly: only the cut's next encode reads it."""
     from . import media
     dur = float(media.probe(src)["format"]["duration"])
     subprocess.run(
         [config.FFMPEG, "-y", "-v", "error", "-i", src,
          "-t", f"{max(0.1, dur - trim_s):.3f}",
-         *config.intermediate_encode_args(),
+         *config.transient_encode_args(),
          "-c:a", "aac", "-b:a", "192k", dst],
         check=True, capture_output=True)
     return dst
