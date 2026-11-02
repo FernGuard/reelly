@@ -435,6 +435,20 @@ def _videotoolbox_works():
         return False
 
 
+# Throwaway passes that the final encode reads straight back (the ambient
+# and finish layers, the tail trim): lossless and fast. Measured on a 12 s
+# 1080x1920 60 fps cut (RTX 5090 host): a CRF 16 pass before the final encode
+# cost 1.4 VMAF points (96.9 -> 95.5) and 1.4 s; lossless restores 96.9 and
+# takes 0.6 s. The files are large (~11 MB per second) but live only in the
+# cut's temporary folder.
+_LOSSLESS_ARGS = ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0"]
+
+
+def transient_encode_args():
+    """Codec args for a pass whose output only the next encode reads."""
+    return list(_LOSSLESS_ARGS)
+
+
 def intermediate_encode_args():
     """Video codec args for throwaway intermediate encodes.
 

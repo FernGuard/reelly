@@ -58,3 +58,27 @@ def test_output_fps_order_and_guard(monkeypatch):
     assert config.output_fps() == 30                  # env beats the kit
     monkeypatch.setenv("REELLY_FPS", "47")
     assert config.output_fps() == 30                  # odd rates refused
+
+
+def test_throwaway_passes_are_lossless(tmp_path, monkeypatch):
+    # the ambient layer's output is read straight back by the final encode:
+    # a lossy pass there cost 1.4 VMAF points for nothing (measured)
+    import os
+    from reelly import audiotail, kinetic, shaderfx
+    assert "-qp" in config.transient_encode_args() and "0" in config.transient_encode_args()
+    monkeypatch.setattr(shaderfx, "active_list", lambda kind="endcard": ["ambient/smoke"])
+    monkeypatch.setattr(kinetic, "enabled", lambda: True)
+    monkeypatch.setattr(shaderfx, "render_ambient",
+                        lambda name, out_dir, *a, **k: (os.path.join(out_dir, "f%05d.tga"), 30))
+    cmds = []
+    monkeypatch.setattr(finalize.subprocess, "run", lambda cmd, **k: cmds.append(list(cmd)))
+    finalize._ambient_pass("raw.mp4", str(tmp_path / "a.mp4"),
+                           {"reframe": 1.0, "_ctrl": {"events": []}}, 10.0, str(tmp_path), None)
+    i = cmds[-1].index("-c:v")
+    assert cmds[-1][i:i + 6] == config.transient_encode_args()
+    monkeypatch.setattr(audiotail.subprocess, "run", lambda cmd, **k: cmds.append(list(cmd)))
+    from reelly import media
+    monkeypatch.setattr(media, "probe", lambda p: {"format": {"duration": "10"}})
+    audiotail.trim_file("raw.mp4", 0.5, str(tmp_path / "t.mp4"))
+    i = cmds[-1].index("-c:v")
+    assert cmds[-1][i:i + 6] == config.transient_encode_args()

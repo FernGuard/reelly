@@ -15,6 +15,12 @@ change behaviour; every such change is listed under "Upgrading").
   Linux, macOS and Windows for every push and pull request. A runner whose
   renderer has no golden references records them as an artifact.
 
+### Changed
+- Throwaway passes (the ambient and finish layers, the tail trim) encode
+  losslessly: the final file is one generation from the raw cut instead of
+  two. Measured: +1.3 VMAF in the gameplay area of a real cut, and each pass
+  is faster (0.6 s against 1.4 s); the temporary files are larger.
+
 ### Fixed
 - Windows' WARP ("Microsoft Basic Render Driver") and Mesa llvmpipe count as
   CPU renderers: `reelly setup` says so, and `REELLY_GPU=gpu` refuses them.

@@ -382,7 +382,7 @@ def _finish_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
                         "[1:v]scale=1080:1920:flags=bicubic,format=rgba[f];"
                         "[0:v][f]overlay=0:0:eof_action=pass:shortest=0,format=yuv420p[v]",
                         "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
-                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
+                        "-r", str(config.output_fps()), *config.transient_encode_args(),
                         dst], check=True)
         print(f"        finish '{fx}': around the picture, {n} frames")
         return dst
@@ -455,7 +455,7 @@ def _ambient_pass(src, dst, plan, dur, workdir, layout_template, follow=False):
         subprocess.run([config.FFMPEG, "-y", "-v", "error", "-i", src, *inputs,
                         "-filter_complex", ";".join(chain) + f";[{last}]format=yuv420p[v]",
                         "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
-                        "-r", str(config.output_fps()), *config.intermediate_encode_args(),
+                        "-r", str(config.output_fps()), *config.transient_encode_args(),
                         dst], check=True)
         c = plan.get("_ctrl") or {}
         print(f"        ambient '{fx}': outside the picture; control: {len(pops)} pop(s), "
